@@ -10,18 +10,22 @@ This repo holds a terminal workspace in two stages:
 
 ## Docs workflow (always follow)
 
-### 1. Measure before planning
+### 1. Measure only when necessary
 
-Before writing or changing a plan, **measure what the plan depends on instead of assuming it**. That
-includes:
+Measure only when **a plan decision depends on a fact you can check and don't already know**. Such facts
+include:
 - timings and sizes
 - versions, licenses and dependency lists
 - how a tool actually behaves
 - what the current code does
 
-Skip measuring only when no decision depends on a fact that can be checked.
+**Don't measure** when nothing depends on it, for example when:
+- the user has already decided (scope, priorities, preferences)
+- the fact is already recorded in `docs/findings/` and still current
+- the change is wording, structure or a small edit
+- a rough figure is good enough; label it as an **estimate** instead
 
-Record every measurement in **`docs/findings/YYYY-MM-DD-<topic>.md`** with these sections:
+When you do measure, record it in **`docs/findings/YYYY-MM-DD-<topic>.md`** with these sections:
 
 - **Question:** what we needed to know, and which decision depends on it.
 - **Method:** the exact commands or scripts, plus versions and machine, so it can be re-run.
