@@ -1,7 +1,8 @@
 # Rebuild plan: our own terminal workspace
 
 **Status:** proposal · **Date:** 2026-11-03 · **Audience:** product and engineering ·
-**Findings:** [dependencies and licenses](../findings/2026-11-03-dependency-licenses.md)
+**Findings:** [dependencies and licenses](../findings/2026-11-03-dependency-licenses.md) ·
+[iTerm2 image support](../findings/2026-11-03-iterm2-image-support.md)
 
 ## Decision
 
@@ -81,7 +82,8 @@ It is our best **reference** for how to handle edge cases.
 
 - **Stable API on our terms.** Upstream changes its API between releases, because it's built for Alacritty's own needs.
 - **Hooks Alacritty will never add.** For example, kitty images use an escape-sequence type that its parser
-  drops silently, and we need to intercept those.
+  drops silently, and we need to intercept those. We also need to intercept iTerm2's image sequences
+  (OSC 1337).
 - **Fixes without waiting** for upstream.
 
 Rules for the fork:
@@ -114,7 +116,15 @@ Each pane needs four layers:
 **What we write on top of the fork:**
 - per-pane key and mouse encoding
 - output: copy each pane's cells into a `ratatui` buffer and let `ratatui` send only what changed
-- image handling (kitty, sixel, colour blocks)
+- image handling (kitty, iTerm2, sixel, colour blocks)
+
+**Images:** we support the **kitty**, **iTerm2** and **sixel** protocols, with coloured blocks as the
+fallback.
+- **Preferred order** when a terminal supports several: kitty, then iTerm2, then sixel. iTerm2 sends a
+  compressed full-colour image, while sixel is palette-based.
+- **Detection:** `ratatui-image` detects what the terminal supports
+  ([finding](../findings/2026-11-03-iterm2-image-support.md)). Whether it lets us set the order is still to
+  check.
 
 **Output cost over mobile SSH.**
 - **tmux** sends cheap "scroll this region" operations.
@@ -187,7 +197,7 @@ These replace yazi, glow, bat, chafa, html2text, w3m and VisiData.
 | Syntax highlighting | `syntect` + `two-face` | 5.3.0, 0.5.2 | MIT, MIT/Apache |
 | HTML → Markdown | `htmd` | 0.5.6 | Apache-2.0 |
 | Image decoding | `image` | 0.25.10 | MIT/Apache |
-| Image display (kitty, sixel, blocks) | `ratatui-image`, `icy_sixel` | 11.1.0, 0.7.0 | MIT, MIT/Apache |
+| Image display (kitty, iTerm2, sixel, blocks; auto-detected) | `ratatui-image`, `icy_sixel` | 11.1.0, 0.7.0 | MIT, MIT/Apache |
 | CSV read/write and grid editor | `csv` | 1.4.0 | MIT/Unlicense |
 
 ### Daemon (poller + webhook)
@@ -321,7 +331,8 @@ Because this is for other people, some zellij features become expected.
 - **Keys:** every action needs a plain key or a tap, because Alt and Ctrl are awkward on phone keyboards.
   Termux and Blink can send taps as mouse clicks.
 - **Flaky networks:** Mosh, or simply reconnect and re-attach. Mosh doesn't pass images through.
-- **Images:** most phone terminals don't support graphics, so keep the coloured-block fallback.
+- **Images:** Blink (plain SSH only, not Mosh) and ConnectBot can show iTerm2 images. Other phone terminals
+  get the coloured-block fallback ([phone research](../findings/2026-11-03-phone-interface-research.md) §1).
 - **Security:**
   - The session server listens only on a Unix socket.
   - The public webhook listener is kept separate from the private phone API.
@@ -340,7 +351,7 @@ own API, not from the terminal. See the [phone interface plan](2026-11-03-phone-
 | Per-pane key encoding (application cursor keys, kitty keyboard protocol, bracketed paste) | Follow tmux's behaviour; snapshot tests |
 | Output cost on slow links | Frame-rate cap, batching, and a later scroll optimisation |
 | Multi-client sizes | Size per client for our widgets; shared PTY panes follow the active client |
-| Images through the multiplexer | Intercept kitty/sixel sequences in the fork; block fallback |
+| Images through the multiplexer | Intercept kitty/iTerm2/sixel sequences in the fork; block fallback |
 | Server crash kills every shell | Small session server; daemon in a separate process; crash logs |
 | Upgrading the server while sessions run | The old server keeps serving its sessions until they close; versioned client↔server protocol |
 | Fork drift from upstream | Minimal, marked changes; scheduled merges; send generic fixes upstream |
@@ -357,9 +368,9 @@ Sizes are rough estimates.
 | **2. Multiplexer** | Shell tabs and splits: new, split, focus, close, zoom, resize, mouse | Usable multiplexer (**~3–5k lines** total) |
 | **3. Daily driver** | Scrollback, copy mode, search, OSC 52 clipboard, mouse selection | **Switch our daily use from zellij** |
 | **4. Persistence and phone** | Reboot recovery, narrow layout, per-client layouts | SSH-from-phone ready (**~10–15k lines** total) |
-| **5. Finder extras** | CSV grid editor, kitty/sixel images, floating panes | Full replacement for the prototype |
+| **5. Finder extras** | CSV grid editor, kitty/iTerm2/sixel images, floating panes | Full replacement for the prototype |
 | **Parallel track** | Daemon: poller, webhook, events into the finder | Independent process; can start anytime |
-| **6. Launch** | Config, themes, layouts, key hints, docs, packaging, testing across terminals (Ghostty, Terminator, WezTerm, kitty, Termux, Blink) | Ready for other users (roughly **2×** the personal-use effort) |
+| **6. Launch** | Config, themes, layouts, key hints, docs, packaging, testing across terminals (Ghostty, Terminator, WezTerm, kitty, iTerm2 if macOS is supported, Termux, Blink) | Ready for other users (roughly **2×** the personal-use effort) |
 
 The prototype in `~/terminal-browser` stays in use until step 3. Its preview logic (file-type detection, the
 CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim config carry over as reference.
@@ -382,6 +393,12 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
     "SSH is the only way in"; the public webhook listener stays separate.
   - **Narrow layout:** the single-pane layout is now backed by measurements. 40–50 columns was unusable
     two-pane and 100 columns was fine, so it kicks in below ~80 columns (exact threshold to confirm).
+- **2026-11-03:** iTerm2 image support added, next to kitty and sixel
+  ([finding](../findings/2026-11-03-iterm2-image-support.md)). No new crate is needed, because
+  `ratatui-image` already supports it. Updated:
+  - the fork reasons (§3) and an images note (§4)
+  - the image row (§6) and the phone images note (§9)
+  - the images risk (§10), and steps 5 and 6 (§11)
 
 ---
 
@@ -395,3 +412,6 @@ Every measurement behind this plan is recorded in
 - `alacritty_terminal`'s modules
 - the size of the prototype
 - which tools are installed locally
+
+iTerm2 image support in `ratatui-image` is recorded in
+[`docs/findings/2026-11-03-iterm2-image-support.md`](../findings/2026-11-03-iterm2-image-support.md).
