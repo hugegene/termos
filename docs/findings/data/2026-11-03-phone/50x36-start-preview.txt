@@ -1,0 +1,32 @@
+
+
+  Terminal Finder
+
+  Files pane (left)
+    ↑ ↓  j k        move — the
+    → ←  l h        open folde
+    Enter  e        edit the f
+    o               open with
+    i               rendered ⇄
+    q               close the
+
+  Preview pane (here)
+    ↑ ↓  j k        scroll
+    g  G            top / bott
+    h  Esc          back to th
+
+  Mouse             click fold
+                    double-cli
+                    click empt
+
+  Switch panes      Alt+h / Al
+
+  Editing
+    text, markdown  Neovim: ju
+    csv             VisiData:
+    images          opens in a
+
+  Careful: Ctrl+Q quits all of
+
+
+ Alt+h files

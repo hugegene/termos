@@ -1,0 +1,4 @@
+# VisiData settings used only by the terminal finder (vd --config <this file>).
+# zellij takes Ctrl+S (scroll mode) and Ctrl+Q (quits zellij!), so save with Alt+s.
+BaseSheet.bindkey('Alt+s', 'save-sheet')   # asks for the file name — Enter keeps the same file
+options.quitguard = True                    # ask before quitting with unsaved changes

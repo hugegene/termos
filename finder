@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# finder [dir] — open the two-pane file finder (yazi | preview) in zellij.
+#   Inside zellij: opens as a new tab in the current session.
+#   Outside zellij: starts a new zellij session with it.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+START="$(readlink -f "${1:-$PWD}")"
+[ -d "$START" ] || { echo "finder: not a directory: $START" >&2; exit 1; }
+
+for dep in zellij yazi ya python3; do
+  command -v "$dep" >/dev/null || { echo "finder: '$dep' not found — run $HERE/install.sh" >&2; exit 1; }
+done
+
+# One run dir per finder: its name doubles as the yazi client id, and it holds
+# the fifo that yazi uses to send "edit <file>" requests to the preview pane.
+ID="$(date +%s%N)"
+RUN="${XDG_RUNTIME_DIR:-/tmp}/tfinder/$ID"
+mkdir -p "$RUN"
+mkfifo "$RUN/fifo"
+
+kdl() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; }
+
+cat > "$RUN/layout.kdl" <<EOF
+layout {
+    tab name="finder" focus=true {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane size="35%" name="files" focus=true command=$(kdl "$HERE/bin/files") {
+                args $(kdl "$RUN") $(kdl "$START")
+                close_on_exit true
+            }
+            pane name="preview" command="python3" {
+                args $(kdl "$HERE/preview.py") $(kdl "$RUN")
+                close_on_exit true
+            }
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+EOF
+
+if [ -n "${ZELLIJ:-}" ]; then
+  zellij action new-tab --layout "$RUN/layout.kdl" --name "finder" --cwd "$START"
+else
+  cd "$START"
+  exec zellij --new-session-with-layout "$RUN/layout.kdl"
+fi

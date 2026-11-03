@@ -1,0 +1,31 @@
+  1 # Project Notes
+  2
+  3 Some bold, some    italic and inline code.
+  4
+  5  ○ Tasks
+  6
+  7 ☑  ship v1
+  8 ☐  write docs
+  9 ● plain bullet
+ 10
+ 11 ▋ A quote worth keeping.
+ 12 ┌───────┬─────┐
+ 13 │ fruit │ qty │
+ 14 ├───────┼────━┤
+ 15 │ apple │   3 │
+ 16 │ pear  │  12 │
+ 17 └───────┴─────┘
+ 18 python████████████████████
+ 19 print("hello")
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ < close  ·  Ctrl+z undo  1:1
+-- INSERT --

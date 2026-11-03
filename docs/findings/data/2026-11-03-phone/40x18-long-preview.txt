@@ -1,0 +1,14 @@
+ long.md   markdown · 1…
+   "Netplan reference"
+
+  • YAML configuration
+    • Top-level
+    configuration
+    structure
+    • Properties for
+    physical device
+    types
+    • Properties for
+    all device types
+    • DHCP Overrides
+ e edit · o o…1–12/5000

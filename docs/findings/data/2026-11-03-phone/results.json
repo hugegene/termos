@@ -1,0 +1,510 @@
+[
+ {
+  "size": "40x18",
+  "actions": [
+   {
+    "action": "open finder (first full draw)",
+    "count": 1,
+    "bytes": 16167,
+    "gzip": 1302,
+    "bytes_each": 16167,
+    "gzip_each": 1302,
+    "note": ""
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 8708,
+    "gzip": 290,
+    "bytes_each": 8708,
+    "gzip_each": 290,
+    "note": "b.txt   1 lines  \u00b7  33\u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 9357,
+    "gzip": 284,
+    "bytes_each": 9357,
+    "gzip_each": 284,
+    "note": "c.csv   csv \u00b7 ~2 rows \u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 9407,
+    "gzip": 385,
+    "bytes_each": 9407,
+    "gzip_each": 385,
+    "note": "long.md   markdown \u00b7 1\u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 9173,
+    "gzip": 333,
+    "bytes_each": 9173,
+    "gzip_each": 333,
+    "note": "notes.md   markdown \u00b7 \u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 9429,
+    "gzip": 378,
+    "bytes_each": 9429,
+    "gzip_each": 378,
+    "note": "page.html   html \u00b7 \u201cQu\u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 11936,
+    "gzip": 1054,
+    "bytes_each": 11936,
+    "gzip_each": 1054,
+    "note": "photo.png   image \u00b7 10\u2026"
+   },
+   {
+    "action": "preview: scroll 1 line",
+    "count": 20,
+    "bytes": 21878,
+    "gzip": 1003,
+    "bytes_each": 1094,
+    "gzip_each": 50,
+    "note": ""
+   },
+   {
+    "action": "preview: page down",
+    "count": 5,
+    "bytes": 5839,
+    "gzip": 585,
+    "bytes_each": 1168,
+    "gzip_each": 117,
+    "note": ""
+   },
+   {
+    "action": "open editor (Neovim)",
+    "count": 1,
+    "bytes": 19777,
+    "gzip": 1439,
+    "bytes_each": 19777,
+    "gzip_each": 1439,
+    "note": ""
+   },
+   {
+    "action": "editor: type 1 character",
+    "count": 63,
+    "bytes": 72971,
+    "gzip": 1609,
+    "bytes_each": 1158,
+    "gzip_each": 26,
+    "note": ""
+   },
+   {
+    "action": "idle 5 s",
+    "count": 1,
+    "bytes": 26,
+    "gzip": 16,
+    "bytes_each": 26,
+    "gzip_each": 16,
+    "note": ""
+   }
+  ],
+  "pane_content_size": {
+   "files": "12x14",
+   "preview": "24x14"
+  },
+  "browse_headers": [
+   "b.txt   1 lines  \u00b7  33\u2026",
+   "c.csv   csv \u00b7 ~2 rows \u2026",
+   "long.md   markdown \u00b7 1\u2026",
+   "notes.md   markdown \u00b7 \u2026",
+   "page.html   html \u00b7 \u201cQu\u2026",
+   "photo.png   image \u00b7 10\u2026"
+  ],
+  "long_header": "long.md   markdown \u00b7 1\u2026",
+  "edit_target": "notes.md   markdown \u00b7 \u2026"
+ },
+ {
+  "size": "50x36",
+  "actions": [
+   {
+    "action": "open finder (first full draw)",
+    "count": 1,
+    "bytes": 38294,
+    "gzip": 2403,
+    "bytes_each": 38294,
+    "gzip_each": 2403,
+    "note": ""
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 19826,
+    "gzip": 483,
+    "bytes_each": 19826,
+    "gzip_each": 483,
+    "note": "b.txt   1 lines  \u00b7  33 B  \u00b7 \u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 20097,
+    "gzip": 471,
+    "bytes_each": 20097,
+    "gzip_each": 471,
+    "note": "c.csv   csv \u00b7 ~2 rows \u00d7 2 co\u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 20914,
+    "gzip": 817,
+    "bytes_each": 20914,
+    "gzip_each": 817,
+    "note": "long.md   markdown \u00b7 1692 li\u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 20934,
+    "gzip": 674,
+    "bytes_each": 20934,
+    "gzip_each": 674,
+    "note": "notes.md   markdown \u00b7 20 lin\u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 20855,
+    "gzip": 692,
+    "bytes_each": 20855,
+    "gzip_each": 692,
+    "note": "page.html   html \u00b7 \u201cQuarterl\u2026"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 26054,
+    "gzip": 2074,
+    "bytes_each": 26054,
+    "gzip_each": 2074,
+    "note": "photo.png   image \u00b7 1024\u00d7102\u2026"
+   },
+   {
+    "action": "preview: scroll 1 line",
+    "count": 20,
+    "bytes": 55959,
+    "gzip": 2594,
+    "bytes_each": 2798,
+    "gzip_each": 130,
+    "note": ""
+   },
+   {
+    "action": "preview: page down",
+    "count": 5,
+    "bytes": 13572,
+    "gzip": 1663,
+    "bytes_each": 2714,
+    "gzip_each": 333,
+    "note": ""
+   },
+   {
+    "action": "open editor (Neovim)",
+    "count": 1,
+    "bytes": 47925,
+    "gzip": 2788,
+    "bytes_each": 47925,
+    "gzip_each": 2788,
+    "note": ""
+   },
+   {
+    "action": "editor: type 1 character",
+    "count": 63,
+    "bytes": 68545,
+    "gzip": 1690,
+    "bytes_each": 1088,
+    "gzip_each": 27,
+    "note": ""
+   },
+   {
+    "action": "idle 5 s",
+    "count": 1,
+    "bytes": 0,
+    "gzip": 5,
+    "bytes_each": 0,
+    "gzip_each": 5,
+    "note": ""
+   }
+  ],
+  "pane_content_size": {
+   "files": "16x32",
+   "preview": "30x32"
+  },
+  "browse_headers": [
+   "b.txt   1 lines  \u00b7  33 B  \u00b7 \u2026",
+   "c.csv   csv \u00b7 ~2 rows \u00d7 2 co\u2026",
+   "long.md   markdown \u00b7 1692 li\u2026",
+   "notes.md   markdown \u00b7 20 lin\u2026",
+   "page.html   html \u00b7 \u201cQuarterl\u2026",
+   "photo.png   image \u00b7 1024\u00d7102\u2026"
+  ],
+  "long_header": "long.md   markdown \u00b7 1692 li\u2026",
+  "edit_target": "notes.md   markdown \u00b7 20 lin\u2026"
+ },
+ {
+  "size": "100x24",
+  "actions": [
+   {
+    "action": "open finder (first full draw)",
+    "count": 1,
+    "bytes": 33652,
+    "gzip": 2244,
+    "bytes_each": 33652,
+    "gzip_each": 2244,
+    "note": ""
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 15785,
+    "gzip": 416,
+    "bytes_each": 15785,
+    "gzip_each": 416,
+    "note": "b.txt   1 lines  \u00b7  33 B  \u00b7  2026-11-03 "
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 16403,
+    "gzip": 417,
+    "bytes_each": 16403,
+    "gzip_each": 417,
+    "note": "c.csv   csv \u00b7 ~2 rows \u00d7 2 cols  \u00b7  24 B "
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 17071,
+    "gzip": 696,
+    "bytes_each": 17071,
+    "gzip_each": 696,
+    "note": "long.md   markdown \u00b7 1692 lines  \u00b7  70.2"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 17161,
+    "gzip": 608,
+    "bytes_each": 17161,
+    "gzip_each": 608,
+    "note": "notes.md   markdown \u00b7 20 lines  \u00b7  243 B"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 46481,
+    "gzip": 1039,
+    "bytes_each": 46481,
+    "gzip_each": 1039,
+    "note": "page.html   html \u00b7 \u201cQuarterly & Report\u201d "
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 24858,
+    "gzip": 2554,
+    "bytes_each": 24858,
+    "gzip_each": 2554,
+    "note": "photo.png   image \u00b7 1024\u00d71024  \u00b7  498.9 "
+   },
+   {
+    "action": "preview: scroll 1 line",
+    "count": 20,
+    "bytes": 51216,
+    "gzip": 2073,
+    "bytes_each": 2561,
+    "gzip_each": 104,
+    "note": ""
+   },
+   {
+    "action": "preview: page down",
+    "count": 5,
+    "bytes": 12352,
+    "gzip": 1334,
+    "bytes_each": 2470,
+    "gzip_each": 267,
+    "note": ""
+   },
+   {
+    "action": "open editor (Neovim)",
+    "count": 1,
+    "bytes": 39707,
+    "gzip": 2486,
+    "bytes_each": 39707,
+    "gzip_each": 2486,
+    "note": ""
+   },
+   {
+    "action": "editor: type 1 character",
+    "count": 63,
+    "bytes": 47031,
+    "gzip": 1209,
+    "bytes_each": 747,
+    "gzip_each": 19,
+    "note": ""
+   },
+   {
+    "action": "idle 5 s",
+    "count": 1,
+    "bytes": 0,
+    "gzip": 5,
+    "bytes_each": 0,
+    "gzip_each": 5,
+    "note": ""
+   }
+  ],
+  "pane_content_size": {
+   "files": "33x20",
+   "preview": "63x20"
+  },
+  "browse_headers": [
+   "b.txt   1 lines  \u00b7  33 B  \u00b7  2",
+   "c.csv   csv \u00b7 ~2 rows \u00d7 2 cols",
+   "long.md   markdown \u00b7 1692 line",
+   "notes.md   markdown \u00b7 20 lines",
+   "page.html   html \u00b7 \u201cQuarterly ",
+   "photo.png   image \u00b7 1024\u00d71024 "
+  ],
+  "long_header": "long.md   markdown \u00b7 1692 lines  \u00b7  70.2",
+  "edit_target": "notes.md   markdown \u00b7 20 lines  \u00b7  243 B"
+ },
+ {
+  "size": "150x40",
+  "actions": [
+   {
+    "action": "open finder (first full draw)",
+    "count": 1,
+    "bytes": 65331,
+    "gzip": 3492,
+    "bytes_each": 65331,
+    "gzip_each": 3492,
+    "note": ""
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 29255,
+    "gzip": 1232,
+    "bytes_each": 29255,
+    "gzip_each": 1232,
+    "note": "b.txt   1 lines  \u00b7  33 B  \u00b7  2026-11-03 "
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 30385,
+    "gzip": 662,
+    "bytes_each": 30385,
+    "gzip_each": 662,
+    "note": "c.csv   csv \u00b7 ~2 rows \u00d7 2 cols  \u00b7  24 B "
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 31055,
+    "gzip": 1176,
+    "bytes_each": 31055,
+    "gzip_each": 1176,
+    "note": "long.md   markdown \u00b7 1692 lines  \u00b7  70.2"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 31209,
+    "gzip": 899,
+    "bytes_each": 31209,
+    "gzip_each": 899,
+    "note": "notes.md   markdown \u00b7 20 lines  \u00b7  243 B"
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 30733,
+    "gzip": 897,
+    "bytes_each": 30733,
+    "gzip_each": 897,
+    "note": "page.html   html \u00b7 \u201cQuarterly & Report\u201d "
+   },
+   {
+    "action": "move to next file (+preview)",
+    "count": 1,
+    "bytes": 43740,
+    "gzip": 4027,
+    "bytes_each": 43740,
+    "gzip_each": 4027,
+    "note": "photo.png   image \u00b7 1024\u00d71024  \u00b7  498.9 "
+   },
+   {
+    "action": "preview: scroll 1 line",
+    "count": 20,
+    "bytes": 114206,
+    "gzip": 3913,
+    "bytes_each": 5710,
+    "gzip_each": 196,
+    "note": ""
+   },
+   {
+    "action": "preview: page down",
+    "count": 5,
+    "bytes": 29507,
+    "gzip": 2917,
+    "bytes_each": 5901,
+    "gzip_each": 583,
+    "note": ""
+   },
+   {
+    "action": "open editor (Neovim)",
+    "count": 1,
+    "bytes": 70611,
+    "gzip": 3699,
+    "bytes_each": 70611,
+    "gzip_each": 3699,
+    "note": ""
+   },
+   {
+    "action": "editor: type 1 character",
+    "count": 63,
+    "bytes": 57096,
+    "gzip": 2530,
+    "bytes_each": 906,
+    "gzip_each": 40,
+    "note": ""
+   },
+   {
+    "action": "idle 5 s",
+    "count": 1,
+    "bytes": 0,
+    "gzip": 5,
+    "bytes_each": 0,
+    "gzip_each": 5,
+    "note": ""
+   }
+  ],
+  "pane_content_size": {
+   "files": "51x36",
+   "preview": "95x36"
+  },
+  "browse_headers": [
+   "b.txt   1 lines  \u00b7  33 B  \u00b7  2",
+   "c.csv   csv \u00b7 ~2 rows \u00d7 2 cols",
+   "long.md   markdown \u00b7 1692 line",
+   "notes.md   markdown \u00b7 20 lines",
+   "page.html   html \u00b7 \u201cQuarterly ",
+   "photo.png   image \u00b7 1024\u00d71024 "
+  ],
+  "long_header": "long.md   markdown \u00b7 1692 lines  \u00b7  70.2",
+  "edit_target": "notes.md   markdown \u00b7 20 lines  \u00b7  243 B"
+ }
+]

@@ -1,0 +1,14 @@
+
+
+  Terminal Finder
+
+  Files pane (left)
+    ↑ ↓  j k        move
+    → ←  l h        open
+    Enter  e        edit
+    o               open
+    i               rend
+    q               clos
+
+  Preview pane (here)
+ Alt+h files    1–12/28

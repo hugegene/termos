@@ -1,0 +1,12 @@
+  1 # Project Notes
+  2
+  3 Some bold,    some italic and    inline code.
+  4
+  5  ○ Tasks
+  6
+  7 ☑  ship v1
+  8 ☐  write docs
+  9 ● plain bullet
+ 10
+ <  ·  Ctrl+z undo  1:1
+-- INSERT --

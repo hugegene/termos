@@ -1,0 +1,32 @@
+ long.md   markdown · 1692 li…
+   "Netplan reference"
+
+  • YAML configuration
+    • Top-level
+    configuration structure
+    • Properties for
+    physical device types
+    • Properties for all
+    device types
+    • DHCP Overrides
+    • IPv6 Router
+    Advertisement Overrides
+    • Routing
+      • Default routes
+    • Properties for device
+    type  ethernets 
+    • Properties for device
+    type  wifis 
+    • Properties for device
+    type  bridges 
+    • Properties for device
+    type  dummy-devices 
+    • Properties for device
+    type  bonds 
+    • Properties for device
+    type  virtual-ethernets 
+    • Properties for device
+    type  vlans 
+    • Properties for device
+    type  vrfs 
+ e edit · o open · …1–30/4163

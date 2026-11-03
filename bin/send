@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# send <action> [path] — pass a request from yazi to the preview pane.
+# Actions: edit, open, quit. Times out instead of hanging if the preview pane is gone.
+fifo="${TFINDER_RUN:-}/fifo"
+[ -p "$fifo" ] || exit 0
+exec timeout 2 bash -c 'printf "%s\t%s\n" "$1" "$2" > "$3"' _ "$1" "${2:-}" "$fifo"
