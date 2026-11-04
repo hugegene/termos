@@ -4,10 +4,12 @@
 mod copy;
 mod editor;
 mod finder;
+mod images;
 mod input;
 mod keys;
 pub mod layout;
 mod pane;
+mod persist;
 mod render;
 mod scroll;
 
@@ -34,8 +36,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::protocol::{
-    self, ClientKind, ClientMsg, Command, Direction, FocusTarget, InputEvent, PROTOCOL_VERSION, PaneId, ServerMsg,
-    SplitDir,
+    self, ClientKind, ClientMsg, Command, Direction, FocusTarget, ImageProtocol, InputEvent, PROTOCOL_VERSION, PaneId,
+    ServerMsg, SplitDir,
 };
 use crate::{logger, paths};
 use copy::CopyState;
@@ -51,6 +53,8 @@ pub enum Ev {
     Gone(ClientId),
     Pane(PaneId, TermEvent),
     Finder(PaneId, FinderEvent),
+    /// An encoded image is ready (`None`: the job was skipped).
+    Image(images::ImageKey, Option<std::sync::Arc<Vec<u8>>>),
 }
 
 pub type ClientId = u32;
@@ -64,6 +68,8 @@ const MESSAGE_TIME: Duration = Duration::from_secs(3);
 /// How often to redraw anyway, so names that follow the running program stay current. Starting a program
 /// prints nothing, and a redraw that changes nothing sends nothing.
 const REFRESH: Duration = Duration::from_millis(500);
+/// How often the session is saved for restoring, if it changed.
+const SAVE_EVERY: Duration = Duration::from_secs(2);
 
 struct Client {
     tx: SyncSender<ServerMsg>,
@@ -75,6 +81,21 @@ struct Client {
     prev_cursor: Option<Cursor>,
     /// Tab bar click areas: (start x, end x, tab index or `None` for the "+" button).
     tab_zones: Vec<TabZone>,
+    /// How this client's terminal shows images.
+    graphics: protocol::Graphics,
+    /// The images this client's screen shows now.
+    shown: Vec<images::Placed>,
+}
+
+/// One client's screen: what `compose` builds.
+struct Frame {
+    buf: Buffer,
+    cursor: Option<Cursor>,
+    zones: Vec<TabZone>,
+    /// Real images to show after the text.
+    images: Vec<images::Placed>,
+    /// Encodings this frame wanted but the cache didn't have; blocks stand in until they're ready.
+    jobs: Vec<images::Job>,
 }
 
 enum Pane {
@@ -168,6 +189,13 @@ pub struct Server {
     search: Option<scroll::Search>,
     /// Scrollback editors: editor pane → (the pane it stands in for, the temporary file).
     scrollback: HashMap<PaneId, (PaneId, PathBuf)>,
+    /// Restored commands waiting to be typed at their shell's prompt.
+    pending_input: HashMap<PaneId, persist::PendingInput>,
+    /// The last saved session, to skip writing when nothing changed.
+    last_saved: Option<String>,
+    /// Delete the saved session when the server ends (its last pane exited, or `tb delete`).
+    forget: bool,
+    images: images::Images,
 }
 
 fn peer_is_us(stream: &UnixStream) -> bool {
@@ -175,7 +203,9 @@ fn peer_is_us(stream: &UnixStream) -> bool {
 }
 
 /// Runs the server for session `name` until the session ends.
-pub fn run(name: &str) -> anyhow::Result<()> {
+/// Runs a session's server. `run_commands`: when restoring, run the commands that were running instead of
+/// typing them at the prompt (zellij's `attach --force-run-commands`).
+pub fn run(name: &str, run_commands: bool) -> anyhow::Result<()> {
     // Panes must not think they run inside another multiplexer. Safe: no other threads exist yet.
     for var in ["ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID", "TMUX", "TMUX_PANE", "TB_SESSION", "TB_PANE_ID"] {
         unsafe { std::env::remove_var(var) };
@@ -209,6 +239,9 @@ pub fn run(name: &str) -> anyhow::Result<()> {
     });
 
     let mut server = Server::new(name, tx);
+    if let Some(saved) = persist::load(name) {
+        server.restore(saved, run_commands);
+    }
     server.main_loop(rx);
     let _ = fs::remove_file(&sock);
     log::info!("session {name} ended");
@@ -217,6 +250,7 @@ pub fn run(name: &str) -> anyhow::Result<()> {
 
 impl Server {
     fn new(name: &str, tx: Sender<Ev>) -> Self {
+        let encoder = images::Images::new(tx.clone());
         Server {
             name: name.to_owned(),
             tx,
@@ -242,12 +276,17 @@ impl Server {
             last_tab: None,
             search: None,
             scrollback: HashMap::new(),
+            pending_input: HashMap::new(),
+            last_saved: None,
+            forget: false,
+            images: encoder,
         }
     }
 
     fn main_loop(&mut self, rx: Receiver<Ev>) {
         let mut last_render = Instant::now() - FRAME;
         let mut last_refresh = Instant::now();
+        let mut last_save = Instant::now();
         loop {
             let timeout =
                 if self.dirty { FRAME.saturating_sub(last_render.elapsed()) } else { Duration::from_millis(500) };
@@ -274,11 +313,22 @@ impl Server {
             if last_refresh.elapsed() >= REFRESH {
                 last_refresh = Instant::now();
                 self.dirty = true;
+                self.flush_pending_input();
+            }
+            if last_save.elapsed() >= SAVE_EVERY {
+                last_save = Instant::now();
+                self.autosave();
             }
             if self.dirty && last_render.elapsed() >= FRAME {
                 self.render_all();
                 last_render = Instant::now();
             }
+        }
+        // Save before the programs go, so their folders can still be read.
+        if self.forget {
+            persist::delete(&self.name);
+        } else {
+            self.autosave();
         }
         for client in self.clients.values() {
             let _ = client.tx.try_send(ServerMsg::Exit { reason: "session ended".into() });
@@ -304,6 +354,10 @@ impl Server {
                     f.on_event(e);
                     self.dirty = true;
                 }
+            }
+            Ev::Image(key, bytes) => {
+                self.images.done(key, bytes);
+                self.dirty = true;
             }
         }
     }
@@ -350,6 +404,8 @@ impl Server {
                 prev: None,
                 prev_cursor: None,
                 tab_zones: Vec::new(),
+                graphics: protocol::Graphics::default(),
+                shown: Vec::new(),
             },
         );
     }
@@ -393,12 +449,14 @@ impl Server {
                     return;
                 }
                 match kind {
-                    ClientKind::Attach { cols, rows } => {
+                    ClientKind::Attach { cols, rows, graphics } => {
                         if let Some(c) = self.clients.get_mut(&id) {
                             c.attached = true;
                             c.cols = cols;
                             c.rows = rows;
+                            c.graphics = graphics;
                         }
+                        log::info!("client {id} shows images with {:?}", graphics);
                         self.active_client = Some(id);
                         self.set_size(cols, rows);
                         if self.tabs.is_empty()
@@ -730,6 +788,7 @@ impl Server {
     }
 
     fn drop_pane(&mut self, id: PaneId) {
+        self.pending_input.remove(&id);
         match self.panes.remove(&id) {
             Some(Pane::Term(p)) => p.shutdown(),
             Some(Pane::Finder(f)) => {
@@ -784,7 +843,9 @@ impl Server {
         if self.tabs[ti].root == Node::Leaf(id) {
             self.tabs.remove(ti);
             if self.tabs.is_empty() {
+                // Nothing is left to restore.
                 self.quit = true;
+                self.forget = true;
                 return;
             }
             if ti < self.active || self.active >= self.tabs.len() {
@@ -1078,6 +1139,15 @@ impl Server {
         self.apply_layout();
     }
 
+    /// Does what a finder asked for after a key or click.
+    fn finder_action(&mut self, finder_id: PaneId, action: Action) {
+        match action {
+            Action::None => {}
+            Action::OpenEditor(path) => self.open_editor(finder_id, path),
+            Action::Flash(text) => self.flash(text),
+        }
+    }
+
     fn open_editor(&mut self, finder_id: PaneId, path: PathBuf) {
         let opts = editor::command(&path);
         let id = self.alloc_pane();
@@ -1096,7 +1166,12 @@ impl Server {
 
     fn pane_event(&mut self, id: PaneId, event: TermEvent) {
         match event {
-            TermEvent::Wakeup | TermEvent::MouseCursorDirty | TermEvent::CursorBlinkingChange => self.dirty = true,
+            TermEvent::Wakeup | TermEvent::MouseCursorDirty | TermEvent::CursorBlinkingChange => {
+                self.dirty = true;
+                if let Some(p) = self.pending_input.get_mut(&id) {
+                    p.output_seen = true;
+                }
+            }
             TermEvent::PtyWrite(text) => {
                 if let Some(p) = self.term(id) {
                     p.write(text.into_bytes());
@@ -1194,9 +1269,7 @@ impl Server {
             }
             None => return,
         };
-        if let Action::OpenEditor(path) = action {
-            self.open_editor(id, path);
-        }
+        self.finder_action(id, action);
     }
 
     fn type_into(&self, id: PaneId, key: &KeyEvent) {
@@ -1253,9 +1326,8 @@ impl Server {
                     }
                     return;
                 }
-                if let Action::OpenEditor(path) = f.handle_mouse(&ev) {
-                    self.open_editor(id, path);
-                }
+                let action = f.handle_mouse(&ev);
+                self.finder_action(id, action);
             }
             Some(Pane::Term(_)) => {
                 // A click on the frame only focuses.
@@ -1411,8 +1483,15 @@ impl Server {
                     Pane::Finder(f) => f.text(f.editor.and_then(|e| self.term(e))),
                 }
             }
-            Command::Kill => {
+            Command::Kill { forget } => {
                 self.quit = true;
+                self.forget = forget;
+                String::new()
+            }
+            Command::EnsureTab => {
+                if self.tabs.is_empty() {
+                    self.new_tab(None, SpawnOptions::default())?;
+                }
                 String::new()
             }
             Command::NewTab { name, cwd, command } => {
@@ -1486,9 +1565,7 @@ impl Server {
                                     Some(Pane::Finder(f)) => f.handle_key(&KeyEvent::new(code, KeyModifiers::NONE)),
                                     _ => break,
                                 };
-                                if let Action::OpenEditor(path) = action {
-                                    self.open_editor(id, path);
-                                }
+                                self.finder_action(id, action);
                             }
                         }
                     }
@@ -1566,25 +1643,52 @@ impl Server {
         self.dirty = false;
         let ids: Vec<ClientId> = self.clients.iter().filter(|(_, c)| c.attached).map(|(id, _)| *id).collect();
         for id in ids {
-            let (cols, rows) = match self.clients.get(&id) {
-                Some(c) => (c.cols, c.rows),
+            let (cols, rows, graphics) = match self.clients.get(&id) {
+                Some(c) => (c.cols, c.rows, c.graphics),
                 None => continue,
             };
-            let (buf, cursor, zones) = self.compose(cols, rows);
+            let frame = self.compose(cols, rows, graphics);
+            for job in frame.jobs {
+                self.images.request(job);
+            }
             let Some(client) = self.clients.get_mut(&id) else { continue };
-            client.tab_zones = zones;
+            client.tab_zones = frame.zones;
+            let buf = frame.buf;
             let clear = client.prev.is_none();
-            let prev = client.prev.take().unwrap_or_else(|| Buffer::empty(buf.area));
+            let mut prev = client.prev.take().unwrap_or_else(|| Buffer::empty(buf.area));
             let prev_cursor = if clear { None } else { client.prev_cursor };
-            let bytes = encode_frame(&prev, &buf, prev_cursor, cursor, clear);
+            // A full redraw starts from a blank screen: every image is drawn again.
+            let shown = if clear { Vec::new() } else { std::mem::take(&mut client.shown) };
+            let touched: Vec<(u16, u16)> = prev.diff(&buf).iter().map(|(x, y, _)| (*x, *y)).collect();
+            let changes =
+                images::changes(&shown, &frame.images, |r| touched.iter().any(|(x, y)| layout::contains(r, *x, *y)));
+            let mut overlay = Vec::new();
+            if clear && graphics.protocol == ImageProtocol::Kitty {
+                overlay.extend_from_slice(b"\x1b_Ga=d,d=A,q=2\x1b\\");
+            }
+            for p in &changes.remove {
+                if p.key.protocol == ImageProtocol::Kitty {
+                    overlay.extend(images::kitty_delete(p.key.kitty_id()));
+                } else {
+                    // Sixel and iTerm2 pictures are erased by drawing the cells under them again.
+                    invalidate(&mut prev, p.rect);
+                }
+            }
+            for p in &changes.add {
+                overlay.extend(format!("\x1b[{};{}H", p.rect.y + 1, p.rect.x + 1).into_bytes());
+                overlay.extend_from_slice(&p.bytes);
+            }
+            let bytes = encode_frame(&prev, &buf, prev_cursor, frame.cursor, clear, &overlay);
             if bytes.is_empty() {
                 client.prev = Some(buf);
+                client.shown = frame.images;
                 continue;
             }
             match client.tx.try_send(ServerMsg::Output(bytes)) {
                 Ok(()) => {
                     client.prev = Some(buf);
-                    client.prev_cursor = cursor;
+                    client.prev_cursor = frame.cursor;
+                    client.shown = frame.images;
                 }
                 // The client is behind: skip this frame and redraw everything when it catches up.
                 Err(TrySendError::Full(_)) => self.dirty = true,
@@ -1593,8 +1697,8 @@ impl Server {
         }
     }
 
-    /// The full screen for a client of `cols` × `rows`.
-    fn compose(&self, cols: u16, rows: u16) -> (Buffer, Option<Cursor>, Vec<TabZone>) {
+    /// The full screen for a client of `cols` × `rows` whose terminal shows images as `graphics` says.
+    fn compose(&self, cols: u16, rows: u16, graphics: protocol::Graphics) -> Frame {
         let mut buf = Buffer::empty(Rect::new(0, 0, cols, rows));
         let zones = self.draw_tab_bar(&mut buf);
         let content = self.content_area();
@@ -1614,16 +1718,41 @@ impl Server {
             Mode::Modal(Modal::Normal | Modal::Locked) => Color::Green,
             _ => Color::Yellow,
         };
+        // Real images need a protocol, no overlay on top, and for sixel the cell size in pixels.
+        let protocol = graphics.protocol;
+        let real = protocol != ImageProtocol::Blocks
+            && !matches!(self.mode, Mode::Help)
+            && (protocol != ImageProtocol::Sixel || graphics.cell_px.is_some());
+        let mut slots = Vec::new();
         if let Some(tab) = self.tabs.get(self.active) {
             let layout = self.tab_layout(tab);
             for (id, rect) in &layout.panes {
                 let focused = *id == tab.focus;
-                if let Some(c) = self.draw_pane(&mut buf, *id, *rect, focused, focused && cursor_allowed, accent) {
+                let look = PaneLook { focused, show_cursor: focused && cursor_allowed, accent };
+                if let Some(c) = self.draw_pane(&mut buf, *id, *rect, look, real.then_some(&mut slots)) {
                     cursor = Some(c);
                 }
             }
             if !self.frames {
                 draw_separators(&mut buf, &layout.separators, layout.rect_of(tab.focus));
+            }
+        }
+        let mut placed = Vec::new();
+        let mut jobs = Vec::new();
+        for slot in slots {
+            let cell = graphics.cell_px.unwrap_or(images::DEFAULT_CELL);
+            let (rect, px) = images::fit(slot.img.width(), slot.img.height(), slot.area, cell, protocol);
+            let key = images::ImageKey { id: slot.id, protocol, cells: (rect.width, rect.height), px };
+            let on_screen = rect.right() <= cols && rect.bottom() <= rows.saturating_sub(1);
+            match self.images.get(&key).filter(|_| on_screen) {
+                Some(bytes) => placed.push(images::Placed { key, rect, bytes }),
+                None => {
+                    if on_screen {
+                        jobs.push(images::Job { key, img: slot.img.clone() });
+                    }
+                    let (w, h) = (slot.area.width.max(1), slot.area.height.max(1));
+                    finder::draw_blocks(&mut buf, &finder::view::image_cells(&slot.img, w, h), slot.area);
+                }
             }
         }
         if rows >= 2 {
@@ -1635,7 +1764,7 @@ impl Server {
         }
         // Never place the cursor on the tab or status bar.
         let cursor = cursor.filter(|c| c.y >= 1 && c.y + 1 < rows && c.x < cols);
-        (buf, cursor, zones)
+        Frame { buf, cursor, zones, images: placed, jobs }
     }
 
     /// A pane's frame title: its name if it was renamed, otherwise its title or program.
@@ -1660,10 +1789,10 @@ impl Server {
         buf: &mut Buffer,
         id: PaneId,
         rect: Rect,
-        focused: bool,
-        show_cursor: bool,
-        accent: Color,
+        look: PaneLook,
+        slots: Option<&mut Vec<finder::ImageSlot>>,
     ) -> Option<Cursor> {
+        let PaneLook { focused, show_cursor, accent } = look;
         match self.panes.get(&id)? {
             Pane::Term(p) => {
                 let body = self.body(rect);
@@ -1695,7 +1824,7 @@ impl Server {
             }
             Pane::Finder(f) => {
                 let editor = f.editor.and_then(|e| self.term(e));
-                f.render(buf, rect, focused, accent, editor).filter(|_| show_cursor)
+                f.render(buf, rect, focused, accent, editor, slots).filter(|_| show_cursor)
             }
         }
     }
@@ -1728,6 +1857,26 @@ impl Server {
         }
         put_str(buf, right, 0, &session, Style::default().fg(Color::Black).bg(Color::Blue), width - right);
         zones
+    }
+}
+
+/// How to draw a pane: whether it has focus, shows the program's cursor, and its frame colour.
+#[derive(Clone, Copy)]
+struct PaneLook {
+    focused: bool,
+    show_cursor: bool,
+    accent: Color,
+}
+
+/// Makes the cells in `rect` look changed, so the next frame draws them again (erasing a picture there).
+fn invalidate(buf: &mut Buffer, rect: Rect) {
+    let rect = rect.intersection(buf.area);
+    for y in rect.top()..rect.bottom() {
+        for x in rect.left()..rect.right() {
+            if let Some(c) = buf.cell_mut((x, y)) {
+                c.set_symbol("\u{1}");
+            }
+        }
     }
 }
 

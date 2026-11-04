@@ -521,7 +521,10 @@ impl Server {
             },
             Mode::ConfirmQuit => (
                 put_str(buf, 0, y, " QUIT? ", badge(Color::Red), width),
-                format!("y ends session '{}' and every program in it · any other key cancels", self.name),
+                format!(
+                    "y ends session '{}' and its programs; attach again to restore the layout · any other key cancels",
+                    self.name
+                ),
             ),
             Mode::Help => (put_str(buf, 0, y, " HELP ", badge(Color::Cyan), width), "any key closes".into()),
         };

@@ -57,8 +57,24 @@ and `docs/plans/2026-11-04-zellij-keys-and-frames.md`.
 cargo build --release
 ./target/release/tb               # attach to session "main", starting it if needed
 ./target/release/tb finder ~/docs # open a finder tab
-./target/release/tb ls            # list sessions;  tb kill  ends one
+./target/release/tb ls            # list sessions;  tb kill  ends one (attach again to restore it)
 ```
+
+Session commands are **zellij's**, with the same names, aliases and flags:
+
+```bash
+tb attach work           # or: tb a work, tb -s work; starts "work" if needed (-c is accepted)
+tb attach -b work        # start it in the background without attaching
+tb attach --forget work  # forget its saved layout and start fresh
+tb attach -f work        # when restoring, run the commands that were running
+tb list-sessions         # or: tb ls; -s names only, -r reversed
+tb kill-session work     # or: tb k work; keeps the layout for next time
+tb delete-session work   # or: tb d work; forgets the saved layout (-f also ends a running session)
+tb kill-all-sessions     # or: tb ka; -y skips the question
+tb delete-all-sessions   # or: tb da; -y skips the question, -f also ends and forgets running ones
+```
+
+Unlike zellij, plain `tb` returns to "main" instead of starting a new session with a random name.
 
 Inside a session the keys are **zellij's** (your `~/.config/zellij/config.kdl` bindings), and each pane has a
 frame like zellij's:
@@ -75,6 +91,16 @@ frame like zellij's:
 | `Ctrl+g` | **lock:** all keys go to the program until `Ctrl+g` again |
 | `Ctrl+q` | quit: ends the session (asks first) |
 | `Alt+n`, `Alt+arrows`, `Alt+=`/`Alt+-`, `Alt+i`/`Alt+o` | new pane, focus, resize, move the tab |
+
+**Sessions come back.** `tb kill`, Ctrl+q, a crash or a reboot keeps the session's layout: tabs, splits, names,
+folders and finder state. Attaching again restores it. A command that was running is typed at the prompt
+without Enter. `tb ls` shows saved sessions, and `tb delete NAME` forgets one.
+
+**Finder:** images show for real in terminals that support kitty, iTerm2 or sixel images (Ghostty, kitty,
+WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one with
+`TB_IMAGES=kitty|iterm2|sixel|blocks`. Enter on a `.csv`/`.tsv` opens a **grid editor**: arrows move, `e`
+edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Alt+s` saves and `q` closes. `E`
+opens any text file in Neovim.
 
 `Esc` or `Enter` leaves a mode; `?` in any mode shows all keys. Not in `tb` yet: floating, stacked and pinned
 panes, swap layouts, pane groups and zellij's plugins.

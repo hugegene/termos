@@ -68,6 +68,23 @@ pub fn ensure_private_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Where a session is saved for restoring (step 4).
+pub fn saved_path(session: &str) -> PathBuf {
+    state_dir().join("sessions").join(format!("{session}.json"))
+}
+
+/// Names of saved sessions, running or not.
+pub fn saved_names() -> Vec<String> {
+    let Ok(read) = fs::read_dir(state_dir().join("sessions")) else { return Vec::new() };
+    let mut names: Vec<String> = read
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().to_str()?.strip_suffix(".json").map(str::to_owned))
+        .filter(|n| valid_session_name(n))
+        .collect();
+    names.sort();
+    names
+}
+
 /// Session names become file names, so keep them simple.
 pub fn valid_session_name(name: &str) -> bool {
     !name.is_empty()

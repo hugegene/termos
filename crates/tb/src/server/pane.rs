@@ -63,6 +63,8 @@ pub struct TermPane {
     /// A copy of the PTY's controlling side, used to see which program runs in the foreground.
     master: Option<File>,
     pub pid: u32,
+    /// The program the pane was started with; empty for the user's shell.
+    pub command: Vec<String>,
     /// Title set by the program (OSC 0/2), if any.
     pub title: Option<String>,
     pub cols: u16,
@@ -88,6 +90,7 @@ impl TermPane {
         let size = Size { cols: usize::from(cols), lines: usize::from(rows) };
         let term = Arc::new(FairMutex::new(Term::new(Config::default(), &size, proxy.clone())));
 
+        let command = opts.command.clone();
         let mut env = opts.env;
         env.insert("TERM".into(), "xterm-256color".into());
         env.insert("COLORTERM".into(), "truecolor".into());
@@ -103,7 +106,7 @@ impl TermPane {
         let sender = event_loop.channel();
         // Detached: when the loop ends, the PTY is dropped on its own thread (that drop waits for the child).
         drop(event_loop.spawn());
-        Ok(TermPane { term, sender, master, pid, title: None, cols, rows })
+        Ok(TermPane { term, sender, master, pid, command, title: None, cols, rows })
     }
 
     pub fn write(&self, bytes: Vec<u8>) {
@@ -137,6 +140,20 @@ impl TermPane {
         let pgid = self.master.as_ref().and_then(|f| rustix::termios::tcgetpgrp(f).ok())?;
         let comm = std::fs::read_to_string(format!("/proc/{}/comm", pgid.as_raw_nonzero())).ok()?;
         Some(comm.trim().to_owned())
+    }
+
+    /// The command running in the foreground, unless it's the pane's shell: what to offer again after a
+    /// restore. A pipeline gives only its first command.
+    pub fn running_command(&self) -> Option<Vec<String>> {
+        let pgid = self.master.as_ref().and_then(|f| rustix::termios::tcgetpgrp(f).ok())?;
+        if pgid.as_raw_nonzero().get() as u32 == self.pid {
+            // The pane's own program has the foreground: a shell, or a command it was started with.
+            return (!self.command.is_empty()).then(|| self.command.clone());
+        }
+        let raw = std::fs::read(format!("/proc/{}/cmdline", pgid.as_raw_nonzero())).ok()?;
+        let args: Vec<String> =
+            raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+        (!args.is_empty()).then_some(args)
     }
 
     /// What to call this pane: the program's title, else the foreground program's name.

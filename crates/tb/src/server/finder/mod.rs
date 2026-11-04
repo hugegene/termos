@@ -1,6 +1,7 @@
 //! The built-in finder: a file list and a preview, drawn by the server. Enter opens Neovim in an embedded
 //! terminal inside the preview area.
 
+mod grid;
 mod highlight;
 pub mod view;
 
@@ -30,15 +31,37 @@ const NARROW: u16 = 60;
 /// Half-block colours for an image: (top, bottom) per cell.
 type ImageCells = Vec<Vec<(Color, Color)>>;
 
+/// What a finder saves for a restore (step 4).
+#[derive(serde::Serialize, serde::Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct FinderState {
+    pub dir: PathBuf,
+    pub selected: Option<String>,
+    pub show_hidden: bool,
+    pub focus_preview: bool,
+    pub scroll: usize,
+    /// The file open in the editor.
+    pub editing: Option<PathBuf>,
+}
+
 pub enum FinderEvent {
     View { path: PathBuf, width: u16, view: View },
     Changed(Vec<PathBuf>),
+}
+
+/// An image the server should draw for the client in `area`: as a real image if the client's terminal can,
+/// else as blocks.
+pub struct ImageSlot {
+    pub id: u64,
+    pub img: std::sync::Arc<image::RgbImage>,
+    pub area: Rect,
 }
 
 /// What the server should do after a finder key or click.
 pub enum Action {
     None,
     OpenEditor(PathBuf),
+    /// Show a short message on the status bar.
+    Flash(String),
 }
 
 struct Request {
@@ -66,6 +89,8 @@ pub struct Finder {
     image_cache: RefCell<Option<((u16, u16), ImageCells)>>,
     /// The embedded editor's pane, while editing.
     pub editor: Option<PaneId>,
+    /// The CSV grid editor, while editing a CSV file.
+    grid: Option<grid::Grid>,
     pub editing: Option<PathBuf>,
     rect: Rect,
     /// Draw the list and the preview in boxes (zellij-style pane frames) instead of a separator line.
@@ -113,6 +138,19 @@ fn watcher(id: PaneId, tx: Sender<Ev>) -> Option<notify::RecommendedWatcher> {
     .ok()
 }
 
+/// Draws an image as coloured half-blocks, centred across the top of `area`.
+pub fn draw_blocks(buf: &mut Buffer, cells: &[Vec<(Color, Color)>], area: Rect) {
+    let w = cells.first().map_or(0, |r| r.len() as u16);
+    let x0 = area.x + area.width.saturating_sub(w) / 2;
+    for (row, line) in cells.iter().enumerate() {
+        for (col, (top, bottom)) in line.iter().enumerate() {
+            if let Some(c) = buf.cell_mut((x0 + col as u16, area.y + row as u16)) {
+                c.set_symbol("▀").set_fg(*top).set_bg(*bottom);
+            }
+        }
+    }
+}
+
 pub fn home_relative(p: &Path) -> String {
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
         && let Ok(rest) = p.strip_prefix(&home)
@@ -141,6 +179,7 @@ impl Finder {
             scroll: 0,
             image_cache: RefCell::new(None),
             editor: None,
+            grid: None,
             editing: None,
             rect,
             frames,
@@ -154,6 +193,26 @@ impl Finder {
         f
     }
 
+    pub fn state(&self) -> FinderState {
+        FinderState {
+            dir: self.dir.clone(),
+            selected: self.current().map(|e| e.name.clone()),
+            show_hidden: self.show_hidden,
+            focus_preview: self.focus_preview,
+            scroll: self.scroll,
+            editing: self.editing.clone(),
+        }
+    }
+
+    /// Puts back a saved state (the folder comes from `new`).
+    pub fn restore_state(&mut self, state: &FinderState) {
+        self.show_hidden = state.show_hidden;
+        let dir = self.dir.clone();
+        self.cd(dir, state.selected.clone());
+        self.focus_preview = state.focus_preview;
+        self.scroll = state.scroll;
+    }
+
     // ----- layout -----
 
     /// (list, separator, preview) areas inside `rect`. In a narrow pane one side gets everything. With
@@ -161,7 +220,8 @@ impl Finder {
     fn areas(&self, rect: Rect) -> (Rect, Option<Rect>, Rect) {
         if rect.width < NARROW {
             let empty = Rect::new(rect.x, rect.y, 0, rect.height);
-            return if self.focus_preview || self.editor.is_some() { (empty, None, rect) } else { (rect, None, empty) };
+            let preview = self.focus_preview || self.editor.is_some() || self.grid.is_some();
+            return if preview { (empty, None, rect) } else { (rect, None, empty) };
         }
         let list_w = (rect.width * 35 / 100).clamp(16, rect.width - 20);
         if self.frames {
@@ -205,6 +265,10 @@ impl Finder {
     /// Called when the pane is resized.
     pub fn resize(&mut self, rect: Rect) {
         self.rect = rect;
+        let body = self.body_rect(rect);
+        if let Some(g) = self.grid.as_mut() {
+            g.resize(body.width, body.height);
+        }
         self.ensure_visible();
         if self.preview_width() != self.view_width {
             self.request_preview(true);
@@ -353,19 +417,37 @@ impl Finder {
         (!entry.is_dir && finder_core::detect(&entry.path).is_editable()).then(|| entry.path.clone())
     }
 
-    /// Enter / double-click: open a folder, edit a text file, or look at anything else.
+    /// Enter / double-click: open a folder, edit a file, or look at anything else.
     fn activate(&mut self) -> Action {
         let Some(entry) = self.current().cloned() else { return Action::None };
         if entry.is_dir {
             self.cd(entry.path, None);
             return Action::None;
         }
-        match self.editable() {
-            Some(path) => Action::OpenEditor(path),
-            None => {
-                self.focus_preview = true;
+        if self.editable().is_some() {
+            return self.edit_current();
+        }
+        self.focus_preview = true;
+        Action::None
+    }
+
+    /// Edits the selected file: CSV and TSV in the grid, other text in Neovim.
+    fn edit_current(&mut self) -> Action {
+        let Some(path) = self.editable() else { return Action::None };
+        let finder_core::Kind::Csv { delimiter } = finder_core::detect(&path) else {
+            return Action::OpenEditor(path);
+        };
+        match grid::Grid::open(&path, delimiter) {
+            Ok(g) => {
+                self.grid = Some(g);
+                // In a narrow pane the preview side only shows once the grid is open, so size it now.
+                let body = self.body_rect(self.rect);
+                if let Some(g) = self.grid.as_mut() {
+                    g.resize(body.width, body.height);
+                }
                 Action::None
             }
+            Err(e) => Action::Flash(e),
         }
     }
 
@@ -379,6 +461,20 @@ impl Finder {
     // ----- input -----
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> Action {
+        if let Some(g) = self.grid.as_mut() {
+            if let grid::Outcome::Close = g.handle_key(key) {
+                self.grid = None;
+                self.reload();
+                self.request_preview(true);
+            }
+            return Action::None;
+        }
+        // E edits any text file in Neovim, CSV included.
+        if key.code == KeyCode::Char('E')
+            && let Some(p) = self.editable()
+        {
+            return Action::OpenEditor(p);
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let g_pending = std::mem::take(&mut self.pending_g);
         let page = self.list_rows() as isize;
@@ -417,11 +513,7 @@ impl Finder {
                 KeyCode::Char('g') => self.pending_g = true,
                 KeyCode::Home => self.scroll = 0,
                 KeyCode::Char('G') | KeyCode::End => self.scroll_by(isize::MAX / 2),
-                KeyCode::Enter | KeyCode::Char('e') => {
-                    if let Some(p) = self.editable() {
-                        return Action::OpenEditor(p);
-                    }
-                }
+                KeyCode::Enter | KeyCode::Char('e') => return self.edit_current(),
                 KeyCode::Char('h' | 'q') | KeyCode::Left | KeyCode::Esc | KeyCode::Tab => self.focus_preview = false,
                 _ => {}
             }
@@ -445,11 +537,7 @@ impl Finder {
                 }
                 self.focus_preview = true;
             }
-            KeyCode::Char('e') => {
-                if let Some(p) = self.editable() {
-                    return Action::OpenEditor(p);
-                }
-            }
+            KeyCode::Char('e') => return self.edit_current(),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.up(),
             KeyCode::Char('.') => {
                 self.show_hidden = !self.show_hidden;
@@ -481,6 +569,15 @@ impl Finder {
     /// A mouse event at absolute screen coordinates inside the finder's `rect`.
     pub fn handle_mouse(&mut self, ev: &MouseEvent) -> Action {
         let (list, _, preview) = self.areas(self.rect);
+        if self.grid.is_some() {
+            let body = self.body_rect(self.rect);
+            if let Some(g) = self.grid.as_mut()
+                && super::layout::contains(preview, ev.column, ev.row)
+            {
+                g.handle_mouse(ev, body);
+            }
+            return Action::None;
+        }
         let (x, y) = (ev.column, ev.row);
         let in_list = super::layout::contains(list, x, y);
         let in_preview = super::layout::contains(preview, x, y);
@@ -516,7 +613,9 @@ impl Finder {
 
     /// One line of key hints for the status bar.
     pub fn hint(&self) -> &'static str {
-        if self.editor.is_some() {
+        if let Some(g) = &self.grid {
+            g.hint()
+        } else if self.editor.is_some() {
             "editing · Alt+s save · Alt+q close"
         } else if self.filtering {
             "filter: type to narrow · Enter keep · Esc clear"
@@ -529,7 +628,8 @@ impl Finder {
 
     // ----- drawing -----
 
-    /// Draws the finder into `rect`. `accent` colours the active box's frame when the pane has focus.
+    /// Draws the finder into `rect`. `accent` colours the active box's frame when the pane has focus. With
+    /// `images`, a picture is left blank and handed back for the server to draw; otherwise it's drawn as blocks.
     pub fn render(
         &self,
         buf: &mut Buffer,
@@ -537,11 +637,12 @@ impl Finder {
         focused: bool,
         accent: Color,
         editor: Option<&TermPane>,
+        images: Option<&mut Vec<ImageSlot>>,
     ) -> Option<Cursor> {
         let (list, sep, preview) = self.areas(rect);
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let frame_style = |active: bool| if active { bold.fg(accent) } else { Style::default() };
-        let list_active = focused && !self.focus_preview && self.editor.is_none();
+        let list_active = focused && !self.focus_preview && self.editor.is_none() && self.grid.is_none();
         if list.width > 0 {
             if self.frames {
                 let title = self.list_title(usize::from(list.width.saturating_sub(4)));
@@ -567,7 +668,20 @@ impl Finder {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let preview_active = focused && (self.focus_preview || self.editor.is_some());
+        let preview_active = focused && (self.focus_preview || self.editor.is_some() || self.grid.is_some());
+        if let Some(g) = &self.grid {
+            let name = g.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            if self.frames {
+                draw_frame(buf, preview, &format!("▦ {name}"), &g.info(), frame_style(preview_active));
+            } else {
+                let label = format!(" ▦ {name} ");
+                let w = put_str(buf, header.x, header.y, &label, bold.fg(Color::Black).bg(Color::Yellow), header.width);
+                let info = format!("  {}", g.info());
+                put_str(buf, header.x + w, header.y, &info, Style::default().fg(Color::DarkGray), header.width - w);
+            }
+            g.render(buf, body, focused);
+            return None;
+        }
         if let Some(editor) = editor {
             let hint = "Alt+s save · Alt+q close";
             if self.frames {
@@ -605,22 +719,19 @@ impl Finder {
                     buf.set_line(body.x + 1, body.y + row as u16, line, body.width.saturating_sub(1));
                 }
             }
-            Body::Image(img) => {
+            Body::Image(img, id) => {
                 let size = (body.width.saturating_sub(2), body.height);
+                if let Some(slots) = images {
+                    let area = Rect::new(body.x + 1, body.y, size.0, size.1);
+                    slots.push(ImageSlot { id: *id, img: img.clone(), area });
+                    return None;
+                }
                 let mut cache = self.image_cache.borrow_mut();
                 if cache.as_ref().map(|c| c.0) != Some(size) {
                     *cache = Some((size, view::image_cells(img, size.0.max(1), size.1.max(1))));
                 }
                 let cells = &cache.as_ref().unwrap().1;
-                let w = cells.first().map_or(0, |r| r.len() as u16);
-                let x0 = body.x + 1 + size.0.saturating_sub(w) / 2;
-                for (row, line) in cells.iter().enumerate() {
-                    for (col, (top, bottom)) in line.iter().enumerate() {
-                        if let Some(c) = buf.cell_mut((x0 + col as u16, body.y + row as u16)) {
-                            c.set_symbol("▀").set_fg(*top).set_bg(*bottom);
-                        }
-                    }
-                }
+                draw_blocks(buf, cells, Rect::new(body.x + 1, body.y, size.0, size.1));
             }
         }
         None
@@ -678,7 +789,7 @@ impl Finder {
     pub fn text(&self, editor: Option<&TermPane>) -> String {
         let area = Rect::new(0, 0, self.rect.width, self.rect.height);
         let mut buf = Buffer::empty(area);
-        self.render(&mut buf, area, false, Color::Green, editor);
+        self.render(&mut buf, area, false, Color::Green, editor, None);
         let mut out = Vec::new();
         for y in 0..area.height {
             let mut line = String::new();

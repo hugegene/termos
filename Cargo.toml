@@ -23,7 +23,7 @@ notify = "8"
 postcard = { version = "1", features = ["use-std"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 ratatui = "0.30"
-rustix = { version = "1", features = ["process", "net", "fs", "termios"] }
+rustix = { version = "1", features = ["process", "net", "fs", "termios", "event"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }

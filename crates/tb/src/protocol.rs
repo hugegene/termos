@@ -11,7 +11,7 @@ use crossterm::event::{KeyEvent, MouseEvent};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 const MAX_FRAME: usize = 64 << 20;
 
 pub type PaneId = u32;
@@ -27,9 +27,27 @@ pub enum ClientMsg {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientKind {
     /// An interactive client showing the session.
-    Attach { cols: u16, rows: u16 },
+    Attach { cols: u16, rows: u16, graphics: Graphics },
     /// A one-shot CLI command; the server replies once.
     Command(Command),
+}
+
+/// How a client's terminal shows images.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ImageProtocol {
+    /// Coloured half-blocks: works everywhere.
+    #[default]
+    Blocks,
+    Kitty,
+    Iterm2,
+    Sixel,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Graphics {
+    pub protocol: ImageProtocol,
+    /// The size of one cell in pixels, if the terminal told us.
+    pub cell_px: Option<(u16, u16)>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -82,7 +100,12 @@ pub enum Command {
         pane: Option<PaneId>,
         full: bool,
     },
-    Kill,
+    /// End the session. `forget` also deletes its saved layout; otherwise it can be restored.
+    Kill {
+        forget: bool,
+    },
+    /// Open a first tab if the session has none (after a restore it usually has).
+    EnsureTab,
     NewTab {
         name: Option<String>,
         cwd: Option<PathBuf>,

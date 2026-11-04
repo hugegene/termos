@@ -98,7 +98,7 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { max_bytes: 2 << 20, max_rows: 2000, max_image_side: 512 }
+        Self { max_bytes: 2 << 20, max_rows: 2000, max_image_side: 1600 }
     }
 }
 

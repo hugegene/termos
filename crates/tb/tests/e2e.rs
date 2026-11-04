@@ -106,6 +106,23 @@ impl Env {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
+    /// Runs `tb <args>` (no `-s`) outside any session and returns its output, failed or not.
+    fn run(&self, args: &[&str]) -> std::process::Output {
+        Command::new(TB)
+            .args(args)
+            .envs(self.vars.iter().map(|(k, v)| (k, v)))
+            .env_remove("TB_SESSION")
+            .output()
+            .unwrap()
+    }
+
+    /// Like `run`, but panics if it fails, and returns stdout.
+    fn ok(&self, args: &[&str]) -> String {
+        let out = self.run(args);
+        assert!(out.status.success(), "tb {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
     fn panes(&self) -> Vec<serde_json::Value> {
         serde_json::from_str(&self.tb(&["list-panes", "-j"])).unwrap()
     }
@@ -123,6 +140,8 @@ impl Drop for Env {
     fn drop(&mut self) {
         let _ =
             Command::new(TB).args(["-s", &self.session, "kill"]).envs(self.vars.iter().map(|(k, v)| (k, v))).output();
+        // Any other session a test started in this socket folder.
+        let _ = self.run(&["kill-all-sessions", "-y"]);
         let _ = fs::remove_dir_all(&self.sock);
     }
 }
@@ -577,6 +596,196 @@ fn tabs_are_named_after_the_running_program() {
     s.wait_for(" 1 sh ");
 }
 
+#[test]
+fn sessions_come_back_after_kill() {
+    let env = Env::new("e2e-persist");
+    let proj = env.root.join("proj");
+    let files = env.root.join("files");
+    fs::create_dir_all(&proj).unwrap();
+    fs::create_dir_all(&files).unwrap();
+    fs::write(files.join("a.txt"), "a").unwrap();
+    fs::write(files.join("b.txt"), "b").unwrap();
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    // Tab 1: a shell in proj, and a pane running `sleep`; renamed "work".
+    s.send(format!("cd {}\r", proj.display()).as_bytes());
+    s.send(b"\x10r");
+    wait("two panes", || (env.panes().len() == 2).then_some(()));
+    s.send(b"sleep 300\r");
+    s.wait_for("┌ sleep ");
+    s.send(b"\x14rwork\r");
+    // Tab 2: a finder with b.txt selected (opened as if from inside the session, so it doesn't attach).
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    s.wait_for("a.txt");
+    s.send(b"j");
+    s.wait_for("┌ b.txt ");
+
+    env.tb(&["kill"]);
+    s.wait_exit();
+    let ls = env.tb(&["ls"]);
+    assert!(ls.contains("e2e-persist (exited, attach to restore)"), "{ls}");
+
+    // Attaching brings it back: tabs, names, folders, the finder's selection, and the command at the prompt.
+    let s = env.attach(100, 30);
+    s.wait_for(" 1 work ");
+    s.wait_for(" 2 finder ");
+    s.wait_for("┌ b.txt ");
+    let panes = env.panes();
+    assert_eq!(panes.len(), 3, "{panes:?}");
+    assert_eq!(panes[0]["cwd"].as_str(), Some(proj.to_str().unwrap()));
+    let second = panes[1]["id"].as_u64().unwrap().to_string();
+    wait("sleep typed, not run", || env.tb(&["dump-screen", "-p", &second]).contains("$ sleep 300").then_some(()));
+    assert_eq!(panes[1]["title"].as_str(), Some("sh"), "the shell, not sleep, is running");
+
+    // `tb delete` refuses a running session without --force, then forgets it.
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "delete"])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    env.tb(&["delete", "--force"]);
+    s.wait_exit();
+    wait("forgotten", || env.tb(&["ls"]).contains("no sessions").then_some(()));
+}
+
+#[test]
+fn zellij_session_commands() {
+    let env = Env::new("e2e-zj");
+    let ls = || env.ok(&["list-sessions"]);
+    let short = |extra: &[&str]| -> Vec<String> {
+        let args: Vec<&str> = ["ls", "-s"].iter().chain(extra).copied().collect();
+        env.ok(&args).lines().map(str::to_owned).collect()
+    };
+
+    // `attach -b NAME` and `a --create-background NAME` start sessions without attaching.
+    env.ok(&["attach", "-b", "zj-a"]);
+    env.ok(&["a", "--create-background", "zj-b"]);
+    assert_eq!(short(&[]), ["zj-a", "zj-b"]);
+    assert_eq!(short(&["-r"]), ["zj-b", "zj-a"]);
+    let out = Command::new(TB)
+        .args(["ls"])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", "zj-b")
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("zj-b: 1 tabs, 0 attached (current)"));
+
+    // Two tabs in zj-a; `kill-session NAME` keeps the layout, and `attach -b` brings both tabs back.
+    env.ok(&["action", "-s", "zj-a", "new-tab"]);
+    env.ok(&["kill-session", "zj-a"]);
+    wait("zj-a exited", || ls().contains("zj-a (exited, attach to restore)").then_some(()));
+    env.ok(&["attach", "-b", "zj-a"]);
+    assert!(ls().contains("zj-a: 2 tabs"), "{}", ls());
+    // `--forget` starts it fresh instead.
+    env.ok(&["k", "zj-a"]);
+    wait("zj-a exited", || ls().contains("zj-a (exited").then_some(()));
+    env.ok(&["attach", "-b", "--forget", "zj-a"]);
+    assert!(ls().contains("zj-a: 1 tabs"), "{}", ls());
+
+    // `-f` runs a restored command instead of only typing it.
+    env.ok(&["ac", "-s", "zj-b", "new-tab", "--", "sleep", "300"]);
+    env.ok(&["kill-session", "zj-b"]);
+    wait("zj-b exited", || ls().contains("zj-b (exited").then_some(()));
+    env.ok(&["attach", "-b", "-f", "zj-b"]);
+    wait("sleep running again", || {
+        let panes: Vec<serde_json::Value> = serde_json::from_str(&env.ok(&["list-panes", "-s", "zj-b", "-j"])).unwrap();
+        panes.iter().any(|p| p["title"] == "sleep").then_some(())
+    });
+
+    // `kill-all-sessions -y` ends both and keeps their layouts.
+    env.ok(&["ka", "-y"]);
+    wait("both exited", || (ls().matches("(exited").count() == 2).then_some(()));
+    // Without `-y` it asks, and anything but y keeps the sessions (here stdin is empty: no).
+    env.ok(&["attach", "-b", "zj-a"]);
+    let out = env.ok(&["kill-all-sessions"]);
+    assert!(out.contains("End zj-a"), "{out}");
+    assert!(ls().contains("zj-a: "), "still running: {}", ls());
+
+    // `delete-all-sessions -y` forgets exited sessions only; `-f` also ends and forgets running ones.
+    let out = env.ok(&["da", "-y"]);
+    assert!(out.contains("still running: zj-a"), "{out}");
+    assert_eq!(short(&[]), ["zj-a"]);
+    env.ok(&["delete-all-sessions", "-y", "-f"]);
+    wait("all gone", || (ls().trim() == "no sessions").then_some(()));
+
+    // `delete-session NAME` and `d -f NAME`.
+    env.ok(&["attach", "-b", "zj-c"]);
+    assert!(!env.run(&["delete-session", "zj-c"]).status.success(), "refuses a running session");
+    env.ok(&["d", "-f", "zj-c"]);
+    wait("zj-c gone", || (ls().trim() == "no sessions").then_some(()));
+}
+
+/// Opens a finder on a folder holding one picture, with images forced to `protocol`.
+fn finder_with_picture(name: &str, protocol: &str) -> (Env, Screen) {
+    let mut env = Env::new(name);
+    env.set("TB_IMAGES", protocol);
+    let files = env.root.join("pics");
+    fs::create_dir_all(&files).unwrap();
+    let img = image::RgbImage::from_fn(200, 100, |x, _| image::Rgb([if x < 100 { 255 } else { 0 }, 0, 128]));
+    img.save(files.join("pic.png")).unwrap();
+    env.tb(&["start"]);
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let s = env.attach(100, 30);
+    s.wait_for("200×100");
+    (env, s)
+}
+
+#[test]
+fn images_as_blocks_or_real() {
+    // Blocks: the picture is drawn with half-block characters.
+    let (_env, s) = finder_with_picture("e2e-blocks", "blocks");
+    s.wait_for("▀");
+    // kitty: blocks stand in while the picture is encoded, then the cells are left for the image.
+    let (_env2, s2) = finder_with_picture("e2e-kitty", "kitty");
+    s2.wait_until("the image placed instead of blocks", |t| !t.contains('▀'));
+}
+
+#[test]
+fn csv_grid_editing() {
+    let env = Env::new("e2e-grid");
+    let files = env.root.join("sheet");
+    fs::create_dir_all(&files).unwrap();
+    fs::write(files.join("data.csv"), "name,qty\napple,3\npear,10\n").unwrap();
+    env.tb(&["start"]);
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let s = env.attach(100, 30);
+    s.wait_for("data.csv");
+    // Enter opens the grid.
+    s.send(b"\r");
+    s.wait_for("▦ data.csv");
+    s.wait_for("row 0/2");
+    // Change apple's qty from 3 to 5.
+    s.send(b"jle\x7f5\r");
+    s.wait_for("● unsaved");
+    // Add a row under apple and name it kiwi.
+    s.send(b"a0ekiwi\r");
+    // Alt+s saves; q closes.
+    s.send(b"\x1bs");
+    s.wait_for("saved ");
+    assert_eq!(fs::read_to_string(files.join("data.csv")).unwrap(), "name,qty\napple,5\nkiwi,\npear,10\n");
+    s.send(b"q");
+    s.wait_until("grid closed", |t| !t.contains("▦ data.csv"));
+}
+
 /// Prints what a split session and the finder look like. Run with:
 /// `cargo test -p tb --test e2e show_screens -- --ignored --nocapture`
 #[test]
@@ -602,6 +811,25 @@ fn show_screens() {
     assert!(out.status.success());
     s.send(b"j");
     sleep(Duration::from_millis(500));
+    println!("{}\n{}", "=".repeat(110), s.text());
+    // The CSV grid.
+    let sheet = env.root.join("sheet");
+    fs::create_dir_all(&sheet).unwrap();
+    fs::write(
+        sheet.join("fruit.csv"),
+        "name,qty,colour,notes\napple,3,red,crisp\npear,10,green,\"soft, sweet\"\nkiwi,7,brown,\n",
+    )
+    .unwrap();
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", sheet.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    s.wait_for("fruit.csv");
+    s.send(b"\rjl");
+    sleep(Duration::from_millis(300));
     println!("{}\n{}", "=".repeat(110), s.text());
 }
 

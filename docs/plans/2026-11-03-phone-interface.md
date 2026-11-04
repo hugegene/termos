@@ -109,7 +109,7 @@ This slots into the rebuild roadmap. Sizes are **estimates**.
 | Step | Scope | Depends on |
 |---|---|---|
 | **Rebuild step 1** | Build the finder logic as the `finder-core` library from the start (cheap now, costly to split later) | n/a |
-| **Rebuild step 4** | Single-pane TUI layout below ~80 columns: the **SSH baseline** | steps 1–3 |
+| **Rebuild step 6** | Single-pane TUI layout below ~80 columns: the **SSH baseline** (was step 4; moved 2026-11-04) | steps 1–3 |
 | **P0. Device measurements** | The checks in §5, recorded in `docs/findings/` | can start now |
 | **P1. Read-only PWA** | Phone API (listing, previews, sessions list) and PWA screens 1–3; tailnet + pairing | step 1 |
 | **P2. Editing** | Screen 4, versioned saves, conflict view, server-side drafts | P1 |

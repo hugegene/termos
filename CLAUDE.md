@@ -51,6 +51,8 @@ Write each plan to **`docs/plans/YYYY-MM-DD-<topic>.md`** before implementing it
   - `crates/alacritty_terminal`: our fork, unmodified so far; see its `UPSTREAM.md` and record every change there
 - **Build and test:** `cargo build`, `cargo test --workspace`,
   `cargo clippy --no-deps -p tb -p finder-core --all-targets -- -D warnings`, `cargo deny check licenses`.
+  - Format with `cargo fmt -p tb -p finder-core`, never `cargo fmt --all`: that rewraps the
+    `alacritty_terminal` fork to our `rustfmt.toml`.
   - Rust lives in `~/.cargo/bin`.
   - Network access from Claude's shell is sandboxed, so build with `--offline`. A new dependency needs the user to
     run `cargo fetch`.

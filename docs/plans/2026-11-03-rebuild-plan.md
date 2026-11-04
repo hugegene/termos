@@ -122,9 +122,10 @@ Each pane needs four layers:
 fallback.
 - **Preferred order** when a terminal supports several: kitty, then iTerm2, then sixel. iTerm2 sends a
   compressed full-colour image, while sixel is palette-based.
-- **Detection:** `ratatui-image` detects what the terminal supports
-  ([finding](../findings/2026-11-03-iterm2-image-support.md)). Whether it lets us set the order is still to
-  check.
+- **Detection (changed 2026-11-04):** the client detects what its terminal supports, using a kitty graphics
+  query, the terminal's device attributes and `TERM_PROGRAM`, and tells the server. The server then encodes
+  images for each client with our own small encoders, so we choose the order. See
+  [build steps 4–5](2026-11-04-build-steps-4-5.md).
 
 **Output cost over mobile SSH.**
 - **tmux** sends cheap "scroll this region" operations.
@@ -197,7 +198,7 @@ These replace yazi, glow, bat, chafa, html2text, w3m and VisiData.
 | Syntax highlighting | `syntect` + `two-face` | 5.3.0, 0.5.2 | MIT, MIT/Apache |
 | HTML → Markdown | `htmd` | 0.5.6 | Apache-2.0 |
 | Image decoding | `image` | 0.25.10 | MIT/Apache |
-| Image display (kitty, iTerm2, sixel, blocks; auto-detected) | `ratatui-image`, `icy_sixel` | 11.1.0, 0.7.0 | MIT, MIT/Apache |
+| Image display (kitty, iTerm2, sixel, blocks; auto-detected) | ~~`ratatui-image`, `icy_sixel`~~ our own encoders (changed 2026-11-04), PNG via `image` | n/a | ours |
 | CSV read/write and grid editor | `csv` | 1.4.0 | MIT/Unlicense |
 
 ### Daemon (poller + webhook)
@@ -294,7 +295,7 @@ Because this is for other people, some zellij features become expected.
 | Tabs, splits, attach/detach, persistence | ✅ Core (steps 1–4) |
 | Scriptable CLI (`action`, `list-panes`, `dump-screen`) | ✅ From step 1 |
 | Scrollback search, copy mode, clipboard | ✅ Step 3 |
-| Floating panes (pop-up shell) | ✅ Later; useful on phones |
+| Floating panes (pop-up shell) | ✅ Step 7; useful on phones |
 | Layout files, themes, config | ✅ Small version for launch |
 | Key modes with on-screen hints | ✅ Simple version for launch |
 | Stacked panes, auto-arrange layouts | Maybe |
@@ -367,10 +368,12 @@ Sizes are rough estimates.
 | **1. Core** | Server, client, attach/detach, CLI (with `list-panes` and `dump-screen` for tests); one tab running the finder (file list, previews, Neovim pane) | Matches today's prototype |
 | **2. Multiplexer** | Shell tabs and splits: new, split, focus, close, zoom, resize, mouse | Usable multiplexer (**~3–5k lines** total) |
 | **3. Daily driver** | Scrollback, copy mode, search, OSC 52 clipboard, mouse selection | **Switch our daily use from zellij** |
-| **4. Persistence and phone** | Reboot recovery, narrow layout, per-client layouts | SSH-from-phone ready (**~10–15k lines** total) |
-| **5. Finder extras** | CSV grid editor, kitty/iTerm2/sixel images, floating panes | Full replacement for the prototype |
+| **4. Persistence** | Reboot recovery: layout, folders, names, finder state; programs that were running come back as commands waiting at the prompt | Sessions survive reboots, crashes and Ctrl+Q |
+| **5. Finder extras** | CSV grid editor; kitty, iTerm2 and sixel images | Full replacement for the prototype |
+| **6. Phone** | Everything for phones: the one-pane layout below ~80 columns, per-client layouts, plain keys and taps for every action; then the PWA ([phone plan](2026-11-03-phone-interface.md) P1–P4) | SSH-from-phone ready (**~10–15k lines** total before the PWA) |
+| **7. Floating panes** | Floating (pop-up) panes; maybe stacked and pinned panes and swap layouts, zellij's other gaps | No missing zellij pane features |
 | **Parallel track** | Daemon: poller, webhook, events into the finder | Independent process; can start anytime |
-| **6. Launch** | Config, themes, layouts, key hints, docs, packaging, testing across terminals (Ghostty, Terminator, WezTerm, kitty, iTerm2 if macOS is supported, Termux, Blink) | Ready for other users (roughly **2×** the personal-use effort) |
+| **8. Launch** | Config, themes, layouts, key hints, docs, packaging, testing across terminals (Ghostty, Terminator, WezTerm, kitty, iTerm2 if macOS is supported, Termux, Blink) | Ready for other users (roughly **2×** the personal-use effort) |
 
 The prototype in `~/terminal-browser` stays in use until step 3. Its preview logic (file-type detection, the
 CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim config carry over as reference.
@@ -403,6 +406,20 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
   plan and known gaps are in the [build plan](2026-11-03-build-steps-0-3.md). Two departures matter here:
   - The session server uses threads, not tokio.
   - The fork records its upstream commit instead of importing Alacritty's git history.
+- **2026-11-04:** roadmap reordered at the user's request:
+  - Step 4 keeps reboot recovery only.
+  - Everything for phones moved to a new step 6: the narrow one-pane layout, per-client layouts, phone keys
+    and the PWA.
+  - Floating panes moved out of step 5 into a new step 7.
+  - Launch is now step 8.
+- **2026-11-04:** step 5 images will use **our own small encoders** (kitty, iTerm2, sixel) instead of
+  `ratatui-image`, because:
+  - `ratatui-image`'s default features link `libchafa` (LGPL).
+  - Its detection runs inside the app's process, but our server draws for several clients, each with its own
+    terminal.
+  - Its font-size constructor for that case is deprecated.
+
+  See [build steps 4–5](2026-11-04-build-steps-4-5.md).
 
 ---
 

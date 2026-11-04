@@ -273,16 +273,18 @@ fn cursor_shape_seq(shape: CursorShape) -> &'static [u8] {
 }
 
 /// Terminal output that turns `prev` into `next` on the client's screen. `clear` redraws everything.
-/// Returns nothing if the screen and cursor are already right.
+/// `overlay` (images) goes after the text and before the cursor is placed. Returns nothing if the screen and
+/// cursor are already right.
 pub fn encode_frame(
     prev: &Buffer,
     next: &Buffer,
     prev_cursor: Option<Cursor>,
     cursor: Option<Cursor>,
     clear: bool,
+    overlay: &[u8],
 ) -> Vec<u8> {
     let updates = prev.diff(next);
-    if !clear && updates.is_empty() && prev_cursor == cursor {
+    if !clear && updates.is_empty() && prev_cursor == cursor && overlay.is_empty() {
         return Vec::new();
     }
     let mut out: Vec<u8> = b"\x1b[?2026h".to_vec();
@@ -293,6 +295,7 @@ pub fn encode_frame(
         let mut be = CrosstermBackend::new(&mut out);
         let _ = be.hide_cursor();
         let _ = be.draw(updates.into_iter());
+        let _ = be.write_all(overlay);
         if let Some(c) = cursor {
             if prev_cursor.map(|p| p.shape) != Some(c.shape) || clear {
                 let _ = be.write_all(cursor_shape_seq(c.shape));

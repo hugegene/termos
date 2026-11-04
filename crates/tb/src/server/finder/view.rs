@@ -1,6 +1,9 @@
 //! Turns preview data into styled lines for the terminal: Markdown, code, CSV tables, folders and images.
 
 use finder_core::{Entry, Kind, Preview, human_size};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use image::RgbImage;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
@@ -14,8 +17,11 @@ const MAX_HIGHLIGHT_LINES: usize = 5000;
 
 pub enum Body {
     Lines(Vec<Line<'static>>),
-    Image(RgbImage),
+    /// A picture, with an id that's new for every preview (so encodings can be cached by it).
+    Image(Arc<RgbImage>, u64),
 }
+
+static NEXT_IMAGE: AtomicU64 = AtomicU64::new(1);
 
 pub struct View {
     /// Short description for the preview header, for example "markdown · 1.2 KB".
@@ -49,7 +55,8 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
             View { info: info(&format!("{} rows", rows.len())), body: Body::Lines(lines) }
         }
         Preview::Image { thumbnail, width: w, height: h } => {
-            View { info: info(&format!("{w}×{h}")), body: Body::Image(thumbnail) }
+            let id = NEXT_IMAGE.fetch_add(1, Ordering::Relaxed);
+            View { info: info(&format!("{w}×{h}")), body: Body::Image(Arc::new(thumbnail), id) }
         }
         Preview::Text { text, syntax, truncated } => {
             let mut lines = code_lines(&text, syntax.as_deref());
