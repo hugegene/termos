@@ -8,7 +8,7 @@ use alacritty_terminal::term::search::{Match, RegexSearch};
 use alacritty_terminal::vi_mode::ViMotion;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{ClientId, Mode, Server};
+use super::{ClientId, Mode, NORMAL, Server};
 use crate::protocol::PaneId;
 
 pub struct CopyState {
@@ -36,7 +36,7 @@ impl Server {
             term.toggle_vi_mode();
         }
         drop(term);
-        self.mode = Mode::Copy(CopyState { pane: id, input: None, search: None, last_match: None, pending_g: false });
+        self.mode = Mode::Select(CopyState { pane: id, input: None, search: None, last_match: None, pending_g: false });
     }
 
     fn exit_copy_mode(&mut self, pane: PaneId) {
@@ -48,13 +48,13 @@ impl Server {
             term.selection = None;
             term.scroll_display(Scroll::Bottom);
         }
-        self.mode = Mode::Normal;
+        self.mode = NORMAL;
     }
 
     pub(super) fn copy_key(&mut self, client: ClientId, mut state: CopyState, key: &KeyEvent) {
         let pane = state.pane;
         if self.term(pane).is_none() {
-            self.mode = Mode::Normal;
+            self.mode = NORMAL;
             return;
         }
         if let Some((backward, mut text)) = state.input.take() {
@@ -77,12 +77,12 @@ impl Server {
                 }
                 _ => state.input = Some((backward, text)),
             }
-            self.mode = Mode::Copy(state);
+            self.mode = Mode::Select(state);
             return;
         }
         let outcome = self.copy_motion(&mut state, key);
         match outcome {
-            Outcome::Stay => self.mode = Mode::Copy(state),
+            Outcome::Stay => self.mode = Mode::Select(state),
             Outcome::Exit => self.exit_copy_mode(pane),
             Outcome::Copy => {
                 let text = self.term(pane).and_then(|p| {

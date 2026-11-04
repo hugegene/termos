@@ -50,7 +50,8 @@ finder [folder]                   # inside zellij → new tab; outside → new z
 ## tb: the Rust rebuild (work in progress)
 
 `tb` is a working name. It's our own multiplexer with the finder built in: persistent sessions, tabs, split
-panes, copy mode and mouse support, all in one binary. See `docs/plans/2026-11-03-build-steps-0-3.md`.
+panes, scrolling and search, and mouse support, all in one binary. See `docs/plans/2026-11-03-build-steps-0-3.md`
+and `docs/plans/2026-11-04-zellij-keys-and-frames.md`.
 
 ```bash
 cargo build --release
@@ -59,19 +60,27 @@ cargo build --release
 ./target/release/tb ls            # list sessions;  tb kill  ends one
 ```
 
-Inside a session, press **Ctrl+B** and then:
+Inside a session the keys are **zellij's** (your `~/.config/zellij/config.kdl` bindings), and each pane has a
+frame like zellij's:
 
-| Key | Action | Key | Action |
-|---|---|---|---|
-| `c` | new tab | `\|` or `%` | split right |
-| `n` / `p` / `1`–`9` | change tab | `-` or `"` | split down |
-| arrows, `h` `j` `k` `l` | move focus | `H` `J` `K` `L` | resize |
-| `z` | zoom | `x` | close pane |
-| `[` | copy mode | `f` | finder tab |
-| `,` | rename tab | `d` | detach |
-| `?` | help | | |
+| Keys | Mode and what it does |
+|---|---|
+| `Ctrl+p` | **pane:** arrows/`hjkl` focus, `n` new, `d` down, `r` right, `x` close, `f` fullscreen, `z` frames, `c` rename |
+| `Ctrl+t` | **tab:** arrows switch, `n` new, `x` close, `r` rename, `1`–`9`, `Tab` last, `s` sync, `b` break out, `f` finder |
+| `Ctrl+n` | **resize:** arrows/`hjkl` grow that side, `HJKL` shrink it, `+` `-` |
+| `Ctrl+h` | **move:** arrows/`hjkl` swap the pane with its neighbour, `n` `p` |
+| `Ctrl+s` | **scroll:** `↓↑` `d` `u` `PgDn` `PgUp`, `s` search (`n` `p` `c` `w` `o`), `e` edit in the editor, `v` select with vi keys |
+| `Ctrl+o` | **session:** `d` detach |
+| `Ctrl+b` | **tmux keys:** `c` `%` `"` `,` `[` `o` `n` `p` `z` `x` `d`, plus `f` finder |
+| `Ctrl+g` | **lock:** all keys go to the program until `Ctrl+g` again |
+| `Ctrl+q` | quit: ends the session (asks first) |
+| `Alt+n`, `Alt+arrows`, `Alt+=`/`Alt+-`, `Alt+i`/`Alt+o` | new pane, focus, resize, move the tab |
 
-- **Mouse:** click to focus, click tabs, drag borders, wheel to scroll back, drag to select and copy (OSC 52).
+`Esc` or `Enter` leaves a mode; `?` in any mode shows all keys. Not in `tb` yet: floating, stacked and pinned
+panes, swap layouts, pane groups and zellij's plugins.
+
+- **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to
+  select and copy (OSC 52).
 - **Finder:** `j`/`k` move, `Enter` edits in Neovim (`Alt+s` save, `Alt+q` close), `/` filters, `.` shows
   hidden files.
 

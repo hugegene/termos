@@ -217,6 +217,11 @@ fn wait<T>(what: &str, f: impl Fn() -> Option<T>) -> T {
     }
 }
 
+/// A screen line without the pane frame's side lines.
+fn unframe(line: &str) -> &str {
+    line.trim().trim_matches('│').trim()
+}
+
 /// An SGR mouse report as a terminal sends it (1-based coordinates).
 fn click(x: u16, y: u16) -> Vec<u8> {
     format!("\x1b[<0;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 1, y + 1).into_bytes()
@@ -226,24 +231,27 @@ fn click(x: u16, y: u16) -> Vec<u8> {
 fn attach_type_split_detach_reattach() {
     let env = Env::new("e2e-attach");
     let s = env.attach(100, 30);
-    s.wait_for("Ctrl+B ? help");
+    s.wait_for("<g> LOCK");
     s.wait_for("$");
+    // Every pane has a frame.
+    let text = s.wait_for("┌");
+    assert!(text.lines().nth(1).unwrap().starts_with('┌'), "a frame at the top left:\n{text}");
     s.send(b"echo hi-there\r");
-    s.wait_until("command output", |t| t.lines().any(|l| l.trim() == "hi-there"));
+    s.wait_until("command output", |t| t.lines().any(|l| unframe(l) == "hi-there"));
 
-    // Ctrl+B | splits right; the new pane gets focus.
-    s.send(b"\x02|");
+    // Ctrl+P r opens a pane on the right; the new pane gets focus.
+    s.send(b"\x10r");
     wait("two panes", || (env.panes().len() == 2).then_some(()));
-    let text = s.wait_for("│");
-    assert!(text.lines().nth(5).unwrap().contains('│'), "a separator between the panes:\n{text}");
+    let text = s.wait_for("┐┌");
+    assert!(text.lines().nth(5).unwrap().contains("││"), "two frames side by side:\n{text}");
     assert_eq!(env.focused(), 2);
 
     // Clicking the left pane focuses it.
     s.send(&click(5, 5));
     wait("pane 1 focused", || (env.focused() == 1).then_some(()));
 
-    // Ctrl+B d detaches; the session keeps running.
-    s.send(b"\x02d");
+    // Ctrl+O d detaches; the session keeps running.
+    s.send(b"\x0fd");
     s.wait_exit();
     s.wait_for("[detached from session e2e-attach]");
     assert!(env.tb(&["ls"]).contains("e2e-attach: 1 tabs, 0 attached"));
@@ -259,17 +267,21 @@ fn tabs_by_key_and_click() {
     let env = Env::new("e2e-tabs");
     let s = env.attach(100, 30);
     s.wait_for(" 1 ");
-    s.send(b"\x02c");
+    // Ctrl+T n opens a tab.
+    s.send(b"\x14n");
     s.wait_for(" 2 ");
     let tab_of = |id: u64| env.panes().iter().find(|p| p["id"] == id).map(|p| p["tab"].as_u64().unwrap());
     assert_eq!(tab_of(env.focused()), Some(2));
     // Click the first tab in the tab bar.
     s.send(&click(1, 0));
     wait("tab 1 active", || (tab_of(env.focused()) == Some(1)).then_some(()));
-    // Rename it with Ctrl+B ,
-    s.send(b"\x02,");
-    s.send(b"\x7f\x7f\x7f\x7f\x7f\x7fwork\r");
+    // Ctrl+T r renames it; the old name is cleared first, as in zellij.
+    s.send(b"\x14r");
+    s.send(b"work\r");
     s.wait_for(" 1 work ");
+    // Ctrl+B is zellij's tmux mode: c opens a tab.
+    s.send(b"\x02c");
+    s.wait_for(" 3 ");
 }
 
 #[test]
@@ -331,14 +343,15 @@ fn finder_previews_and_edits() {
 }
 
 #[test]
-fn copy_mode_search_and_osc52() {
+fn select_mode_search_and_osc52() {
     let env = Env::new("e2e-copy");
     let s = env.attach(100, 30);
     s.wait_for("$");
     s.send(b"echo alpha-beta-gamma\r");
-    s.wait_until("output", |t| t.lines().any(|l| l.trim() == "alpha-beta-gamma"));
-    s.send(b"\x02[");
-    s.wait_for("COPY");
+    s.wait_until("output", |t| t.lines().any(|l| unframe(l) == "alpha-beta-gamma"));
+    // Ctrl+S is scroll mode; v selects with vi keys.
+    s.send(b"\x13v");
+    s.wait_for("SELECT");
     // Search backwards, select the word, copy it.
     s.send(b"?alpha\r");
     s.send(b"v");
@@ -360,10 +373,10 @@ fn scrollback_with_the_wheel() {
     for _ in 0..3 {
         s.send(b"\x1b[<64;5;5M");
     }
-    s.wait_for(" 9/");
+    s.wait_for("SCROLL: 9/");
     // Typing jumps back to the bottom.
     s.send(b"x");
-    s.wait_until("back at the bottom", |t| !t.contains(" 9/"));
+    s.wait_until("back at the bottom", |t| !t.contains("SCROLL:"));
 }
 
 #[test]
@@ -374,7 +387,8 @@ fn programs_exiting_close_panes_and_the_session() {
     assert_eq!(env.panes().len(), 2);
     wait("the split to close", || (env.panes().len() == 1).then_some(()));
     env.tb(&["action", "write", "--enter", "exit"]);
-    wait("the session to end", || (!env.tb(&["ls"]).contains("e2e-exit")).then_some(()));
+    // zellij's name for `ls` works too.
+    wait("the session to end", || (!env.tb(&["list-sessions"]).contains("e2e-exit")).then_some(()));
     assert!(!Path::new(&env.sock).join("e2e-exit.sock").exists());
 }
 
@@ -384,17 +398,17 @@ fn drag_to_select_copies() {
     let s = env.attach(80, 24);
     s.wait_for("$");
     s.send(b"echo one two three\r");
-    let text = s.wait_until("output", |t| t.lines().any(|l| l.trim() == "one two three"));
-    let y = text.lines().position(|l| l.trim() == "one two three").unwrap() as u16;
-    // Press on "two", drag to the end of "three", release.
-    s.send(format!("\x1b[<0;5;{}M", y + 1).as_bytes());
-    s.send(format!("\x1b[<32;9;{}M", y + 1).as_bytes());
-    s.send(format!("\x1b[<32;13;{}M", y + 1).as_bytes());
-    s.send(format!("\x1b[<0;13;{}m", y + 1).as_bytes());
+    let text = s.wait_until("output", |t| t.lines().any(|l| unframe(l) == "one two three"));
+    let y = text.lines().position(|l| unframe(l) == "one two three").unwrap() as u16;
+    // The frame shifts the text one column right. Press on "two", drag to the end of "three", release.
+    s.send(format!("\x1b[<0;6;{}M", y + 1).as_bytes());
+    s.send(format!("\x1b[<32;10;{}M", y + 1).as_bytes());
+    s.send(format!("\x1b[<32;14;{}M", y + 1).as_bytes());
+    s.send(format!("\x1b[<0;14;{}m", y + 1).as_bytes());
     let clip = wait("clipboard", || s.proxy.clipboard.lock().unwrap().last().cloned());
     assert_eq!(clip, "two three");
     // Double-click selects a word.
-    s.send(format!("\x1b[<0;2;{y1}M\x1b[<0;2;{y1}m\x1b[<0;2;{y1}M\x1b[<0;2;{y1}m", y1 = y + 1).as_bytes());
+    s.send(format!("\x1b[<0;3;{y1}M\x1b[<0;3;{y1}m\x1b[<0;3;{y1}M\x1b[<0;3;{y1}m", y1 = y + 1).as_bytes());
     wait("word copied", || (s.proxy.clipboard.lock().unwrap().last().map(String::as_str) == Some("one")).then_some(()));
 }
 
@@ -418,6 +432,151 @@ fn finder_refreshes_when_the_folder_changes() {
     s.wait_for("second.txt");
 }
 
+#[test]
+fn zellij_modes() {
+    let env = Env::new("e2e-modes");
+    let s = env.attach(100, 30);
+    s.wait_for("<g> LOCK");
+    s.wait_for("$");
+    let x_of = |id: u64| env.panes().iter().find(|p| p["id"] == id).map(|p| p["x"].as_u64().unwrap()).unwrap();
+    let cols_of = |id: u64| env.panes().iter().find(|p| p["id"] == id).map(|p| p["cols"].as_u64().unwrap()).unwrap();
+
+    // Pane mode shows its keys; Esc goes back.
+    s.send(b"\x10");
+    s.wait_for(" PANE ");
+    s.send(b"\x1b");
+    s.wait_for("<g> LOCK");
+
+    // Locked mode passes Ctrl+P to the program instead of switching mode.
+    s.send(b"\x07");
+    s.wait_for(" LOCKED ");
+    s.send(b"\x10");
+    sleep(Duration::from_millis(200));
+    assert!(s.text().contains(" LOCKED "), "still locked:\n{}", s.text());
+    s.send(b"\x07");
+    s.wait_for("<g> LOCK");
+
+    // Alt+N opens a pane where there's room: to the right on a wide screen.
+    s.send(b"\x1bn");
+    wait("two panes", || (env.panes().len() == 2).then_some(()));
+    assert_eq!(env.focused(), 2);
+    assert!(x_of(2) > x_of(1));
+
+    // Move mode: h swaps the focused pane with its left neighbour.
+    s.send(b"\x08h");
+    wait("panes swapped", || (x_of(2) < x_of(1)).then_some(()));
+    s.send(b"\x1b");
+
+    // Resize mode: l grows the focused (now left) pane's right side.
+    let before = cols_of(2);
+    s.send(b"\x0el\x1b");
+    wait("pane grew", || (cols_of(2) > before).then_some(()));
+
+    // Ctrl+P z turns frames off and on.
+    s.send(b"\x10z");
+    s.wait_until("frames off", |t| !t.contains('┌'));
+    s.send(b"\x10z");
+    s.wait_for("┌");
+
+    // Ctrl+T b breaks the focused pane out into its own tab.
+    s.send(b"\x14b");
+    s.wait_for(" 2 ");
+    let tabs: Vec<u64> = env.panes().iter().map(|p| p["tab"].as_u64().unwrap()).collect();
+    assert_eq!(tabs, vec![1, 2]);
+
+    // Ctrl+P c renames the pane; the frame shows the name.
+    s.send(b"\x10cbuild\r");
+    s.wait_for("┌ build ");
+
+    // Ctrl+P x closes the pane (and its tab) without asking, as in zellij.
+    s.send(b"\x10x");
+    wait("one pane", || (env.panes().len() == 1).then_some(()));
+
+    // Ctrl+Q asks before ending the session.
+    s.send(b"\x11");
+    s.wait_for("QUIT?");
+    s.send(b"n");
+    s.wait_for("<g> LOCK");
+    assert_eq!(env.panes().len(), 1);
+}
+
+#[test]
+fn scroll_mode_search() {
+    let env = Env::new("e2e-search");
+    let s = env.attach(80, 24);
+    s.wait_for("$");
+    // The command line doesn't contain the word; only the output does.
+    s.send(b"printf 'nee%s\\n' dle-one; seq 1 60\r");
+    s.wait_for("60");
+    // Ctrl+S s, type, Enter: search mode jumps to the match above and scrolls it into view.
+    s.send(b"\x13s");
+    s.wait_for("find:");
+    s.send(b"needle\r");
+    let text = s.wait_for("SCROLL:");
+    assert!(text.lines().any(|l| unframe(l) == "needle-one"), "the match is on screen:\n{text}");
+    assert!(text.contains(" SEARCH "), "{text}");
+    // Ctrl+C goes back to the bottom and to normal mode.
+    s.send(b"\x03");
+    s.wait_until("back at the bottom", |t| !t.contains("SCROLL:") && t.contains("g lock"));
+}
+
+#[test]
+fn sync_move_tab_and_edit_scrollback() {
+    let mut env = Env::new("e2e-more");
+    // A fake editor: shows the first line of the file it got, waits for a line, then exits.
+    let editor = env.root.join("show-editor");
+    fs::write(&editor, "#!/bin/sh\necho \"FIRST: $(head -n 1 \"$1\")\"\nread line\n").unwrap();
+    Command::new("chmod").arg("755").arg(&editor).status().unwrap();
+    env.set("TB_EDITOR", &editor.display().to_string());
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    let screen = |id: u64| env.tb(&["dump-screen", "-p", &id.to_string()]);
+
+    // Ctrl+T s syncs the tab: typing goes to both panes.
+    s.send(b"\x10r");
+    wait("two panes", || (env.panes().len() == 2).then_some(()));
+    s.send(b"\x14s");
+    s.wait_for("(SYNC)");
+    s.send(b"echo both-$((1+1))\r");
+    wait("both panes ran it", || (screen(1).contains("both-2") && screen(2).contains("both-2")).then_some(()));
+    s.send(b"\x14s");
+    s.wait_until("sync off", |t| !t.contains("(SYNC)"));
+
+    // Alt+O moves the tab right (wrapping to the front), Ctrl+T Tab goes back to the last tab.
+    s.send(b"\x14n");
+    s.wait_for(" 2 ");
+    s.send(b"\x1bo");
+    let tab_of = |id: u64| env.panes().iter().find(|p| p["id"] == id).map(|p| p["tab"].as_u64().unwrap());
+    wait("the new tab moved to the front", || (tab_of(3) == Some(1)).then_some(()));
+    s.send(b"\x14\t");
+    wait("back on the old tab", || (tab_of(env.focused()) == Some(2)).then_some(()));
+    s.send(b"\x1b");
+
+    // Ctrl+S e opens the focused pane's scrollback in the editor, in the pane's place; it comes back after.
+    let focused = env.focused();
+    s.send(b"\x13e");
+    s.wait_for("FIRST: $ echo both-$((1+1))");
+    s.wait_for("┌ scrollback ");
+    s.send(b"\r");
+    wait("the pane is back", || (env.focused() == focused).then_some(()));
+    s.wait_until("editor gone", |t| !t.contains("FIRST:"));
+}
+
+#[test]
+fn tabs_are_named_after_the_running_program() {
+    let env = Env::new("e2e-names");
+    let s = env.attach(100, 30);
+    s.wait_for(" 1 sh ");
+    // `cat` starts half a second after the last output and prints nothing, so the tab bar must update
+    // without any output to trigger it.
+    s.send(b"sleep 0.5; cat\r");
+    s.wait_for(" 1 sleep ");
+    s.wait_for(" 1 cat ");
+    s.wait_for("┌ cat ");
+    s.send(b"\x04");
+    s.wait_for(" 1 sh ");
+}
+
 /// Prints what a split session and the finder look like. Run with:
 /// `cargo test -p tb --test e2e show_screens -- --ignored --nocapture`
 #[test]
@@ -427,9 +586,9 @@ fn show_screens() {
     let s = env.attach(110, 28);
     s.wait_for("$");
     s.send(b"echo left pane\r");
-    s.send(b"\x02|");
+    s.send(b"\x10r");
     s.send(b"echo right pane\r");
-    s.send(b"\x02-");
+    s.send(b"\x10d");
     s.wait_for("right pane");
     sleep(Duration::from_millis(300));
     println!("{}\n{}", "=".repeat(110), s.text());
@@ -475,7 +634,7 @@ fn real_neovim() {
     s.send(b"\x1bq");
     s.wait_for("Save changes");
     s.send(b"n");
-    s.wait_until("nvim closed", |t| !t.contains("Alt+s save · Alt+q close  ·"));
+    s.wait_until("nvim closed", |t| !t.contains("Alt+s save"));
     assert_eq!(fs::read_to_string(files.join("a.md")).unwrap(), "# Hello\n");
     println!("{}", s.text());
 }

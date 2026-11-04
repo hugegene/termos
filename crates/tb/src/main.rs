@@ -32,8 +32,10 @@ enum Cmd {
     /// Start the session without attaching
     Start,
     /// List running sessions
+    #[command(visible_alias = "list-sessions")]
     Ls,
     /// End the session and every program in it
+    #[command(visible_alias = "kill-session")]
     Kill,
     /// Open a finder tab on DIR (default: the current folder)
     Finder { dir: Option<PathBuf> },
@@ -106,13 +108,16 @@ enum ActionCmd {
         command: Vec<String>,
     },
     /// Focus a pane: left, right, up, down, next, prev, or a pane id
+    #[command(visible_alias = "move-focus")]
     Focus { target: String },
     /// Close a pane (default: the focused one)
+    #[command(visible_alias = "close-pane")]
     Close {
         #[arg(short, long)]
         pane: Option<u32>,
     },
     /// Zoom or unzoom the focused pane
+    #[command(visible_alias = "toggle-fullscreen")]
     Zoom,
     /// Move the focused pane's nearest border
     Resize {
@@ -126,6 +131,7 @@ enum ActionCmd {
     /// Rename the current tab
     RenameTab { name: String },
     /// Type text into a pane (default: the focused one)
+    #[command(visible_alias = "write-chars")]
     Write {
         #[arg(short, long)]
         pane: Option<u32>,

@@ -5,9 +5,11 @@ mod copy;
 mod editor;
 mod finder;
 mod input;
+mod keys;
 pub mod layout;
 mod pane;
 mod render;
+mod scroll;
 
 use std::collections::HashMap;
 use std::fs;
@@ -26,12 +28,10 @@ use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::TermMode;
 use anyhow::{Context, bail};
 use base64::Engine;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line as TextLine;
-use ratatui::widgets::{Block, Clear, Paragraph, Widget};
 
 use crate::protocol::{
     self, ClientKind, ClientMsg, Command, Direction, FocusTarget, InputEvent, PROTOCOL_VERSION, PaneId, ServerMsg,
@@ -42,7 +42,7 @@ use copy::CopyState;
 use finder::{Action, Finder, FinderEvent};
 use layout::{Layout, Node};
 use pane::{SpawnOptions, TermPane};
-use render::{Cursor, TermDecor, draw_separators, draw_term, encode_frame, fill, put_str};
+use render::{Cursor, TermDecor, draw_frame, draw_separators, draw_term, encode_frame, fill, put_str};
 
 /// Everything the main loop reacts to.
 pub enum Ev {
@@ -61,6 +61,9 @@ type TabZone = (u16, u16, Option<usize>);
 /// Shortest time between two frames sent to a client.
 const FRAME: Duration = Duration::from_millis(8);
 const MESSAGE_TIME: Duration = Duration::from_secs(3);
+/// How often to redraw anyway, so names that follow the running program stay current. Starting a program
+/// prints nothing, and a redraw that changes nothing sends nothing.
+const REFRESH: Duration = Duration::from_millis(500);
 
 struct Client {
     tx: SyncSender<ServerMsg>,
@@ -80,23 +83,54 @@ enum Pane {
 }
 
 struct Tab {
+    /// Stays the same when tabs move, unlike the index.
+    id: u32,
     name: String,
     /// Name the tab after its focused program until the user renames it.
     auto_name: bool,
     root: Node,
     focus: PaneId,
     zoomed: bool,
+    /// Typing goes to every terminal pane in the tab.
+    sync: bool,
+}
+
+/// zellij's input modes. See `keys.rs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Modal {
+    Normal,
+    Locked,
+    Pane,
+    Tab,
+    Resize,
+    Move,
+    Scroll,
+    Search,
+    Session,
+    Tmux,
 }
 
 enum Mode {
-    Normal,
-    /// Ctrl+B was pressed; the next key is a command.
-    Prefix,
-    ConfirmClose(PaneId),
+    Modal(Modal),
+    /// Typing a search term (scroll mode, then `s`).
+    EnterSearch(String),
+    /// Renaming the active tab. The name changes as you type; Esc puts the old one back.
+    RenameTab {
+        old: String,
+        old_auto: bool,
+    },
+    /// Renaming a pane, likewise.
+    RenamePane {
+        pane: PaneId,
+        old: Option<String>,
+    },
+    /// Selecting with vi keys (scroll mode, then `v`).
+    Select(CopyState),
+    ConfirmQuit,
     Help,
-    Rename(String),
-    Copy(CopyState),
 }
+
+const NORMAL: Mode = Mode::Modal(Modal::Normal);
 
 enum Drag {
     Border { path: Vec<bool>, area: Rect, vertical: bool },
@@ -124,6 +158,16 @@ pub struct Server {
     message: Option<(String, Instant)>,
     last_click: Option<(Instant, PaneId, Point, u8)>,
     started: Instant,
+    /// Draw a box around each pane (zellij's pane frames); off draws separator lines between panes.
+    frames: bool,
+    /// Names given with "rename pane".
+    pane_names: HashMap<PaneId, String>,
+    next_tab_id: u32,
+    /// The tab shown before the current one (by id), for "last tab".
+    last_tab: Option<u32>,
+    search: Option<scroll::Search>,
+    /// Scrollback editors: editor pane → (the pane it stands in for, the temporary file).
+    scrollback: HashMap<PaneId, (PaneId, PathBuf)>,
 }
 
 fn peer_is_us(stream: &UnixStream) -> bool {
@@ -184,7 +228,7 @@ impl Server {
             active: 0,
             size: (80, 24),
             active_client: None,
-            mode: Mode::Normal,
+            mode: NORMAL,
             drag: None,
             dirty: false,
             quit: false,
@@ -192,11 +236,18 @@ impl Server {
             message: None,
             last_click: None,
             started: Instant::now(),
+            frames: true,
+            pane_names: HashMap::new(),
+            next_tab_id: 0,
+            last_tab: None,
+            search: None,
+            scrollback: HashMap::new(),
         }
     }
 
     fn main_loop(&mut self, rx: Receiver<Ev>) {
         let mut last_render = Instant::now() - FRAME;
+        let mut last_refresh = Instant::now();
         loop {
             let timeout =
                 if self.dirty { FRAME.saturating_sub(last_render.elapsed()) } else { Duration::from_millis(500) };
@@ -219,6 +270,10 @@ impl Server {
             }
             if self.quit {
                 break;
+            }
+            if last_refresh.elapsed() >= REFRESH {
+                last_refresh = Instant::now();
+                self.dirty = true;
             }
             if self.dirty && last_render.elapsed() >= FRAME {
                 self.render_all();
@@ -439,8 +494,13 @@ impl Server {
         if tab.zoomed {
             Layout { panes: vec![(tab.focus, area)], separators: Vec::new() }
         } else {
-            tab.root.layout(area)
+            tab.root.layout(area, self.frames)
         }
+    }
+
+    /// Where a terminal pane's program draws inside the pane's `rect`: inside its frame, if any.
+    fn body(&self, rect: Rect) -> Rect {
+        if self.frames { layout::inner(rect) } else { rect }
     }
 
     /// Gives every pane in every tab the size its layout says.
@@ -450,7 +510,7 @@ impl Server {
             .tabs
             .iter()
             .flat_map(|t| {
-                let mut panes = t.root.layout(area).panes;
+                let mut panes = t.root.layout(area, self.frames).panes;
                 if t.zoomed {
                     for (id, r) in &mut panes {
                         if *id == t.focus {
@@ -468,12 +528,14 @@ impl Server {
     }
 
     fn resize_pane(&mut self, id: PaneId, rect: Rect) {
+        let (frames, body) = (self.frames, self.body(rect));
         let editor = match self.panes.get_mut(&id) {
             Some(Pane::Term(p)) => {
-                p.resize(rect.width, rect.height);
+                p.resize(body.width, body.height);
                 None
             }
             Some(Pane::Finder(f)) => {
+                f.frames = frames;
                 f.resize(rect);
                 f.editor.map(|e| (e, f.body_rect(rect)))
             }
@@ -522,15 +584,35 @@ impl Server {
         Ok(id)
     }
 
-    fn push_tab(&mut self, name: Option<String>, id: PaneId) {
-        self.tabs.push(Tab {
+    fn make_tab(&mut self, name: Option<String>, id: PaneId) -> Tab {
+        self.next_tab_id += 1;
+        Tab {
+            id: self.next_tab_id,
             auto_name: name.is_none(),
             name: name.unwrap_or_else(|| "shell".into()),
             root: Node::Leaf(id),
             focus: id,
             zoomed: false,
-        });
+            sync: false,
+        }
+    }
+
+    /// A finder keeps its name when it moves to a tab of its own.
+    fn tab_name_for(&self, id: PaneId) -> Option<String> {
+        matches!(self.panes.get(&id), Some(Pane::Finder(_))).then(|| "finder".to_owned())
+    }
+
+    fn remember_tab(&mut self) {
+        if let Some(t) = self.tabs.get(self.active) {
+            self.last_tab = Some(t.id);
+        }
+    }
+
+    fn push_tab(&mut self, name: Option<String>, id: PaneId) {
+        let tab = self.make_tab(name, id);
+        self.tabs.push(tab);
         let old = self.focused_pane();
+        self.remember_tab();
         self.active = self.tabs.len() - 1;
         self.had_tabs = true;
         self.focus_changed(old, Some(id));
@@ -545,7 +627,7 @@ impl Server {
 
     fn new_finder_tab(&mut self, dir: PathBuf) -> PaneId {
         let id = self.alloc_pane();
-        let finder = Finder::new(id, dir, self.content_area(), self.tx.clone());
+        let finder = Finder::new(id, dir, self.content_area(), self.frames, self.tx.clone());
         self.panes.insert(id, Pane::Finder(Box::new(finder)));
         self.push_tab(Some("finder".into()), id);
         id
@@ -553,14 +635,91 @@ impl Server {
 
     fn split(&mut self, dir: SplitDir, opts: SpawnOptions) -> std::io::Result<PaneId> {
         let Some(target) = self.focused_pane() else { return self.new_tab(None, opts) };
+        self.split_at(target, dir, opts)
+    }
+
+    /// Splits pane `target` in the active tab; the new pane gets focus.
+    fn split_at(&mut self, target: PaneId, dir: SplitDir, opts: SpawnOptions) -> std::io::Result<PaneId> {
+        let rect = self.tabs[self.active].root.layout(self.content_area(), self.frames).rect_of(target);
+        if !rect.is_some_and(|r| layout::can_split(r, dir, self.frames)) {
+            return Err(std::io::Error::other("not enough room to split this pane"));
+        }
         let id = self.spawn_term(opts)?;
         let tab = &mut self.tabs[self.active];
         tab.root.split(target, id, dir);
-        tab.focus = id;
+        let old = std::mem::replace(&mut tab.focus, id);
         tab.zoomed = false;
-        self.focus_changed(Some(target), Some(id));
+        self.focus_changed(Some(old), Some(id));
         self.apply_layout();
         Ok(id)
+    }
+
+    fn cwd_opts(&self) -> SpawnOptions {
+        SpawnOptions { cwd: self.focused_cwd(), ..SpawnOptions::default() }
+    }
+
+    /// Splits the focused pane (keys), showing any error on the status bar.
+    fn split_here(&mut self, dir: SplitDir) {
+        if let Err(e) = self.split(dir, self.cwd_opts()) {
+            self.flash(format!("{e}"));
+        }
+    }
+
+    /// Where a new pane fits in tab `ti`: its biggest pane, split along its longer side.
+    fn room_in_tab(&self, ti: usize) -> Option<(PaneId, SplitDir)> {
+        let tab = self.tabs.get(ti)?;
+        let mut best: Option<(u32, PaneId, Rect)> = None;
+        for (id, r) in tab.root.layout(self.content_area(), self.frames).panes {
+            let area = u32::from(r.width) * u32::from(r.height);
+            let better = match best {
+                None => true,
+                // Ties go to the focused pane.
+                Some((a, _, _)) => area > a || (area == a && id == tab.focus),
+            };
+            if better {
+                best = Some((area, id, r));
+            }
+        }
+        let (_, id, r) = best?;
+        // Cells are about twice as tall as they are wide.
+        let wide = u32::from(r.width) > 2 * u32::from(r.height);
+        let order = if wide { [SplitDir::Right, SplitDir::Down] } else { [SplitDir::Down, SplitDir::Right] };
+        order.into_iter().find(|d| layout::can_split(r, *d, self.frames)).map(|d| (id, d))
+    }
+
+    /// zellij's "new pane": splits wherever there's the most room.
+    fn new_pane(&mut self) {
+        if self.tabs.is_empty() {
+            return;
+        }
+        if self.tabs[self.active].zoomed {
+            self.tabs[self.active].zoomed = false;
+            self.apply_layout();
+        }
+        let Some((target, dir)) = self.room_in_tab(self.active) else {
+            self.flash("not enough room for a new pane");
+            return;
+        };
+        if let Err(e) = self.split_at(target, dir, self.cwd_opts()) {
+            self.flash(format!("failed: {e}"));
+        }
+    }
+
+    fn new_tab_here(&mut self) {
+        if let Err(e) = self.new_tab(None, self.cwd_opts()) {
+            self.flash(format!("failed: {e}"));
+        }
+    }
+
+    fn open_finder_tab(&mut self) {
+        let dir = self.focused_cwd().or_else(|| std::env::current_dir().ok()).unwrap_or_else(|| "/".into());
+        self.new_finder_tab(dir);
+    }
+
+    fn close_focused(&mut self) {
+        if let Some(id) = self.focused_pane() {
+            self.close_pane(id);
+        }
     }
 
     fn editor_owner(&self, id: PaneId) -> Option<PaneId> {
@@ -580,8 +739,12 @@ impl Server {
             }
             None => {}
         }
-        if matches!(&self.mode, Mode::Copy(c) if c.pane == id) {
-            self.mode = Mode::Normal;
+        self.pane_names.remove(&id);
+        let selecting = matches!(&self.mode, Mode::Select(c) if c.pane == id);
+        let searching = self.search.as_ref().is_some_and(|s| s.pane == id);
+        if selecting || searching {
+            self.search = None;
+            self.mode = NORMAL;
         }
     }
 
@@ -597,6 +760,23 @@ impl Server {
             }
             self.apply_layout();
             return;
+        }
+        // A scrollback editor gives its place back to the pane it stood in for.
+        if let Some((orig, path)) = self.scrollback.remove(&id) {
+            let _ = fs::remove_file(&path);
+            if self.panes.contains_key(&orig)
+                && let Some(tab) = self.tabs.iter_mut().find(|t| t.root.contains(id))
+            {
+                tab.root.replace(id, orig);
+                if tab.focus == id {
+                    tab.focus = orig;
+                }
+                self.drop_pane(id);
+                let focus = self.focused_pane();
+                self.focus_changed(None, focus);
+                self.apply_layout();
+                return;
+            }
         }
         let tab_index = self.tabs.iter().position(|t| t.root.contains(id));
         self.drop_pane(id);
@@ -658,7 +838,9 @@ impl Server {
         let current = tab.focus;
         let next = match target {
             FocusTarget::Pane(id) => Some(id),
-            FocusTarget::Dir(d) => layout::neighbor(&tab.root.layout(self.content_area()).panes, current, d),
+            FocusTarget::Dir(d) => {
+                layout::neighbor(&tab.root.layout(self.content_area(), self.frames).panes, current, d)
+            }
             FocusTarget::Next | FocusTarget::Prev => {
                 let panes = tab.root.panes();
                 let i = panes.iter().position(|p| *p == current).unwrap_or(0);
@@ -676,9 +858,60 @@ impl Server {
         }
     }
 
+    /// Moves focus left or right, or to the neighbouring tab at the edge (zellij's MoveFocusOrTab).
+    fn focus_or_tab(&mut self, dir: Direction) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let panes = tab.root.layout(self.content_area(), self.frames).panes;
+        if layout::neighbor(&panes, tab.focus, dir).is_some() {
+            self.focus(FocusTarget::Dir(dir));
+        } else if dir == Direction::Left && self.active > 0 {
+            self.go_to_tab(self.active - 1);
+        } else if dir == Direction::Right {
+            self.go_to_tab(self.active + 1);
+        }
+    }
+
+    /// Next or previous tab, wrapping around.
+    fn cycle_tab(&mut self, next: bool) {
+        let n = self.tabs.len().max(1);
+        self.go_to_tab(if next { (self.active + 1) % n } else { (self.active + n - 1) % n });
+    }
+
+    fn toggle_last_tab(&mut self) {
+        if let Some(i) = self.last_tab.and_then(|id| self.tabs.iter().position(|t| t.id == id)) {
+            self.go_to_tab(i);
+        }
+    }
+
+    /// Moves the active tab one place left or right, wrapping around the ends.
+    fn move_tab(&mut self, right: bool) {
+        let n = self.tabs.len();
+        if n < 2 {
+            return;
+        }
+        let i = self.active;
+        if right && i + 1 < n {
+            self.tabs.swap(i, i + 1);
+            self.active = i + 1;
+        } else if right {
+            let t = self.tabs.remove(i);
+            self.tabs.insert(0, t);
+            self.active = 0;
+        } else if i > 0 {
+            self.tabs.swap(i, i - 1);
+            self.active = i - 1;
+        } else {
+            let t = self.tabs.remove(0);
+            self.tabs.push(t);
+            self.active = n - 1;
+        }
+        self.dirty = true;
+    }
+
     fn go_to_tab(&mut self, index: usize) {
         if index < self.tabs.len() && index != self.active {
             let old = self.focused_pane();
+            self.remember_tab();
             self.active = index;
             let new = self.focused_pane();
             self.focus_changed(old, new);
@@ -694,13 +927,155 @@ impl Server {
     }
 
     fn move_border(&mut self, dir: Direction, cells: u16) {
-        let area = self.content_area();
+        let (area, frames) = (self.content_area(), self.frames);
         if let Some(tab) = self.tabs.get_mut(self.active)
             && !tab.zoomed
-            && tab.root.move_border(tab.focus, dir, cells, area)
+            && tab.root.move_border(tab.focus, dir, cells, area, frames)
         {
             self.apply_layout();
         }
+    }
+
+    /// zellij's resize: grows or shrinks the focused pane on one side, or on every side with `None`. A
+    /// step is 5% of the screen.
+    fn resize_focused(&mut self, side: Option<Direction>, grow: bool) {
+        let (area, frames) = (self.content_area(), self.frames);
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        if tab.zoomed {
+            return;
+        }
+        let sides = match side {
+            Some(d) => vec![d],
+            None => vec![Direction::Left, Direction::Right, Direction::Up, Direction::Down],
+        };
+        let mut changed = false;
+        for d in sides {
+            let cells = match d {
+                Direction::Left | Direction::Right => (area.width / 20).max(1),
+                Direction::Up | Direction::Down => (area.height / 20).max(1),
+            };
+            changed |= tab.root.resize_side(tab.focus, d, grow, cells, area, frames);
+        }
+        if changed {
+            self.apply_layout();
+        }
+    }
+
+    /// Swaps the focused pane with its neighbour in a direction, or the next or previous pane.
+    fn move_pane(&mut self, target: FocusTarget) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let current = tab.focus;
+        let other = match target {
+            FocusTarget::Dir(d) => {
+                layout::neighbor(&tab.root.layout(self.content_area(), self.frames).panes, current, d)
+            }
+            FocusTarget::Next | FocusTarget::Prev => {
+                let panes = tab.root.panes();
+                let i = panes.iter().position(|p| *p == current).unwrap_or(0);
+                let n = panes.len();
+                let j = if target == FocusTarget::Next { (i + 1) % n } else { (i + n - 1) % n };
+                Some(panes[j])
+            }
+            FocusTarget::Pane(id) => Some(id),
+        };
+        if let Some(other) = other.filter(|o| *o != current) {
+            let tab = &mut self.tabs[self.active];
+            tab.root.swap(current, other);
+            tab.zoomed = false;
+            self.apply_layout();
+        }
+    }
+
+    /// Takes the focused pane out of its tab. Returns it, or `None` if it's the tab's only pane.
+    fn take_focused(&mut self) -> Option<PaneId> {
+        let tab = self.tabs.get_mut(self.active)?;
+        if tab.root.panes().len() < 2 {
+            return None;
+        }
+        let id = tab.focus;
+        tab.root.remove(id);
+        tab.zoomed = false;
+        tab.focus = tab.root.panes()[0];
+        Some(id)
+    }
+
+    /// Moves the focused pane to a new tab of its own.
+    fn break_pane(&mut self) {
+        if let Some(id) = self.take_focused() {
+            let name = self.tab_name_for(id);
+            self.push_tab(name, id);
+        }
+    }
+
+    /// Moves the focused pane to the tab on the right or left, or to a new tab there if there's none.
+    fn break_pane_to(&mut self, right: bool) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let id = tab.focus;
+        let alone = tab.root.panes().len() == 1;
+        let target = if right { self.active + 1 } else { self.active.wrapping_sub(1) };
+        let exists = target < self.tabs.len();
+        if alone && !exists {
+            return;
+        }
+        let old = self.focused_pane();
+        self.remember_tab();
+        if alone {
+            self.tabs.remove(self.active);
+        } else {
+            self.take_focused();
+        }
+        let target = if alone && right { target - 1 } else { target };
+        let room = if exists { self.room_in_tab(target) } else { None };
+        if let Some((big, dir)) = room {
+            let t = &mut self.tabs[target];
+            t.root.split(big, id, dir);
+            t.focus = id;
+            t.zoomed = false;
+            self.active = target;
+        } else {
+            // No tab on that side, or no room in it: a new tab on that side.
+            let name = self.tab_name_for(id);
+            let tab = self.make_tab(name, id);
+            let at = match (right, exists) {
+                (true, true) => target,
+                (true, false) => self.tabs.len(),
+                (false, true) => target + 1,
+                (false, false) => 0,
+            };
+            self.tabs.insert(at, tab);
+            self.active = at;
+        }
+        self.focus_changed(old, Some(id));
+        self.apply_layout();
+    }
+
+    /// Closes the active tab and everything in it.
+    fn close_tab(&mut self) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let ids = tab.root.panes();
+        // Panes hidden behind a scrollback editor go too.
+        for id in &ids {
+            if let Some((orig, path)) = self.scrollback.remove(id) {
+                let _ = fs::remove_file(path);
+                self.drop_pane(orig);
+            }
+        }
+        for id in ids {
+            self.close_pane(id);
+        }
+    }
+
+    fn toggle_sync(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            tab.sync = !tab.sync;
+            let state = if tab.sync { "typing goes to every pane in this tab" } else { "sync off" };
+            self.flash(state);
+        }
+    }
+
+    fn toggle_frames(&mut self) {
+        self.frames = !self.frames;
+        self.apply_layout();
     }
 
     fn open_editor(&mut self, finder_id: PaneId, path: PathBuf) {
@@ -770,7 +1145,7 @@ impl Server {
             InputEvent::Key(key) => self.key(client, key),
             InputEvent::Mouse(m) => self.mouse(client, m),
             InputEvent::Paste(text) => {
-                if let Some(p) = self.typing_target().and_then(|id| self.term(id)) {
+                for p in self.typing_targets().iter().filter_map(|id| self.term(*id)) {
                     let mode = *p.term.lock().mode();
                     p.write(input::encode_paste(&text, mode));
                 }
@@ -787,51 +1162,24 @@ impl Server {
         }
     }
 
-    fn key(&mut self, client: ClientId, key: KeyEvent) {
-        if key.kind == KeyEventKind::Release {
-            return;
-        }
-        let is_prefix = key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL;
-        match std::mem::replace(&mut self.mode, Mode::Normal) {
-            Mode::Normal => {
-                if is_prefix {
-                    self.mode = Mode::Prefix;
-                } else {
-                    self.send_key(&key);
-                }
-            }
-            Mode::Prefix => self.prefix_key(client, &key, is_prefix),
-            Mode::ConfirmClose(id) => {
-                if matches!(key.code, KeyCode::Char('y' | 'Y')) {
-                    self.close_pane(id);
-                }
-            }
-            Mode::Help => {}
-            Mode::Rename(mut name) => match key.code {
-                KeyCode::Enter => {
-                    if let Some(tab) = self.tabs.get_mut(self.active) {
-                        tab.auto_name = name.trim().is_empty();
-                        tab.name = if tab.auto_name { "shell".into() } else { name.trim().to_owned() };
-                    }
-                }
-                KeyCode::Esc => {}
-                KeyCode::Backspace => {
-                    name.pop();
-                    self.mode = Mode::Rename(name);
-                }
-                KeyCode::Char(c) => {
-                    name.push(c);
-                    self.mode = Mode::Rename(name);
-                }
-                _ => self.mode = Mode::Rename(name),
-            },
-            Mode::Copy(state) => self.copy_key(client, state, &key),
+    /// Where typing goes: the typing target, or every terminal pane in a synced tab.
+    fn typing_targets(&self) -> Vec<PaneId> {
+        let synced = self.tabs.get(self.active).filter(|t| t.sync && self.term(t.focus).is_some());
+        match synced {
+            Some(tab) => tab.root.panes().into_iter().filter(|id| self.term(*id).is_some()).collect(),
+            None => self.typing_target().into_iter().collect(),
         }
     }
 
     /// Sends a key to whatever has focus: a terminal, a finder, or a finder's editor.
     fn send_key(&mut self, key: &KeyEvent) {
         let Some(id) = self.focused_pane() else { return };
+        if self.tabs.get(self.active).is_some_and(|t| t.sync) && self.term(id).is_some() {
+            for target in self.typing_targets() {
+                self.type_into(target, key);
+            }
+            return;
+        }
         let action = match self.panes.get_mut(&id) {
             Some(Pane::Finder(f)) => match f.editor {
                 Some(editor) => {
@@ -866,106 +1214,6 @@ impl Server {
         }
     }
 
-    fn prefix_key(&mut self, client: ClientId, key: &KeyEvent, is_prefix: bool) {
-        let cwd = || SpawnOptions { cwd: self.focused_cwd(), ..SpawnOptions::default() };
-        let result: std::io::Result<()> = match key.code {
-            _ if is_prefix => {
-                if let Some(p) = self.typing_target().and_then(|id| self.term(id)) {
-                    p.write(vec![0x02]);
-                }
-                Ok(())
-            }
-            KeyCode::Char('c') => self.new_tab(None, cwd()).map(drop),
-            KeyCode::Char('n') => {
-                self.go_to_tab((self.active + 1) % self.tabs.len().max(1));
-                Ok(())
-            }
-            KeyCode::Char('p') => {
-                let n = self.tabs.len().max(1);
-                self.go_to_tab((self.active + n - 1) % n);
-                Ok(())
-            }
-            KeyCode::Char(d @ '1'..='9') => {
-                self.go_to_tab(usize::from(d as u8 - b'1'));
-                Ok(())
-            }
-            KeyCode::Char('%' | '|') => self.split(SplitDir::Right, cwd()).map(drop),
-            KeyCode::Char('"' | '-') => self.split(SplitDir::Down, cwd()).map(drop),
-            KeyCode::Left | KeyCode::Char('h') => {
-                self.focus(FocusTarget::Dir(Direction::Left));
-                Ok(())
-            }
-            KeyCode::Right | KeyCode::Char('l') => {
-                self.focus(FocusTarget::Dir(Direction::Right));
-                Ok(())
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.focus(FocusTarget::Dir(Direction::Up));
-                Ok(())
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.focus(FocusTarget::Dir(Direction::Down));
-                Ok(())
-            }
-            KeyCode::Char('o') => {
-                self.focus(FocusTarget::Next);
-                Ok(())
-            }
-            KeyCode::Char('H') => {
-                self.move_border(Direction::Left, 2);
-                Ok(())
-            }
-            KeyCode::Char('L') => {
-                self.move_border(Direction::Right, 2);
-                Ok(())
-            }
-            KeyCode::Char('K') => {
-                self.move_border(Direction::Up, 1);
-                Ok(())
-            }
-            KeyCode::Char('J') => {
-                self.move_border(Direction::Down, 1);
-                Ok(())
-            }
-            KeyCode::Char('x') => {
-                if let Some(id) = self.focused_pane() {
-                    self.mode = Mode::ConfirmClose(id);
-                }
-                Ok(())
-            }
-            KeyCode::Char('z') => {
-                self.toggle_zoom();
-                Ok(())
-            }
-            KeyCode::Char('d') => {
-                self.detach(client);
-                Ok(())
-            }
-            KeyCode::Char('[') => {
-                self.enter_copy_mode();
-                Ok(())
-            }
-            KeyCode::Char('f') => {
-                let dir = self.focused_cwd().or_else(|| std::env::current_dir().ok()).unwrap_or_else(|| "/".into());
-                self.new_finder_tab(dir);
-                Ok(())
-            }
-            KeyCode::Char(',') => {
-                let name = self.tabs.get(self.active).map(|t| t.name.clone()).unwrap_or_default();
-                self.mode = Mode::Rename(name);
-                Ok(())
-            }
-            KeyCode::Char('?') => {
-                self.mode = Mode::Help;
-                Ok(())
-            }
-            _ => Ok(()),
-        };
-        if let Err(e) = result {
-            self.flash(format!("failed: {e}"));
-        }
-    }
-
     fn mouse(&mut self, client: ClientId, ev: MouseEvent) {
         let (x, y) = (ev.column, ev.row);
         if self.mouse_drag(client, &ev) {
@@ -977,12 +1225,7 @@ impl Server {
                     self.clients.get(&client).and_then(|c| c.tab_zones.iter().find(|z| x >= z.0 && x < z.1).copied());
                 match zone {
                     Some((_, _, Some(i))) => self.go_to_tab(i),
-                    Some((_, _, None)) => {
-                        let opts = SpawnOptions { cwd: self.focused_cwd(), ..SpawnOptions::default() };
-                        if let Err(e) = self.new_tab(None, opts) {
-                            self.flash(format!("failed: {e}"));
-                        }
-                    }
+                    Some((_, _, None)) => self.new_tab_here(),
                     None => {}
                 }
             }
@@ -1014,7 +1257,13 @@ impl Server {
                     self.open_editor(id, path);
                 }
             }
-            Some(Pane::Term(_)) => self.term_mouse(client, id, rect, &ev),
+            Some(Pane::Term(_)) => {
+                // A click on the frame only focuses.
+                let body = self.body(rect);
+                if layout::contains(body, x, y) {
+                    self.term_mouse(client, id, body, &ev);
+                }
+            }
             None => {}
         }
     }
@@ -1031,9 +1280,8 @@ impl Server {
         match drag {
             Drag::Border { path, area, vertical } => {
                 if moving {
-                    let (pos, start, len) =
-                        if vertical { (ev.column, area.x, area.width) } else { (ev.row, area.y, area.height) };
-                    let ratio = f32::from(pos.saturating_sub(start)) / f32::from(len.saturating_sub(1).max(1));
+                    let pos = if vertical { ev.column } else { ev.row };
+                    let ratio = layout::drag_ratio(pos, area, vertical, self.frames);
                     if let Some(tab) = self.tabs.get_mut(self.active) {
                         tab.root.set_ratio(&path, ratio);
                     }
@@ -1274,7 +1522,10 @@ impl Server {
         for (ti, tab) in self.tabs.iter().enumerate() {
             let layout = self.tab_layout(tab);
             for id in tab.root.panes() {
-                let rect = layout.rect_of(id).unwrap_or_default();
+                let mut rect = layout.rect_of(id).unwrap_or_default();
+                if matches!(self.panes.get(&id), Some(Pane::Term(_))) {
+                    rect = self.body(rect);
+                }
                 let focused = ti == self.active && tab.focus == id;
                 let (kind, title, cwd, editor) = match self.panes.get(&id) {
                     Some(Pane::Term(p)) => ("terminal", p.display_title(), p.cwd(), None),
@@ -1287,6 +1538,7 @@ impl Server {
                     "tab_name": self.tab_label(tab),
                     "kind": kind,
                     "title": title,
+                    "name": self.pane_names.get(&id),
                     "focused": focused,
                     "visible": ti == self.active && (!tab.zoomed || tab.focus == id),
                     "x": rect.x, "y": rect.y, "cols": rect.width, "rows": rect.height,
@@ -1352,16 +1604,27 @@ impl Server {
             fill(&mut buf, content, " ", Style::default());
         }
         let mut cursor = None;
-        let cursor_allowed = matches!(self.mode, Mode::Normal | Mode::Prefix | Mode::Copy(_));
+        let cursor_allowed = match &self.mode {
+            Mode::Modal(m) => !matches!(m, Modal::Scroll | Modal::Search),
+            Mode::Select(_) => true,
+            _ => false,
+        };
+        // zellij colours the focused frame green, and differently while a mode is active.
+        let accent = match self.mode {
+            Mode::Modal(Modal::Normal | Modal::Locked) => Color::Green,
+            _ => Color::Yellow,
+        };
         if let Some(tab) = self.tabs.get(self.active) {
             let layout = self.tab_layout(tab);
             for (id, rect) in &layout.panes {
                 let focused = *id == tab.focus;
-                if let Some(c) = self.draw_pane(&mut buf, *id, *rect, focused, focused && cursor_allowed) {
+                if let Some(c) = self.draw_pane(&mut buf, *id, *rect, focused, focused && cursor_allowed, accent) {
                     cursor = Some(c);
                 }
             }
-            draw_separators(&mut buf, &layout.separators, layout.rect_of(tab.focus));
+            if !self.frames {
+                draw_separators(&mut buf, &layout.separators, layout.rect_of(tab.focus));
+            }
         }
         if rows >= 2 {
             self.draw_status(&mut buf, rows - 1);
@@ -1375,18 +1638,64 @@ impl Server {
         (buf, cursor, zones)
     }
 
-    fn draw_pane(&self, buf: &mut Buffer, id: PaneId, rect: Rect, focused: bool, show_cursor: bool) -> Option<Cursor> {
+    /// A pane's frame title: its name if it was renamed, otherwise its title or program.
+    fn pane_title(&self, id: PaneId) -> String {
+        if let Mode::RenamePane { pane, .. } = &self.mode
+            && *pane == id
+        {
+            return format!("{}▏", self.pane_names.get(&id).map_or("", String::as_str));
+        }
+        if let Some(name) = self.pane_names.get(&id).filter(|n| !n.is_empty()) {
+            return name.clone();
+        }
+        match self.panes.get(&id) {
+            Some(Pane::Term(p)) => p.display_title(),
+            Some(Pane::Finder(f)) => finder::home_relative(&f.dir),
+            None => String::new(),
+        }
+    }
+
+    fn draw_pane(
+        &self,
+        buf: &mut Buffer,
+        id: PaneId,
+        rect: Rect,
+        focused: bool,
+        show_cursor: bool,
+        accent: Color,
+    ) -> Option<Cursor> {
         match self.panes.get(&id)? {
             Pane::Term(p) => {
-                let search_match = match &self.mode {
-                    Mode::Copy(c) if c.pane == id => c.last_match.as_ref(),
-                    _ => None,
+                let body = self.body(rect);
+                let (scroll, others) = {
+                    let term = p.term.lock();
+                    let offset = term.grid().display_offset();
+                    let scroll = (offset > 0).then(|| format!("SCROLL: {offset}/{}", term.grid().history_size()));
+                    let others = match &self.search {
+                        Some(s) if s.pane == id => s.visible(&term),
+                        _ => Vec::new(),
+                    };
+                    (scroll, others)
                 };
-                draw_term(buf, rect, p, &TermDecor { show_cursor, search_match })
+                if self.frames {
+                    let style = if focused {
+                        Style::default().fg(accent).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    draw_frame(buf, rect, &self.pane_title(id), scroll.as_deref().unwrap_or(""), style);
+                }
+                let search_match = match &self.mode {
+                    Mode::Select(c) if c.pane == id => c.last_match.as_ref(),
+                    _ => self.search.as_ref().filter(|s| s.pane == id).and_then(|s| s.current.as_ref()),
+                };
+                let decor =
+                    TermDecor { show_cursor, search_match, other_matches: &others, scroll_overlay: !self.frames };
+                draw_term(buf, body, p, &decor)
             }
             Pane::Finder(f) => {
                 let editor = f.editor.and_then(|e| self.term(e));
-                f.render(buf, rect, focused, editor).filter(|_| show_cursor)
+                f.render(buf, rect, focused, accent, editor).filter(|_| show_cursor)
             }
         }
     }
@@ -1399,9 +1708,12 @@ impl Server {
         let active = Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD);
         let session = format!(" {} ", self.name);
         let right = width.saturating_sub(session.len() as u16);
+        let renaming = matches!(self.mode, Mode::RenameTab { .. });
         for (i, tab) in self.tabs.iter().enumerate() {
-            let zoom = if tab.zoomed { " ⤢" } else { "" };
-            let label = format!(" {} {}{zoom} ", i + 1, self.tab_label(tab));
+            let zoom = if tab.zoomed { " (FULLSCREEN)" } else { "" };
+            let sync = if tab.sync { " (SYNC)" } else { "" };
+            let name = if renaming && i == self.active { format!("{}▏", tab.name) } else { self.tab_label(tab) };
+            let label = format!(" {} {name}{zoom}{sync} ", i + 1);
             let style = if i == self.active { active } else { normal };
             let w = put_str(buf, x, 0, &label, style, right.saturating_sub(x));
             zones.push((x, x + w, Some(i)));
@@ -1416,107 +1728,6 @@ impl Server {
         }
         put_str(buf, right, 0, &session, Style::default().fg(Color::Black).bg(Color::Blue), width - right);
         zones
-    }
-
-    fn draw_status(&self, buf: &mut Buffer, y: u16) {
-        let width = buf.area.width;
-        let badge = |bg: Color| Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD);
-        let focused_title = || -> String {
-            let Some(id) = self.focused_pane() else { return String::new() };
-            match self.panes.get(&id) {
-                Some(Pane::Term(p)) => p.display_title(),
-                Some(Pane::Finder(f)) => finder::home_relative(&f.dir),
-                None => String::new(),
-            }
-        };
-        let finder_hint = || match self.focused_pane().and_then(|id| self.panes.get(&id)) {
-            Some(Pane::Finder(f)) => Some(f.hint()),
-            _ => None,
-        };
-        let (left, left_style, right): (String, Style, String) = match &self.mode {
-            Mode::Normal => {
-                let zoom = if self.tabs.get(self.active).is_some_and(|t| t.zoomed) { " [zoomed]" } else { "" };
-                let hint = finder_hint().map(|h| format!("{h} · ")).unwrap_or_default();
-                (format!(" {}{zoom} ", focused_title()), badge(Color::Green), format!("{hint}Ctrl+B ? help "))
-            },
-            Mode::Prefix => (
-                " Ctrl+B ".into(),
-                badge(Color::Yellow),
-                "c tab · n/p next/prev · | split · - split down · arrows focus · x close · z zoom · [ copy · f finder · d detach · ? help ".into(),
-            ),
-            Mode::ConfirmClose(id) => (format!(" close pane {id}? y/n "), badge(Color::Red), String::new()),
-            Mode::Help => (" help ".into(), badge(Color::Cyan), "any key closes ".into()),
-            Mode::Rename(name) => (format!(" rename tab: {name}▏"), badge(Color::Yellow), "Enter save · Esc cancel ".into()),
-            Mode::Copy(c) => match &c.input {
-                Some((backward, text)) => {
-                    (format!(" {}{text}▏", if *backward { '?' } else { '/' }), badge(Color::Magenta), "Enter search · Esc cancel ".into())
-                },
-                None => (
-                    " COPY ".into(),
-                    badge(Color::Magenta),
-                    "hjkl/w/b move · v V select · y copy · / ? search · n N next · q quit ".into(),
-                ),
-            },
-        };
-        let w = put_str(buf, 0, y, &left, left_style, width);
-        if let Some((msg, _)) = &self.message {
-            put_str(buf, w + 1, y, msg, Style::default().fg(Color::Yellow), width.saturating_sub(w + 1));
-            return;
-        }
-        // Drop whole hints from the left until the rest fits.
-        let room = usize::from(width.saturating_sub(w + 1));
-        let mut hints: Vec<&str> = right.split(" · ").collect();
-        while hints.len() > 1 && hints.join(" · ").chars().count() > room {
-            hints.remove(0);
-        }
-        let shown = hints.join(" · ");
-        let rw = (shown.chars().count() as u16).min(room as u16);
-        if rw > 0 {
-            put_str(buf, width - rw, y, &shown, Style::default().fg(Color::DarkGray), rw);
-        }
-    }
-
-    fn draw_help(&self, buf: &mut Buffer) {
-        const KEYS: &[(&str, &str)] = &[
-            ("c", "new tab"),
-            ("n / p, 1-9", "next / previous tab, go to tab"),
-            (",", "rename tab"),
-            ("| or %", "split right"),
-            ("- or \"", "split down"),
-            ("arrows, h j k l", "move focus"),
-            ("o", "next pane"),
-            ("H J K L", "move the border (resize)"),
-            ("z", "zoom the pane"),
-            ("x", "close the pane"),
-            ("[", "copy mode (scroll back, select, search)"),
-            ("f", "open a finder tab"),
-            ("d", "detach (the session keeps running)"),
-            ("Ctrl+B", "send Ctrl+B to the program"),
-        ];
-        let area = buf.area;
-        let width = 64.min(area.width);
-        let height = (KEYS.len() as u16 + 6).min(area.height);
-        let rect = Rect::new((area.width - width) / 2, (area.height - height) / 2, width, height);
-        let mut lines: Vec<TextLine> = KEYS
-            .iter()
-            .map(|(k, d)| {
-                TextLine::from(vec![
-                    ratatui::text::Span::styled(format!("  {k:<16}"), Style::default().fg(Color::Yellow)),
-                    ratatui::text::Span::raw(*d),
-                ])
-            })
-            .collect();
-        lines.push(TextLine::default());
-        lines.push(TextLine::styled(
-            "  Mouse: click to focus, drag borders, wheel scrolls back,",
-            Style::default().fg(Color::DarkGray),
-        ));
-        lines.push(TextLine::styled(
-            "  drag to select and copy (Shift if the program uses the mouse).",
-            Style::default().fg(Color::DarkGray),
-        ));
-        Clear.render(rect, buf);
-        Paragraph::new(lines).block(Block::bordered().title(" keys after Ctrl+B ")).render(rect, buf);
     }
 }
 

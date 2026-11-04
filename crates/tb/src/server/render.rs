@@ -83,8 +83,12 @@ pub fn cell_style(cell: &Cell) -> Style {
 pub struct TermDecor<'a> {
     /// Show the program's cursor (only for the focused pane).
     pub show_cursor: bool,
-    /// A search match to highlight (copy mode).
+    /// The current search match, drawn brightest.
     pub search_match: Option<&'a Match>,
+    /// Other search matches on screen.
+    pub other_matches: &'a [Match],
+    /// Show the scroll position over the pane's top-right corner (when no frame shows it).
+    pub scroll_overlay: bool,
 }
 
 /// Draws a terminal pane into `rect`. Returns the cursor position if it should be shown.
@@ -97,6 +101,7 @@ pub fn draw_term(buf: &mut Buffer, rect: Rect, pane: &TermPane, decor: &TermDeco
     let offset = content.display_offset as i32;
     let selection = content.selection;
     let in_match = |p: Point| decor.search_match.is_some_and(|m| m.contains(&p));
+    let in_other = |p: Point| decor.other_matches.iter().any(|m| m.contains(&p));
     for indexed in content.display_iter {
         let line = indexed.point.line.0 + offset;
         let col = indexed.point.column.0;
@@ -115,6 +120,8 @@ pub fn draw_term(buf: &mut Buffer, rect: Rect, pane: &TermPane, decor: &TermDeco
         }
         if in_match(indexed.point) {
             style = style.fg(Color::Black).bg(Color::Yellow).remove_modifier(Modifier::REVERSED);
+        } else if in_other(indexed.point) {
+            style = style.fg(Color::Black).bg(Color::Cyan).remove_modifier(Modifier::REVERSED);
         }
         let wide_at_edge = cell.flags.contains(Flags::WIDE_CHAR) && col + 1 >= usize::from(rect.width);
         if cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) || wide_at_edge || cell.c == '\0' {
@@ -130,7 +137,7 @@ pub fn draw_term(buf: &mut Buffer, rect: Rect, pane: &TermPane, decor: &TermDeco
     }
 
     // Scrollback position indicator.
-    if offset > 0 {
+    if offset > 0 && decor.scroll_overlay {
         let label = format!(" {}/{} ", offset, term.grid().history_size());
         let x = rect.x + rect.width.saturating_sub(label.len() as u16);
         put_str(buf, x, rect.y, &label, Style::default().fg(Color::Black).bg(Color::Yellow), rect.width);
@@ -146,6 +153,52 @@ pub fn draw_term(buf: &mut Buffer, rect: Rect, pane: &TermPane, decor: &TermDeco
         y: rect.y + line as u16,
         shape: content.cursor.shape,
     })
+}
+
+/// Draws a pane frame: a box with `title` at the left of the top border and `right` at its right end.
+pub fn draw_frame(buf: &mut Buffer, rect: Rect, title: &str, right: &str, style: Style) {
+    let rect = rect.intersection(buf.area);
+    if rect.width < 2 || rect.height < 2 {
+        return;
+    }
+    let (x0, y0, x1, y1) = (rect.x, rect.y, rect.right() - 1, rect.bottom() - 1);
+    let line = style.remove_modifier(Modifier::BOLD);
+    let mut set = |x: u16, y: u16, sym: &str| {
+        if let Some(c) = buf.cell_mut((x, y)) {
+            c.set_symbol(sym).set_style(line);
+        }
+    };
+    for x in x0 + 1..x1 {
+        set(x, y0, "─");
+        set(x, y1, "─");
+    }
+    for y in y0 + 1..y1 {
+        set(x0, y, "│");
+        set(x1, y, "│");
+    }
+    set(x0, y0, "┌");
+    set(x1, y0, "┐");
+    set(x0, y1, "└");
+    set(x1, y1, "┘");
+    // "┌ title ──── right ┐": both labels sit between the corners with a space either side.
+    let room = rect.width.saturating_sub(2);
+    let right = format!(" {right} ");
+    let right_w = right.chars().count() as u16;
+    let right_w = if right.trim().is_empty() || right_w + 8 > room { 0 } else { right_w };
+    if right_w > 0 {
+        put_str(buf, x1 - right_w, y0, &right, line, right_w);
+    }
+    if !title.is_empty() {
+        let max = room.saturating_sub(right_w + 1);
+        if max >= 3 {
+            let title = format!(" {title} ");
+            let w = put_str(buf, x0 + 1, y0, &title, style, max);
+            // A cut-off title ends in "…" instead of mid-word.
+            if usize::from(w) < title.chars().count() && w > 1 {
+                put_str(buf, x0 + w, y0, "…", style, 1);
+            }
+        }
+    }
 }
 
 /// Writes `s` at (x, y), clipped to `max` columns. Returns the width written.

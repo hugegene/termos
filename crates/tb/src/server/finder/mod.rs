@@ -18,8 +18,9 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
 use super::Ev;
+use super::layout::inner;
 use super::pane::TermPane;
-use super::render::{Cursor, TermDecor, draw_term, fill, put_str};
+use super::render::{Cursor, TermDecor, draw_frame, draw_term, fill, put_str};
 use crate::protocol::PaneId;
 use view::{Body, View};
 
@@ -67,6 +68,8 @@ pub struct Finder {
     pub editor: Option<PaneId>,
     pub editing: Option<PathBuf>,
     rect: Rect,
+    /// Draw the list and the preview in boxes (zellij-style pane frames) instead of a separator line.
+    pub frames: bool,
     requests: Sender<Request>,
     watcher: Option<notify::RecommendedWatcher>,
     pending_g: bool,
@@ -120,7 +123,7 @@ pub fn home_relative(p: &Path) -> String {
 }
 
 impl Finder {
-    pub fn new(id: PaneId, dir: PathBuf, rect: Rect, tx: Sender<Ev>) -> Self {
+    pub fn new(id: PaneId, dir: PathBuf, rect: Rect, frames: bool, tx: Sender<Ev>) -> Self {
         let mut f = Finder {
             dir: dir.clone(),
             entries: Vec::new(),
@@ -140,6 +143,7 @@ impl Finder {
             editor: None,
             editing: None,
             rect,
+            frames,
             requests: spawn_worker(id, tx.clone()),
             watcher: watcher(id, tx),
             pending_g: false,
@@ -152,13 +156,21 @@ impl Finder {
 
     // ----- layout -----
 
-    /// (list, separator, preview) areas inside `rect`. In a narrow pane one side gets everything.
+    /// (list, separator, preview) areas inside `rect`. In a narrow pane one side gets everything. With
+    /// frames the two boxes touch and there is no separator.
     fn areas(&self, rect: Rect) -> (Rect, Option<Rect>, Rect) {
         if rect.width < NARROW {
             let empty = Rect::new(rect.x, rect.y, 0, rect.height);
             return if self.focus_preview || self.editor.is_some() { (empty, None, rect) } else { (rect, None, empty) };
         }
         let list_w = (rect.width * 35 / 100).clamp(16, rect.width - 20);
+        if self.frames {
+            return (
+                Rect::new(rect.x, rect.y, list_w, rect.height),
+                None,
+                Rect::new(rect.x + list_w, rect.y, rect.width - list_w, rect.height),
+            );
+        }
         (
             Rect::new(rect.x, rect.y, list_w, rect.height),
             Some(Rect::new(rect.x + list_w, rect.y, 1, rect.height)),
@@ -166,14 +178,19 @@ impl Finder {
         )
     }
 
-    /// Where preview content (and the editor) goes: the preview area below its header line.
+    /// Where preview content (and the editor) goes: inside the preview box, or below the header line.
     pub fn body_rect(&self, rect: Rect) -> Rect {
         let (_, _, p) = self.areas(rect);
-        Rect::new(p.x, p.y + 1, p.width, p.height.saturating_sub(1))
+        if self.frames { inner(p) } else { Rect::new(p.x, p.y + 1, p.width, p.height.saturating_sub(1)) }
+    }
+
+    /// Where the list's entries go inside the list area: inside its box, or below the title line.
+    fn entries_rect(&self, list: Rect) -> Rect {
+        if self.frames { inner(list) } else { Rect::new(list.x, list.y + 1, list.width, list.height.saturating_sub(1)) }
     }
 
     fn list_rows(&self) -> usize {
-        usize::from(self.rect.height.saturating_sub(1)).max(1)
+        usize::from(self.rect.height.saturating_sub(if self.frames { 2 } else { 1 })).max(1)
     }
 
     fn preview_rows(&self) -> usize {
@@ -474,10 +491,11 @@ impl Finder {
             MouseEventKind::ScrollUp if in_preview => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) if in_list => {
                 self.focus_preview = false;
-                if y == list.y {
+                let rows = self.entries_rect(list);
+                if !super::layout::contains(rows, x, y) {
                     return Action::None;
                 }
-                let index = self.list_top + usize::from(y - list.y - 1);
+                let index = self.list_top + usize::from(y - rows.y);
                 if index >= self.visible.len() {
                     return Action::None;
                 }
@@ -511,10 +529,28 @@ impl Finder {
 
     // ----- drawing -----
 
-    pub fn render(&self, buf: &mut Buffer, rect: Rect, focused: bool, editor: Option<&TermPane>) -> Option<Cursor> {
+    /// Draws the finder into `rect`. `accent` colours the active box's frame when the pane has focus.
+    pub fn render(
+        &self,
+        buf: &mut Buffer,
+        rect: Rect,
+        focused: bool,
+        accent: Color,
+        editor: Option<&TermPane>,
+    ) -> Option<Cursor> {
         let (list, sep, preview) = self.areas(rect);
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let frame_style = |active: bool| if active { bold.fg(accent) } else { Style::default() };
+        let list_active = focused && !self.focus_preview && self.editor.is_none();
         if list.width > 0 {
-            self.render_list(buf, list, focused && !self.focus_preview && self.editor.is_none());
+            if self.frames {
+                let title = self.list_title(usize::from(list.width.saturating_sub(4)));
+                draw_frame(buf, list, &title, "", frame_style(list_active));
+            } else {
+                let title = format!(" {} ", self.list_title(usize::from(list.width.saturating_sub(2))));
+                put_str(buf, list.x, list.y, &title, bold.fg(Color::Blue), list.width);
+            }
+            self.render_list(buf, self.entries_rect(list), list_active);
         }
         if let Some(sep) = sep {
             fill(buf, sep, "│", Style::default().fg(Color::DarkGray));
@@ -522,7 +558,6 @@ impl Finder {
         if preview.width == 0 {
             return None;
         }
-        // Header line.
         let header = Rect::new(preview.x, preview.y, preview.width, 1);
         let body = self.body_rect(rect);
         let name = self
@@ -532,32 +567,30 @@ impl Finder {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let preview_active = focused && (self.focus_preview || self.editor.is_some());
         if let Some(editor) = editor {
-            let label = format!(" ✎ {name} ");
-            let w = put_str(buf, header.x, header.y, &label, bold.fg(Color::Black).bg(Color::Yellow), header.width);
-            put_str(
-                buf,
-                header.x + w,
-                header.y,
-                "  Alt+s save · Alt+q close",
-                Style::default().fg(Color::DarkGray),
-                header.width - w,
-            );
-            let decor = TermDecor { show_cursor: focused, search_match: None };
+            let hint = "Alt+s save · Alt+q close";
+            if self.frames {
+                draw_frame(buf, preview, &format!("✎ {name}"), hint, frame_style(preview_active));
+            } else {
+                let label = format!(" ✎ {name} ");
+                let w = put_str(buf, header.x, header.y, &label, bold.fg(Color::Black).bg(Color::Yellow), header.width);
+                let hint = format!("  {hint}");
+                put_str(buf, header.x + w, header.y, &hint, Style::default().fg(Color::DarkGray), header.width - w);
+            }
+            let decor = TermDecor { show_cursor: focused, ..TermDecor::default() };
             return draw_term(buf, body, editor, &decor);
         }
-        let head_style = if focused && self.focus_preview { bold.fg(Color::Black).bg(Color::Cyan) } else { bold };
-        let w = put_str(buf, header.x, header.y, &format!(" {name} "), head_style, header.width);
-        if let Some(view) = &self.view {
-            put_str(
-                buf,
-                header.x + w,
-                header.y,
-                &format!(" {}", view.info),
-                Style::default().fg(Color::DarkGray),
-                header.width - w,
-            );
+        let info = self.view.as_ref().map(|v| v.info.as_str()).unwrap_or_default();
+        if self.frames {
+            draw_frame(buf, preview, &name, info, frame_style(preview_active));
+        } else {
+            let head_style = if preview_active { bold.fg(Color::Black).bg(Color::Cyan) } else { bold };
+            let w = put_str(buf, header.x, header.y, &format!(" {name} "), head_style, header.width);
+            if !info.is_empty() {
+                let info = format!(" {info}");
+                put_str(buf, header.x + w, header.y, &info, Style::default().fg(Color::DarkGray), header.width - w);
+            }
         }
         let Some(view) = &self.view else {
             if self.preview_path.is_some() {
@@ -593,42 +626,36 @@ impl Finder {
         None
     }
 
-    fn render_list(&self, buf: &mut Buffer, area: Rect, active: bool) {
-        let bold = Style::default().add_modifier(Modifier::BOLD);
+    /// The list's title: the folder, or the filter being typed. Long paths keep their end visible.
+    fn list_title(&self, max: usize) -> String {
         let title = if self.filtering || !self.filter.is_empty() {
-            format!(" /{}{} ", self.filter, if self.filtering { "▏" } else { "" })
+            format!("/{}{}", self.filter, if self.filtering { "▏" } else { "" })
         } else {
-            format!(" {} ", home_relative(&self.dir))
+            home_relative(&self.dir)
         };
-        // Keep the end of long paths visible.
-        let max = usize::from(area.width);
-        let title: String = if title.chars().count() > max {
-            let skip = title.chars().count() - max + 1;
-            format!("…{}", title.chars().skip(skip).collect::<String>())
+        let count = title.chars().count();
+        if count > max && max > 1 {
+            format!("…{}", title.chars().skip(count - max + 1).collect::<String>())
         } else {
             title
-        };
-        put_str(buf, area.x, area.y, &title, bold.fg(Color::Blue), area.width);
+        }
+    }
+
+    /// Draws the entries into `area` (inside the list box, or below the title line).
+    fn render_list(&self, buf: &mut Buffer, area: Rect, active: bool) {
+        let bold = Style::default().add_modifier(Modifier::BOLD);
         if let Some(msg) = &self.message {
-            put_str(buf, area.x + 1, area.y + 1, msg, Style::default().fg(Color::Red), area.width.saturating_sub(1));
+            put_str(buf, area.x + 1, area.y, msg, Style::default().fg(Color::Red), area.width.saturating_sub(1));
             return;
         }
         if self.visible.is_empty() {
             let text = if self.filter.is_empty() { "(empty)" } else { "(no match)" };
-            put_str(
-                buf,
-                area.x + 1,
-                area.y + 1,
-                text,
-                Style::default().fg(Color::DarkGray),
-                area.width.saturating_sub(1),
-            );
+            put_str(buf, area.x + 1, area.y, text, Style::default().fg(Color::DarkGray), area.width.saturating_sub(1));
             return;
         }
-        let rows = usize::from(area.height.saturating_sub(1));
-        for (row, &i) in self.visible.iter().skip(self.list_top).take(rows).enumerate() {
+        for (row, &i) in self.visible.iter().skip(self.list_top).take(usize::from(area.height)).enumerate() {
             let e = &self.entries[i];
-            let y = area.y + 1 + row as u16;
+            let y = area.y + row as u16;
             let mut style = if e.is_dir {
                 bold.fg(Color::Blue)
             } else if e.is_symlink {
@@ -641,7 +668,9 @@ impl Finder {
                 fill(buf, Rect::new(area.x, y, area.width, 1), " ", style);
             }
             let name = if e.is_dir { format!(" {}/", e.name) } else { format!(" {}", e.name) };
-            put_str(buf, area.x, y, &name, style, area.width);
+            // Inside a box, keep a column free before the right edge.
+            let max = if self.frames { area.width.saturating_sub(1) } else { area.width };
+            put_str(buf, area.x, y, &name, style, max);
         }
     }
 
@@ -649,7 +678,7 @@ impl Finder {
     pub fn text(&self, editor: Option<&TermPane>) -> String {
         let area = Rect::new(0, 0, self.rect.width, self.rect.height);
         let mut buf = Buffer::empty(area);
-        self.render(&mut buf, area, false, editor);
+        self.render(&mut buf, area, false, Color::Green, editor);
         let mut out = Vec::new();
         for y in 0..area.height {
             let mut line = String::new();
