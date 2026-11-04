@@ -1,0 +1,15 @@
+[package]
+name = "finder-core"
+description = "File listing, file types and preview data for the finder (shared by the TUI and the phone API)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+csv.workspace = true
+htmd.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
