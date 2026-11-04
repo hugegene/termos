@@ -46,6 +46,35 @@ finder [folder]                   # inside zellij → new tab; outside → new z
 **Neovim here is set up like a notepad:** opens ready to type, `Alt+s` save, `Alt+q` close,
 `Ctrl+z` undo. (`Ctrl+S`/`Ctrl+Q` are taken by zellij — and **Ctrl+Q quits all of zellij** in this setup.)
 
+
+## tb: the Rust rebuild (work in progress)
+
+`tb` is a working name. It's our own multiplexer with the finder built in: persistent sessions, tabs, split
+panes, copy mode and mouse support, all in one binary. See `docs/plans/2026-11-03-build-steps-0-3.md`.
+
+```bash
+cargo build --release
+./target/release/tb               # attach to session "main", starting it if needed
+./target/release/tb finder ~/docs # open a finder tab
+./target/release/tb ls            # list sessions;  tb kill  ends one
+```
+
+Inside a session, press **Ctrl+B** and then:
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `c` | new tab | `\|` or `%` | split right |
+| `n` / `p` / `1`–`9` | change tab | `-` or `"` | split down |
+| arrows, `h` `j` `k` `l` | move focus | `H` `J` `K` `L` | resize |
+| `z` | zoom | `x` | close pane |
+| `[` | copy mode | `f` | finder tab |
+| `,` | rename tab | `d` | detach |
+| `?` | help | | |
+
+- **Mouse:** click to focus, click tabs, drag borders, wheel to scroll back, drag to select and copy (OSC 52).
+- **Finder:** `j`/`k` move, `Enter` edits in Neovim (`Alt+s` save, `Alt+q` close), `/` filters, `.` shows
+  hidden files.
+
 ## Images
 
 zellij only passes through **sixel** images. Ghostty and Terminator don't do sixel, so images are

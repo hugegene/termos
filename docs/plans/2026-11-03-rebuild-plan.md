@@ -399,6 +399,10 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
   - the fork reasons (§3) and an images note (§4)
   - the image row (§6) and the phone images note (§9)
   - the images risk (§10), and steps 5 and 6 (§11)
+- **2026-11-04:** roadmap steps 0–3 built in this repo as `tb`, a working name. Details, departures from this
+  plan and known gaps are in the [build plan](2026-11-03-build-steps-0-3.md). Two departures matter here:
+  - The session server uses threads, not tokio.
+  - The fork records its upstream commit instead of importing Alacritty's git history.
 
 ---
 

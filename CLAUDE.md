@@ -42,6 +42,22 @@ Write each plan to **`docs/plans/YYYY-MM-DD-<topic>.md`** before implementing it
 - **Sources:** link the findings it relies on (`../findings/...`). Label anything not measured as an **estimate**.
 - **Keep it current:** when the plan changes, update the same file and note what changed and when. Don't start a duplicate.
 
+## Rust workspace (`tb`, a working name)
+
+- **Layout:**
+  - `Cargo.toml` (workspace)
+  - `crates/tb`: client, server, finder UI and CLI
+  - `crates/finder-core`: listing, file types, preview data
+  - `crates/alacritty_terminal`: our fork, unmodified so far; see its `UPSTREAM.md` and record every change there
+- **Build and test:** `cargo build`, `cargo test --workspace`,
+  `cargo clippy --no-deps -p tb -p finder-core --all-targets -- -D warnings`, `cargo deny check licenses`.
+  - Rust lives in `~/.cargo/bin`.
+  - Network access from Claude's shell is sandboxed, so build with `--offline`. A new dependency needs the user to
+    run `cargo fetch`.
+- **End-to-end tests:** `crates/tb/tests/e2e.rs` runs `tb attach` in a pseudo-terminal and reads the screen back.
+  - Tests use their own socket and state folders (`TB_SOCKET_DIR`, `TB_STATE_DIR`), never the user's sessions.
+  - Socket paths must stay under about 100 bytes, so don't put sockets in the scratchpad.
+
 ## Prototype
 
 - **Files:**
