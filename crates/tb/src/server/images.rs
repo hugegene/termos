@@ -265,6 +265,12 @@ impl Images {
     }
 }
 
+/// The picture a client already shows inside `area`, to keep up while a new one for that area is encoded, so a
+/// scrolled PDF page doesn't flash blocks between steps.
+pub fn still_shown(shown: &[Placed], area: Rect, protocol: ImageProtocol) -> Option<Placed> {
+    shown.iter().find(|s| s.key.protocol == protocol && area.union(s.rect) == area).cloned()
+}
+
 /// `write!` into a byte vector.
 struct VecWriter<'a>(&'a mut Vec<u8>);
 
@@ -363,5 +369,57 @@ mod tests {
         let c = changes(&shown, &wanted, |r| r.x == 0);
         assert_eq!(c.remove.iter().map(|p| p.key.id).collect::<Vec<_>>(), vec![1, 2]);
         assert_eq!(c.add.iter().map(|p| p.key.id).collect::<Vec<_>>(), vec![1, 3]);
+    }
+
+    #[test]
+    fn keeps_a_picture_inside_the_area() {
+        let shown = [placed(1, 2), placed(2, 40)];
+        let area = Rect::new(0, 0, 20, 10);
+        assert_eq!(still_shown(&shown, area, ImageProtocol::Kitty).map(|p| p.key.id), Some(1));
+        assert!(still_shown(&shown, Rect::new(30, 0, 5, 10), ImageProtocol::Kitty).is_none(), "doesn't fit");
+        assert!(still_shown(&shown, area, ImageProtocol::Sixel).is_none(), "another protocol");
+    }
+
+    /// Times one scroll step of a PDF page at fit width: cutting a 1000×900 piece out of the page and encoding
+    /// it for each protocol (step 7 of docs/plans/2026-11-05-pdf-preview.md). Needs poppler. Run with:
+    /// `TB_BENCH_PDF=file.pdf cargo test --release -p tb --bin tb scroll_step_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn scroll_step_cost() {
+        use std::time::{Duration, Instant};
+        let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../finder-core/tests/data/two-pages.pdf");
+        let path = std::env::var("TB_BENCH_PDF").unwrap_or_else(|_| fixture.into());
+        let limits = finder_core::Limits::default();
+        let page = finder_core::pdf::page(path.as_ref(), 1, 1000, true, &limits, &|| false, &|| {}).unwrap().image;
+        println!("{path}: page 1 rendered {}×{}", page.width(), page.height());
+        let median = |mut v: Vec<Duration>| {
+            v.sort();
+            v[v.len() / 2].as_secs_f64() * 1000.0
+        };
+        // Steps of 3 rows of 20 pixels, as `j` makes, down from the top.
+        let crops: Vec<RgbImage> = (0..10)
+            .map(|i| image::imageops::crop_imm(&page, 0, i * 60, 1000, 900.min(page.height() - i * 60)).to_image())
+            .collect();
+        let mut times = Vec::new();
+        for i in 0..10 {
+            let t = Instant::now();
+            let _ = image::imageops::crop_imm(&page, 0, i * 60, 1000, 900.min(page.height() - i * 60)).to_image();
+            times.push(t.elapsed());
+        }
+        println!("| cut out 1000×900 | {:.1} ms | |", median(times));
+        for protocol in [ImageProtocol::Kitty, ImageProtocol::Iterm2, ImageProtocol::Sixel] {
+            let key = ImageKey { id: 1, protocol, cells: (100, 45), px: (1000, 900) };
+            let mut times = Vec::new();
+            let mut bytes = Vec::new();
+            for crop in &crops {
+                let k = ImageKey { px: (crop.width(), crop.height()), ..key };
+                let t = Instant::now();
+                let out = encode(crop, &k);
+                times.push(t.elapsed());
+                bytes.push(out.len());
+            }
+            bytes.sort();
+            println!("| encode {protocol:?} | {:.1} ms | {} bytes |", median(times), bytes[bytes.len() / 2]);
+        }
     }
 }

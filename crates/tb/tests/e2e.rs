@@ -1211,6 +1211,89 @@ fn images_as_blocks_or_real() {
 }
 
 #[test]
+fn pdf_text_pages_and_zoom() {
+    // Like finder-core's PDF tests, this needs poppler-utils.
+    if Command::new("pdftoppm").arg("-v").output().is_err() {
+        eprintln!("skipped: poppler-utils isn't installed");
+        return;
+    }
+    let env = Env::new("e2e-pdf");
+    let files = env.root.join("pdfs");
+    fs::create_dir_all(&files).unwrap();
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../finder-core/tests/data");
+    fs::copy(data.join("two-pages.pdf"), files.join("a.pdf")).unwrap();
+    fs::copy(data.join("scanned.pdf"), files.join("b-scan.pdf")).unwrap();
+    env.tb(&["start"]);
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let s = env.attach(100, 30);
+
+    // Text first, with both pages and the page number and title in the header.
+    let text = s.wait_for("Page one says alpha");
+    s.wait_for("── page 2 ──");
+    s.wait_for("page 1/2");
+    assert!(text.contains("Fixture document"), "title in the header:\n{text}");
+
+    // In the preview, t shows the page at fit width; this terminal gets it as blocks.
+    s.send(b"l");
+    s.send(b"t");
+    s.wait_for("fit width");
+    s.wait_until("the page drawn", |t| t.contains('▀') && !t.contains("rendering"));
+    s.send(b"+");
+    s.wait_for("150%");
+    s.send(b"0");
+    s.wait_for("fit width");
+    s.send(b"]");
+    s.wait_until("page 2 drawn", |t| t.contains("page 2/2") && !t.contains("rendering"));
+
+    // t again: back to the text; h back to the list.
+    s.send(b"t");
+    s.wait_until("the text again", |t| t.contains("Page two says beta") && !t.contains('▀'));
+    s.send(b"h");
+
+    // A scanned PDF has no text, so it shows its page.
+    s.send(b"j");
+    s.wait_for("no text · showing pages");
+    s.wait_until("the scanned page drawn", |t| t.contains('▀'));
+}
+
+#[test]
+fn pdf_page_view_with_kitty_images() {
+    if Command::new("pdftoppm").arg("-v").output().is_err() {
+        eprintln!("skipped: poppler-utils isn't installed");
+        return;
+    }
+    let mut env = Env::new("e2e-pdf-kitty");
+    env.set("TB_IMAGES", "kitty");
+    let files = env.root.join("pdfs");
+    fs::create_dir_all(&files).unwrap();
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../finder-core/tests/data");
+    fs::copy(data.join("two-pages.pdf"), files.join("a.pdf")).unwrap();
+    env.tb(&["start"]);
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let s = env.attach(100, 30);
+    s.wait_for("Page one says alpha");
+    s.send(b"lt");
+    s.wait_until("the page placed as an image", |t| {
+        t.contains("fit width") && !t.contains('▀') && !t.contains("rendering")
+    });
+    // Each scroll step is a new picture, placed in turn; on to page 2 at the end of page 1.
+    s.send(b"jjjjj   ");
+    s.wait_until("page 2 placed", |t| t.contains("page 2/2") && !t.contains('▀') && !t.contains("rendering"));
+}
+
+#[test]
 fn csv_grid_editing() {
     let env = Env::new("e2e-grid");
     let files = env.root.join("sheet");

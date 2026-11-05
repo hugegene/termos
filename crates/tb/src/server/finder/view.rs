@@ -23,6 +23,11 @@ pub enum Body {
 
 static NEXT_IMAGE: AtomicU64 = AtomicU64::new(1);
 
+/// A new picture id.
+pub fn next_image_id() -> u64 {
+    NEXT_IMAGE.fetch_add(1, Ordering::Relaxed)
+}
+
 pub struct View {
     /// Short description for the preview header, for example "markdown · 1.2 KB".
     pub info: String,
@@ -55,8 +60,14 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
             View { info: info(&format!("{} rows", rows.len())), body: Body::Lines(lines) }
         }
         Preview::Image { thumbnail, width: w, height: h } => {
-            let id = NEXT_IMAGE.fetch_add(1, Ordering::Relaxed);
-            View { info: info(&format!("{w}×{h}")), body: Body::Image(Arc::new(thumbnail), id) }
+            View { info: info(&format!("{w}×{h}")), body: Body::Image(Arc::new(thumbnail), next_image_id()) }
+        }
+        Preview::Pdf { info: doc, pages, truncated } => {
+            let (mut lines, _) = super::pdf::text_lines(1, &pages, width);
+            if truncated {
+                lines.push(Line::styled("… the preview stops here (file too large)", dim()));
+            }
+            View { info: info(&format!("{} pages", doc.pages)), body: Body::Lines(lines) }
         }
         Preview::Text { text, syntax, truncated } => {
             let mut lines = code_lines(&text, syntax.as_deref());

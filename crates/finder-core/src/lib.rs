@@ -7,7 +7,10 @@ use std::cmp::Ordering;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
+
+pub mod pdf;
+pub mod tool;
 
 /// One row of a folder listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +33,7 @@ pub enum Kind {
         delimiter: u8,
     },
     Image,
+    Pdf,
     /// Text or source code. `syntax` is a file extension or name a highlighter can use.
     Text {
         syntax: Option<String>,
@@ -47,6 +51,7 @@ impl Kind {
             Kind::Csv { delimiter: b'\t' } => "tsv",
             Kind::Csv { .. } => "csv",
             Kind::Image => "image",
+            Kind::Pdf => "pdf",
             Kind::Text { .. } => "text",
             Kind::Binary => "binary",
         }
@@ -74,6 +79,13 @@ pub enum Preview {
         width: u32,
         height: u32,
     },
+    /// A PDF's text, one string per page, from page 1 up to `Limits::pdf_text_pages` pages. `truncated` says
+    /// the text stopped at `Limits::max_bytes`.
+    Pdf {
+        info: pdf::PdfInfo,
+        pages: Vec<String>,
+        truncated: bool,
+    },
     Text {
         text: String,
         syntax: Option<String>,
@@ -94,11 +106,27 @@ pub struct Limits {
     pub max_rows: usize,
     /// Longest side of an image thumbnail, in pixels.
     pub max_image_side: u32,
+    /// PDF pages whose text is read at a time.
+    pub pdf_text_pages: u32,
+    /// Most pixels in a rendered PDF page (24 MP is 72 MB; an A4 page at 4000 pixels wide fits).
+    pub max_pixels: u32,
+    /// A PDF page still rendering after this is drawn again without anti-aliasing.
+    pub pdf_slow: Duration,
+    /// ... and given this long before the preview gives up on it.
+    pub pdf_give_up: Duration,
 }
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { max_bytes: 2 << 20, max_rows: 2000, max_image_side: 1600 }
+        Self {
+            max_bytes: 2 << 20,
+            max_rows: 2000,
+            max_image_side: 1600,
+            pdf_text_pages: 100,
+            max_pixels: 24_000_000,
+            pdf_slow: Duration::from_secs(2),
+            pdf_give_up: Duration::from_secs(10),
+        }
     }
 }
 
@@ -168,23 +196,31 @@ pub fn detect(path: &Path) -> Kind {
         "csv" => return Kind::Csv { delimiter: b',' },
         "tsv" => return Kind::Csv { delimiter: b'\t' },
         e if IMAGE_EXTS.contains(&e) => return Kind::Image,
+        "pdf" => return Kind::Pdf,
         _ => {}
     }
-    if looks_binary(path) {
+    let head = read_head(path);
+    if head.starts_with(b"%PDF-") {
+        return Kind::Pdf;
+    }
+    if looks_binary(&head) {
         return Kind::Binary;
     }
     let syntax = if ext.is_empty() { path.file_name().map(|n| n.to_string_lossy().into_owned()) } else { Some(ext) };
     Kind::Text { syntax }
 }
 
-/// True if the first 8 KB contain a NUL byte or aren't valid UTF-8 (allowing a cut-off last character).
-fn looks_binary(path: &Path) -> bool {
-    let mut buf = [0u8; 8192];
-    let n = match fs::File::open(path).and_then(|mut f| f.read(&mut buf)) {
-        Ok(n) => n,
-        Err(_) => return false,
-    };
-    let head = &buf[..n];
+/// The first 8 KB of a file (empty if it can't be read).
+fn read_head(path: &Path) -> Vec<u8> {
+    let mut head = Vec::with_capacity(8192);
+    if let Ok(f) = fs::File::open(path) {
+        let _ = f.take(8192).read_to_end(&mut head);
+    }
+    head
+}
+
+/// True if `head` contains a NUL byte or isn't valid UTF-8 (allowing a cut-off last character).
+fn looks_binary(head: &[u8]) -> bool {
     if head.contains(&0) {
         return true;
     }
@@ -239,6 +275,13 @@ fn load(path: &Path, kind: &Kind, limits: Limits) -> io::Result<Preview> {
         Kind::Text { syntax } => {
             let (text, truncated) = read_text(path, limits.max_bytes)?;
             Preview::Text { text, syntax: syntax.clone(), truncated }
+        }
+        Kind::Pdf => {
+            let never = || false;
+            let info = pdf::info(path, &never).map_err(io::Error::other)?;
+            let (pages, truncated) =
+                pdf::text(path, 1, limits.pdf_text_pages, limits.max_bytes, &never).map_err(io::Error::other)?;
+            Preview::Pdf { info, pages, truncated }
         }
         Kind::Binary => Preview::Binary { size: fs::metadata(path)?.len() },
     })
@@ -345,11 +388,16 @@ mod tests {
         fs::write(p("b.rs"), "fn main() {}").unwrap();
         fs::write(p("c.bin"), [0u8, 1, 2]).unwrap();
         fs::write(p("Makefile"), "all:").unwrap();
+        fs::write(p("doc.PDF"), "not even a pdf").unwrap();
+        fs::write(p("download"), b"%PDF-1.7\n\x00\x01binary").unwrap();
         assert_eq!(detect(&p("a.md")), Kind::Markdown);
         assert_eq!(detect(&p("b.rs")), Kind::Text { syntax: Some("rs".into()) });
         assert_eq!(detect(&p("c.bin")), Kind::Binary);
         assert_eq!(detect(&p("Makefile")), Kind::Text { syntax: Some("Makefile".into()) });
         assert_eq!(detect(dir.path()), Kind::Dir);
+        assert_eq!(detect(&p("doc.PDF")), Kind::Pdf);
+        assert_eq!(detect(&p("download")), Kind::Pdf);
+        assert!(!Kind::Pdf.is_editable());
     }
 
     #[test]

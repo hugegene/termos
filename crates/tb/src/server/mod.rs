@@ -685,7 +685,7 @@ impl Server {
             }
             Some(Pane::Finder(f)) => {
                 f.frames = frames;
-                f.resize(rect);
+                f.resize(rect, cell);
                 f.editor.map(|e| (e, f.body_rect(rect)))
             }
             None => None,
@@ -1639,11 +1639,11 @@ impl Server {
         self.dirty = false;
         let ids: Vec<ClientId> = self.clients.iter().filter(|(_, c)| c.attached).map(|(id, _)| *id).collect();
         for id in ids {
-            let (cols, rows, graphics, read_only) = match self.clients.get(&id) {
-                Some(c) => (c.cols, c.rows, c.graphics, c.read_only),
+            let (cols, rows, graphics, read_only, shown) = match self.clients.get(&id) {
+                Some(c) => (c.cols, c.rows, c.graphics, c.read_only, c.shown.clone()),
                 None => continue,
             };
-            let frame = self.compose(cols, rows, graphics, read_only);
+            let frame = self.compose(cols, rows, graphics, read_only, &shown);
             for job in frame.jobs {
                 self.images.request(job);
             }
@@ -1694,8 +1694,16 @@ impl Server {
         }
     }
 
-    /// The full screen for a client of `cols` × `rows` whose terminal shows images as `graphics` says.
-    fn compose(&self, cols: u16, rows: u16, graphics: protocol::Graphics, read_only: bool) -> Frame {
+    /// The full screen for a client of `cols` × `rows` whose terminal shows images as `graphics` says. `shown`
+    /// is what the client's terminal has on screen now.
+    fn compose(
+        &self,
+        cols: u16,
+        rows: u16,
+        graphics: protocol::Graphics,
+        read_only: bool,
+        shown: &[images::Placed],
+    ) -> Frame {
         let mut buf = Buffer::empty(Rect::new(0, 0, cols, rows));
         let zones = self.draw_tab_bar(&mut buf);
         let content = self.content_area();
@@ -1747,8 +1755,15 @@ impl Server {
                     if on_screen {
                         jobs.push(images::Job { key, img: slot.img.clone() });
                     }
-                    let (w, h) = (slot.area.width.max(1), slot.area.height.max(1));
-                    finder::draw_blocks(&mut buf, &finder::view::image_cells(&slot.img, w, h), slot.area);
+                    // A scrolled PDF page keeps the picture that's there until the new one is encoded.
+                    let kept = images::still_shown(shown, slot.area, protocol).filter(|_| slot.keep && on_screen);
+                    match kept {
+                        Some(old) => placed.push(old),
+                        None => {
+                            let (w, h) = (slot.area.width.max(1), slot.area.height.max(1));
+                            finder::draw_blocks(&mut buf, &finder::view::image_cells(&slot.img, w, h), slot.area);
+                        }
+                    }
                 }
             }
         }

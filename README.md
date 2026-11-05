@@ -76,6 +76,9 @@ tb delete-all-sessions   # or: tb da; -y skips the question, -f also ends and fo
 
 Unlike zellij, plain `tb` returns to "main" instead of starting a new session with a random name.
 
+**PDFs** in the finder show their text; `t` shows the pages (`+`/`-` zoom, `0` fit width, `[` `]` page). This
+needs poppler-utils (`sudo apt install poppler-utils`).
+
 **Extending `tb`** works through the same command line, from any language; there are no plugins. See
 [docs/cli.md](docs/cli.md) for the overview and [docs/cli/](docs/cli/README.md) for a page per command.
 

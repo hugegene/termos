@@ -1,0 +1,12 @@
+%!PS
+% Source of two-pages.pdf (see make.sh): two A4 pages with a line of text each.
+[ /Title (Fixture document) /DOCINFO pdfmark
+<< /PageSize [595 842] >> setpagedevice
+/Helvetica findfont 24 scalefont setfont
+72 760 moveto (Page one says alpha) show
+0 0 1 setrgbcolor 72 400 moveto 523 400 lineto 8 setlinewidth stroke
+showpage
+/Helvetica findfont 24 scalefont setfont
+72 760 moveto (Page two says beta) show
+1 0 0 setrgbcolor 72 400 moveto 523 400 lineto 8 setlinewidth stroke
+showpage

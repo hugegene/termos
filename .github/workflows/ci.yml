@@ -15,6 +15,8 @@ jobs:
       # The vendored alacritty_terminal fork keeps upstream formatting and lints, so only our crates are checked.
       - run: cargo fmt -p tb -p finder-core --check
       - run: cargo clippy --no-deps -p tb -p finder-core --all-targets -- -D warnings
+      # The PDF preview's tests run poppler's tools (they skip, saying so, without them).
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: cargo test --workspace
 
   licenses:

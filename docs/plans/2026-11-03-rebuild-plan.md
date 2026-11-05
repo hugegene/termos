@@ -209,6 +209,7 @@ These replace yazi, glow, bat, chafa, html2text, w3m and VisiData.
 | Image decoding | `image` | 0.25.10 | MIT/Apache |
 | Image display (kitty, iTerm2, sixel, blocks; auto-detected) | ~~`ratatui-image`, `icy_sixel`~~ our own encoders (changed 2026-11-04), PNG via `image` | n/a | ours |
 | CSV read/write and grid editor | `csv` | 1.4.0 | MIT/Unlicense |
+| PDF text and pages | poppler's `pdfinfo`, `pdftotext`, `pdftoppm`, run as separate programs ([PDF plan](2026-11-05-pdf-preview.md)) | 24.02 tested | GPL (not linked or bundled) |
 
 ### Daemon (poller + webhook)
 
@@ -228,10 +229,14 @@ These replace yazi, glow, bat, chafa, html2text, w3m and VisiData.
 | CI license gate | `cargo-deny` | MIT/Apache |
 | Generating the third-party notices file | `cargo-about` | MIT/Apache |
 
-### External program
+### External programs
 
 - **Neovim** (Apache-2.0, plus Vim-licensed code) with **render-markdown.nvim** (MIT) for live Markdown
   editing. We either require it or bundle it with its licenses, and fall back to the user's `$EDITOR`.
+- **poppler-utils** (GPL) for PDF previews. It's optional, and we don't bundle it: the user installs it, and
+  without it a PDF's preview says which package to install.
+  - Running it as a separate program keeps its licence off `tb`.
+  - It also means killing the program cancels a slow page, and a crash in it can't take the server down.
 
 ### Avoid
 
@@ -447,6 +452,10 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
   - `prbot` runs on `tb` with 7 lines changed ([finding](../findings/2026-11-05-prbot-on-tb.md)).
   - The protocol version is now 3.
   - Details are in the [CLI extension plan](2026-11-05-cli-extensions.md).
+- **2026-11-05:** the finder **previews PDFs** with poppler's command-line tools, run as separate programs.
+  - **Text first;** `t` switches to the pages, at fit width with zoom.
+  - **poppler-utils** is a new optional external program (§6).
+  - Details are in the [PDF preview plan](2026-11-05-pdf-preview.md).
 
 ---
 
