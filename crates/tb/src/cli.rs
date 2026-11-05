@@ -168,6 +168,9 @@ pub struct DumpScreenArgs {
 pub enum ActionCmd {
     // ----- tabs -----
     /// Open a new tab running a shell, or COMMAND; prints the tab's id
+    #[command(
+        after_long_help = "Examples:\n  tb action new-tab -n build -c ~/project -- make watch\n  tb action new-tab --start-suspended -- make deploy   # typed, not run"
+    )]
     NewTab {
         #[arg(short, long)]
         name: Option<String>,
@@ -195,6 +198,9 @@ pub enum ActionCmd {
     /// Go to the tab with this id
     GoToTabById { id: u32 },
     /// Go to the tab with this name
+    #[command(
+        after_long_help = "Examples:\n  tb action go-to-tab-name logs\n  tb action go-to-tab-name -c scratch   # create it if it's missing"
+    )]
     GoToTabName {
         name: String,
         /// Create it if there's none
@@ -231,6 +237,9 @@ pub enum ActionCmd {
         t: TabOpt,
     },
     /// List tabs
+    #[command(
+        after_long_help = "Examples:\n  tb action list-tabs -s\n  tb action list-tabs -j | jq '.[] | select(.active) | .tab_id'"
+    )]
     ListTabs(ListTabsArgs),
     /// Print each tab's name
     QueryTabNames,
@@ -242,6 +251,9 @@ pub enum ActionCmd {
 
     // ----- panes -----
     /// Open a pane running a shell, or COMMAND; prints the pane's id
+    #[command(
+        after_long_help = "Examples:\n  tb action new-pane -d right -- htop\n  tb action new-pane -n logs -- tail -f /var/log/syslog"
+    )]
     NewPane(PaneArgs),
     /// Split the focused pane (tb's form of new-pane)
     Split {
@@ -313,6 +325,9 @@ pub enum ActionCmd {
     /// Turn pane frames on or off
     TogglePaneFrames,
     /// Resize a pane: `increase|decrease [left|right|up|down]` (zellij), or `DIRECTION [CELLS]` (tb)
+    #[command(
+        after_long_help = "Examples:\n  tb action resize increase left\n  tb action resize decrease          # every side\n  tb action resize down 5            # tb's form: move the border 5 cells"
+    )]
     Resize {
         how: String,
         side: Option<String>,
@@ -334,6 +349,9 @@ pub enum ActionCmd {
         ansi: bool,
     },
     /// Set a pane's default colours ("#00e000" or "rgb:00/e0/00"); default: the pane this runs in
+    #[command(
+        after_long_help = "Examples:\n  tb action set-pane-color --bg \"#3a0000\"   # tint the pane this runs in\n  tb action set-pane-color -p 3 --reset"
+    )]
     SetPaneColor {
         #[command(flatten)]
         p: PaneOpt,
@@ -386,8 +404,14 @@ pub enum ActionCmd {
         p: PaneOpt,
     },
     /// List panes
+    #[command(
+        after_long_help = "Examples:\n  tb action list-panes -t -c\n  tb action list-panes -j | jq '.[] | select(.is_focused) | .id'"
+    )]
     ListPanes(ListPanesArgs),
     /// Print a pane's text
+    #[command(
+        after_long_help = "Examples:\n  tb action dump-screen -f > scrollback.txt\n  tb action dump-screen -p 3 --ansi --path pane3.txt"
+    )]
     DumpScreen(DumpScreenArgs),
     /// Print the session's layout (tb's saved-session JSON)
     DumpLayout,
@@ -403,6 +427,9 @@ pub enum ActionCmd {
         p: PaneOpt,
     },
     /// Type text into a pane
+    #[command(
+        after_long_help = "Examples:\n  tb action write-chars --enter \"make test\"\n  tb action write-chars -p terminal_3 q"
+    )]
     WriteChars {
         chars: String,
         #[command(flatten)]
@@ -418,6 +445,7 @@ pub enum ActionCmd {
         p: PaneOpt,
     },
     /// Send keys, e.g. "Ctrl a" "F1" "Alt Shift b" Enter
+    #[command(after_long_help = "Examples:\n  tb action send-keys \"Ctrl c\"\n  tb action send-keys -p 3 Up Enter")]
     SendKeys {
         #[arg(required = true)]
         keys: Vec<String>,
@@ -437,6 +465,9 @@ pub enum ActionCmd {
     /// Move your client to another session, starting it if needed
     SwitchSession { name: String },
     /// Show TEXT in the status bar (tb). Each --id is its own segment; clicks reach `tb subscribe`
+    #[command(
+        after_long_help = "Examples:\n  tb action set-status --id ci \"build ✓\"\n  tb action set-status --id prbot --ttl 60 \"PR #487 needs review\"\n  tb action clear-status --id ci"
+    )]
     SetStatus {
         text: String,
         /// The segment to set (one per extension)

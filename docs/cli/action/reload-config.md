@@ -1,0 +1,12 @@
+<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
+     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+
+# `tb action reload-config`
+
+Read ~/.config/tb/config.kdl again and print what it skipped (tb)
+
+```
+tb action reload-config
+```
+
+See also: [all commands](../README.md) · [the overview](../../cli.md)

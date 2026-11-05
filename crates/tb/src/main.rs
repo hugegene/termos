@@ -3,6 +3,8 @@
 
 mod cli;
 mod client;
+#[cfg(test)]
+mod docs;
 mod kdl;
 mod keyspec;
 mod logger;
@@ -69,6 +71,9 @@ struct AttachArgs {
 enum Cmd {
     /// Attach to a session, starting it if needed (the default)
     #[command(visible_alias = "a")]
+    #[command(
+        after_long_help = "Examples:\n  tb attach work            # attach to \"work\", starting it if needed\n  tb attach -b work         # start it in the background, without attaching\n  tb attach --forget work   # start fresh, without the saved layout"
+    )]
     Attach(AttachArgs),
     /// Start a session without attaching (same as `attach -b`)
     Start {
@@ -140,6 +145,9 @@ enum Cmd {
     },
     /// Run COMMAND in a new pane (zellij's `run`); prints the pane's id. The session comes from `tb -s`
     #[command(visible_alias = "r")]
+    #[command(
+        after_long_help = "Examples:\n  tb run -- htop\n  tb run -d right -n logs -- tail -f app.log\n  tb -s work run -s -- make deploy   # typed at a prompt, not run"
+    )]
     Run(cli::PaneArgs),
     /// Open FILE in the editor in a new pane (zellij's `edit`); prints the pane's id
     #[command(visible_alias = "e")]
@@ -147,6 +155,9 @@ enum Cmd {
     /// Print events as JSON lines until the session ends: tabs and panes opening, closing, renaming and
     /// gaining focus, mode changes, clients. With -p, also those panes' text whenever it changes. The
     /// session comes from `tb -s`
+    #[command(
+        after_long_help = "Examples:\n  tb subscribe -f json                 # every event as a JSON line\n  tb subscribe -p terminal_3           # pane 3's text whenever it changes\n  tb subscribe -p 3 -s 100 --ansi      # first with 100 lines of scrollback, in colour"
+    )]
     Subscribe {
         /// Panes whose text to print when it changes (e.g. terminal_1 or 1)
         #[arg(short, long = "pane-id", num_args = 1.., value_parser = cli::pane_id)]
@@ -341,6 +352,51 @@ mod tests {
                 _ => panic!("{args:?} isn't action"),
             }
         }
+    }
+
+    /// docs/cli/ has a page per command, generated from these definitions. `TB_UPDATE_DOCS=1` rewrites it.
+    #[test]
+    fn cli_docs_are_current() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/cli");
+        let pages = crate::docs::render(Cli::command());
+        let on_disk = |d: &std::path::Path| -> Vec<String> {
+            let mut found = Vec::new();
+            for sub in ["", "action"] {
+                if let Ok(entries) = std::fs::read_dir(d.join(sub)) {
+                    for e in entries.flatten() {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        if name.ends_with(".md") {
+                            found.push(if sub.is_empty() { name } else { format!("{sub}/{name}") });
+                        }
+                    }
+                }
+            }
+            found
+        };
+        if std::env::var_os("TB_UPDATE_DOCS").is_some() {
+            for old in on_disk(&dir) {
+                if !pages.iter().any(|(p, _)| *p == old) {
+                    std::fs::remove_file(dir.join(&old)).unwrap();
+                }
+            }
+            for (path, text) in &pages {
+                let file = dir.join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, text).unwrap();
+            }
+            return;
+        }
+        let mut stale: Vec<String> = pages
+            .iter()
+            .filter(|(path, text)| std::fs::read_to_string(dir.join(path)).ok().as_deref() != Some(text.as_str()))
+            .map(|(path, _)| path.clone())
+            .collect();
+        stale.extend(on_disk(&dir).into_iter().filter(|f| !pages.iter().any(|(p, _)| p == f)));
+        assert!(
+            stale.is_empty(),
+            "docs/cli is out of date ({}); run: TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs",
+            stale.join(", ")
+        );
     }
 
     /// docs/cli.md is the extension API's reference: every action must be in it.

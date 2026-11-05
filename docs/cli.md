@@ -12,6 +12,9 @@ A user starts it from a key with a `Run` binding in `~/.config/tb/config.kdl`.
 zellij scripts port by changing `zellij` to `tb` and `ZELLIJ_SESSION_NAME`/`ZELLIJ_PANE_ID` to
 `TB_SESSION`/`TB_PANE_ID`.
 
+**[docs/cli/](cli/README.md) has a page for every command,** with its usage, options and examples. The pages
+are generated from the same definitions as `tb … --help`. This page covers what spans commands.
+
 ## Stability
 
 `tb --version` prints the extension API's version: `tb 0.1.0 (extension API 1)`. Within one API version,

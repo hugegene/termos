@@ -56,6 +56,12 @@ Write each plan to **`docs/plans/YYYY-MM-DD-<topic>.md`** before implementing it
   - Rust lives in `~/.cargo/bin`.
   - Network access from Claude's shell is sandboxed, so build with `--offline`. A new dependency needs the user to
     run `cargo fetch`.
+- **Command docs:** `docs/cli/` has a page per command, generated from the clap definitions, so don't edit it
+  by hand.
+  - After changing a command, its help text or its examples (`after_long_help`), run
+    `TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs`.
+  - The test `cli_docs_are_current` fails until you do.
+  - New concepts that span commands (ids, JSON fields, events, config) go in `docs/cli.md`.
 - **End-to-end tests:** `crates/tb/tests/e2e.rs` runs `tb attach` in a pseudo-terminal and reads the screen back.
   - Tests use their own socket and state folders (`TB_SOCKET_DIR`, `TB_STATE_DIR`), never the user's sessions.
   - Socket paths must stay under about 100 bytes, so don't put sockets in the scratchpad.
