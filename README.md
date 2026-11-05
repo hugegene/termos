@@ -76,6 +76,21 @@ tb delete-all-sessions   # or: tb da; -y skips the question, -f also ends and fo
 
 Unlike zellij, plain `tb` returns to "main" instead of starting a new session with a random name.
 
+**Extending `tb`** works through the same command line, from any language; there are no plugins. See
+[docs/cli.md](docs/cli.md) for the reference.
+
+```bash
+tb action new-pane -d right -- make test    # zellij's actions, names and flags; prints terminal_7
+tb action list-tabs -j                      # JSON with zellij's fields
+tb subscribe -f json                        # events: tabs and panes opening, closing, exiting, …
+tb action set-status --id ci "build ✓"      # text in the status bar; clicks arrive as events
+tb run -- htop                              # also: tb edit FILE, tb watch NAME
+```
+
+Keys can run commands. Add zellij-style `bind` blocks to `~/.config/tb/config.kdl`, for example
+`tab { bind "p" { Run "prbot" "ls"; SwitchToMode "Normal"; } }`. A zellij script such as `prbot` ports by
+changing `zellij` to `tb` and `ZELLIJ_*` to `TB_*`.
+
 Inside a session the keys are **zellij's** (your `~/.config/zellij/config.kdl` bindings), and each pane has a
 frame like zellij's:
 

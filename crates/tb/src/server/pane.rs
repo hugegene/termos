@@ -164,6 +164,14 @@ impl TermPane {
         (!args.is_empty()).then_some(args)
     }
 
+    /// The pane's own program and its arguments (its shell, or the command it was started with).
+    pub fn program(&self) -> Option<String> {
+        let raw = std::fs::read(format!("/proc/{}/cmdline", self.pid)).ok()?;
+        let args: Vec<String> =
+            raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+        (!args.is_empty()).then(|| args.join(" "))
+    }
+
     /// What to call this pane: the program's title, else the foreground program's name.
     pub fn display_title(&self) -> String {
         self.title
@@ -200,4 +208,95 @@ impl TermPane {
         }
         lines.join("\n")
     }
+
+    /// Like `text`, with colours and styles as ANSI escape sequences (`dump-screen --ansi`).
+    pub fn ansi_text(&self, full: bool) -> String {
+        let term = self.term.lock();
+        let grid = term.grid();
+        let top = if full { -(grid.history_size() as i32) } else { 0 };
+        let mut lines = Vec::new();
+        for line in top..grid.screen_lines() as i32 {
+            let row = &grid[Line(line)];
+            // Stop after the last cell that shows something: a character, or a coloured background.
+            let used = (0..grid.columns())
+                .rev()
+                .find(|c| {
+                    let cell = &row[Column(*c)];
+                    cell.c != ' ' || sgr_bg(cell.bg).is_some() || cell.flags.contains(Flags::INVERSE)
+                })
+                .map_or(0, |c| c + 1);
+            let mut s = String::new();
+            let mut last = String::new();
+            for col in 0..used {
+                let cell = &row[Column(col)];
+                if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+                    continue;
+                }
+                let sgr = sgr(cell);
+                if sgr != last {
+                    s.push_str(&format!("\x1b[0{sgr}m"));
+                    last = sgr;
+                }
+                s.push(cell.c);
+                if let Some(zw) = cell.zerowidth() {
+                    s.extend(zw);
+                }
+            }
+            if !last.is_empty() {
+                s.push_str("\x1b[0m");
+            }
+            lines.push(s);
+        }
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+        lines.join("\n")
+    }
+}
+
+/// The SGR parameters for a cell, each starting with `;` (empty for the default style).
+fn sgr(cell: &alacritty_terminal::term::cell::Cell) -> String {
+    let mut s = String::new();
+    for (flag, code) in [
+        (Flags::BOLD, "1"),
+        (Flags::DIM, "2"),
+        (Flags::ITALIC, "3"),
+        (Flags::UNDERLINE, "4"),
+        (Flags::INVERSE, "7"),
+        (Flags::HIDDEN, "8"),
+        (Flags::STRIKEOUT, "9"),
+    ] {
+        if cell.flags.contains(flag) {
+            s.push(';');
+            s.push_str(code);
+        }
+    }
+    if let Some(fg) = sgr_color(cell.fg, 30) {
+        s.push_str(&fg);
+    }
+    if let Some(bg) = sgr_bg(cell.bg) {
+        s.push_str(&bg);
+    }
+    s
+}
+
+fn sgr_bg(c: alacritty_terminal::vte::ansi::Color) -> Option<String> {
+    sgr_color(c, 40)
+}
+
+/// `base` is 30 for the foreground and 40 for the background. The default colours give `None`.
+fn sgr_color(c: alacritty_terminal::vte::ansi::Color, base: u8) -> Option<String> {
+    use alacritty_terminal::vte::ansi::Color as C;
+    Some(match c {
+        C::Spec(rgb) => format!(";{};2;{};{};{}", base + 8, rgb.r, rgb.g, rgb.b),
+        C::Indexed(i) => format!(";{};5;{i}", base + 8),
+        C::Named(n) => {
+            let i = n as usize;
+            match i {
+                0..=7 => format!(";{}", usize::from(base) + i),
+                8..=15 => format!(";{}", usize::from(base) + 60 + i - 8),
+                _ => return None,
+            }
+        }
+    })
 }

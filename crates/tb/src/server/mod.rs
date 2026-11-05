@@ -1,8 +1,11 @@
 //! The session server: owns the panes and tabs, talks to clients over a Unix socket, and draws each
 //! client's screen. One server process runs per session.
 
+mod actions;
+mod config;
 mod copy;
 mod editor;
+mod events;
 mod finder;
 mod images;
 mod input;
@@ -13,7 +16,7 @@ mod persist;
 mod render;
 mod scroll;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::Shutdown;
 use std::os::unix::fs::PermissionsExt;
@@ -61,6 +64,15 @@ pub type ClientId = u32;
 
 /// A tab bar click area: (start x, end x, tab index or `None` for the "+" button).
 type TabZone = (u16, u16, Option<usize>);
+/// A status-bar segment's click area: (start x, end x, segment id).
+type StatusZone = (u16, u16, String);
+
+/// Text an extension put in the status bar (`tb action set-status`).
+struct StatusSegment {
+    id: String,
+    text: String,
+    until: Option<Instant>,
+}
 
 /// Shortest time between two frames sent to a client.
 const FRAME: Duration = Duration::from_millis(8);
@@ -68,6 +80,8 @@ const MESSAGE_TIME: Duration = Duration::from_secs(3);
 /// How often to redraw anyway, so names that follow the running program stay current. Starting a program
 /// prints nothing, and a redraw that changes nothing sends nothing.
 const REFRESH: Duration = Duration::from_millis(500);
+/// How often subscribers hear about changes, at most.
+const EVENTS_EVERY: Duration = Duration::from_millis(100);
 /// How often the session is saved for restoring, if it changed.
 const SAVE_EVERY: Duration = Duration::from_secs(2);
 
@@ -81,10 +95,16 @@ struct Client {
     prev_cursor: Option<Cursor>,
     /// Tab bar click areas: (start x, end x, tab index or `None` for the "+" button).
     tab_zones: Vec<TabZone>,
+    /// Status-bar segments' click areas.
+    status_zones: Vec<StatusZone>,
     /// How this client's terminal shows images.
     graphics: protocol::Graphics,
     /// The images this client's screen shows now.
     shown: Vec<images::Placed>,
+    /// Set for `tb subscribe` clients.
+    subscription: Option<events::Subscription>,
+    /// A `tb watch` client: shown the session, but its keys and size are ignored.
+    read_only: bool,
 }
 
 /// One client's screen: what `compose` builds.
@@ -92,6 +112,7 @@ struct Frame {
     buf: Buffer,
     cursor: Option<Cursor>,
     zones: Vec<TabZone>,
+    status_zones: Vec<StatusZone>,
     /// Real images to show after the text.
     images: Vec<images::Placed>,
     /// Encodings this frame wanted but the cache didn't have; blocks stand in until they're ready.
@@ -198,6 +219,20 @@ pub struct Server {
     /// Delete the saved session when the server ends (its last pane exited, or `tb delete`).
     forget: bool,
     images: images::Images,
+    /// Default colours set with `tb action set-pane-color`: (foreground, background).
+    pane_colors: HashMap<PaneId, (Option<Color>, Option<Color>)>,
+    /// The session as subscribers last heard of it (`None` while nobody is subscribed).
+    event_summary: Option<events::Summary>,
+    /// Panes that printed something since events were last sent.
+    changed_panes: HashSet<PaneId>,
+    /// Exit statuses of panes that closed since events were last sent.
+    exit_codes: HashMap<PaneId, i32>,
+    /// Status-bar text from extensions, in the order it was first set.
+    status: Vec<StatusSegment>,
+    /// Key bindings from `config.kdl`.
+    bindings: config::Bindings,
+    /// Shown when the next client attaches: what was wrong with the config.
+    config_note: Option<String>,
 }
 
 fn peer_is_us(stream: &UnixStream) -> bool {
@@ -241,6 +276,9 @@ pub fn run(name: &str, run_commands: bool) -> anyhow::Result<()> {
     });
 
     let mut server = Server::new(name, tx);
+    if let Err(e) = server.reload_config() {
+        server.config_note = Some(e);
+    }
     if let Some(saved) = persist::load(name) {
         server.restore(saved, run_commands);
     }
@@ -283,6 +321,13 @@ impl Server {
             last_saved: None,
             forget: false,
             images: encoder,
+            pane_colors: HashMap::new(),
+            event_summary: None,
+            changed_panes: HashSet::new(),
+            exit_codes: HashMap::new(),
+            status: Vec::new(),
+            bindings: config::Bindings::default(),
+            config_note: None,
         }
     }
 
@@ -290,9 +335,14 @@ impl Server {
         let mut last_render = Instant::now() - FRAME;
         let mut last_refresh = Instant::now();
         let mut last_save = Instant::now();
+        let mut last_events = Instant::now();
         loop {
-            let timeout =
+            let mut timeout =
                 if self.dirty { FRAME.saturating_sub(last_render.elapsed()) } else { Duration::from_millis(500) };
+            // Subscribers hear about changes promptly.
+            if self.event_summary.is_some() {
+                timeout = timeout.min(EVENTS_EVERY.saturating_sub(last_events.elapsed()).max(Duration::from_millis(1)));
+            }
             match rx.recv_timeout(timeout) {
                 Ok(ev) => self.handle(ev),
                 Err(RecvTimeoutError::Timeout) => {}
@@ -302,6 +352,11 @@ impl Server {
             for ev in rx.try_iter().take(2000) {
                 self.handle(ev);
             }
+            let now = Instant::now();
+            if self.status.iter().any(|s| s.until.is_some_and(|u| u <= now)) {
+                self.status.retain(|s| !s.until.is_some_and(|u| u <= now));
+                self.dirty = true;
+            }
             if self.message.as_ref().is_some_and(|(_, t)| t.elapsed() > MESSAGE_TIME) {
                 self.message = None;
                 self.dirty = true;
@@ -310,7 +365,12 @@ impl Server {
             if !self.had_tabs && self.clients.is_empty() && self.started.elapsed() > Duration::from_secs(30) {
                 self.quit = true;
             }
+            if last_events.elapsed() >= EVENTS_EVERY {
+                last_events = Instant::now();
+                self.emit_events();
+            }
             if self.quit {
+                self.emit_events();
                 break;
             }
             if last_refresh.elapsed() >= REFRESH {
@@ -407,8 +467,11 @@ impl Server {
                 prev: None,
                 prev_cursor: None,
                 tab_zones: Vec::new(),
+                status_zones: Vec::new(),
+                read_only: false,
                 graphics: protocol::Graphics::default(),
                 shown: Vec::new(),
+                subscription: None,
             },
         );
     }
@@ -424,7 +487,7 @@ impl Server {
             return;
         }
         if self.active_client == Some(id) {
-            self.active_client = self.clients.iter().find(|(_, c)| c.attached).map(|(id, _)| *id);
+            self.active_client = self.clients.iter().find(|(_, c)| c.attached && !c.read_only).map(|(id, _)| *id);
             if let Some(c) = self.active_client {
                 self.follow_client(c);
             }
@@ -467,6 +530,20 @@ impl Server {
                             self.send(id, ServerMsg::Exit { reason: format!("can't start a shell: {e}") });
                         }
                         log::info!("client {id} attached ({cols}x{rows})");
+                        if let Some(note) = self.config_note.take() {
+                            self.flash(note);
+                        }
+                    }
+                    ClientKind::Subscribe { panes, scrollback, ansi } => self.subscribe(id, panes, scrollback, ansi),
+                    ClientKind::Watch { cols, rows, graphics } => {
+                        if let Some(c) = self.clients.get_mut(&id) {
+                            c.attached = true;
+                            c.read_only = true;
+                            c.cols = cols;
+                            c.rows = rows;
+                            c.graphics = graphics;
+                        }
+                        log::info!("client {id} watches ({cols}x{rows})");
                     }
                     ClientKind::Command(cmd) => {
                         let (ok, text) = match self.command(cmd, id) {
@@ -480,7 +557,7 @@ impl Server {
                 self.dirty = true;
             }
             ClientMsg::Input(ev) => {
-                if self.clients.get(&id).is_some_and(|c| c.attached) {
+                if self.clients.get(&id).is_some_and(|c| c.attached && !c.read_only) {
                     self.make_active(id);
                     self.input(id, ev);
                 }
@@ -501,6 +578,9 @@ impl Server {
     }
 
     fn make_active(&mut self, id: ClientId) {
+        if self.clients.get(&id).is_some_and(|c| c.read_only) {
+            return;
+        }
         if self.active_client != Some(id) {
             self.active_client = Some(id);
             self.follow_client(id);
@@ -810,6 +890,7 @@ impl Server {
             None => {}
         }
         self.pane_names.remove(&id);
+        self.pane_colors.remove(&id);
         let selecting = matches!(&self.mode, Mode::Select(c) if c.pane == id);
         let searching = self.search.as_ref().is_some_and(|s| s.pane == id);
         if selecting || searching {
@@ -1123,7 +1204,12 @@ impl Server {
 
     /// Closes the active tab and everything in it.
     fn close_tab(&mut self) {
-        let Some(tab) = self.tabs.get(self.active) else { return };
+        self.close_tab_at(self.active);
+    }
+
+    /// Closes tab `i` and everything in it.
+    fn close_tab_at(&mut self, i: usize) {
+        let Some(tab) = self.tabs.get(i) else { return };
         let ids = tab.root.panes();
         // Panes hidden behind a scrollback editor go too.
         for id in &ids {
@@ -1179,6 +1265,13 @@ impl Server {
         match event {
             TermEvent::Wakeup | TermEvent::MouseCursorDirty | TermEvent::CursorBlinkingChange => {
                 self.dirty = true;
+                if self.event_summary.is_some() {
+                    self.changed_panes.insert(id);
+                    // A finder's editor shows in the finder's pane.
+                    if let Some(owner) = self.editor_owner(id) {
+                        self.changed_panes.insert(owner);
+                    }
+                }
                 if let Some(p) = self.pending_input.get_mut(&id) {
                     p.output_seen = true;
                 }
@@ -1219,7 +1312,16 @@ impl Server {
                     self.send(c, ServerMsg::Output(b"\x07".to_vec()));
                 }
             }
-            TermEvent::ChildExit(_) | TermEvent::Exit => self.close_pane(id),
+            TermEvent::ChildExit(status) => {
+                if self.event_summary.is_some() {
+                    use std::os::unix::process::ExitStatusExt;
+                    // Killed by a signal: 128 + the signal, as shells report it.
+                    let code = status.code().or_else(|| status.signal().map(|s| 128 + s)).unwrap_or(-1);
+                    self.exit_codes.insert(id, code);
+                }
+                self.close_pane(id);
+            }
+            TermEvent::Exit => self.close_pane(id),
         }
     }
 
@@ -1301,6 +1403,18 @@ impl Server {
     fn mouse(&mut self, client: ClientId, ev: MouseEvent) {
         let (x, y) = (ev.column, ev.row);
         if self.mouse_drag(client, &ev) {
+            return;
+        }
+        let bottom = self.clients.get(&client).map(|c| c.rows.saturating_sub(1));
+        if Some(y) == bottom {
+            // A click on an extension's status segment goes to subscribers.
+            if let MouseEventKind::Down(button) = ev.kind
+                && let Some(zone) =
+                    self.clients.get(&client).and_then(|c| c.status_zones.iter().find(|z| x >= z.0 && x < z.1))
+            {
+                let button = format!("{button:?}").to_lowercase();
+                self.send_event(serde_json::json!({"event": "status_clicked", "id": zone.2, "button": button}));
+            }
             return;
         }
         if y == 0 {
@@ -1479,20 +1593,10 @@ impl Server {
     // ----- CLI commands -----
 
     fn command(&mut self, cmd: Command, from: ClientId) -> anyhow::Result<String> {
-        let opts =
-            |cwd: Option<PathBuf>, command: Vec<String>| SpawnOptions { cwd, command, ..SpawnOptions::default() };
         Ok(match cmd {
             Command::Info => {
                 let attached = self.clients.values().filter(|c| c.attached).count();
                 format!("{} tabs, {} attached", self.tabs.len(), attached)
-            }
-            Command::ListPanes => serde_json::to_string(&self.pane_list())?,
-            Command::DumpScreen { pane, full } => {
-                let id = pane.or_else(|| self.focused_pane()).context("no pane")?;
-                match self.panes.get(&id).context("no such pane")? {
-                    Pane::Term(p) => p.text(full),
-                    Pane::Finder(f) => f.text(f.editor.and_then(|e| self.term(e))),
-                }
             }
             Command::Kill { forget } => {
                 self.quit = true;
@@ -1505,85 +1609,6 @@ impl Server {
                 }
                 String::new()
             }
-            Command::NewTab { name, cwd, command } => {
-                let cwd = cwd.or_else(|| self.focused_cwd());
-                self.new_tab(name, opts(cwd, command))?.to_string()
-            }
-            Command::Split { dir, cwd, command } => {
-                let cwd = cwd.or_else(|| self.focused_cwd());
-                self.split(dir, opts(cwd, command))?.to_string()
-            }
-            Command::Focus(target) => {
-                if let FocusTarget::Pane(id) = target
-                    && !self.tabs.iter().any(|t| t.root.contains(id))
-                {
-                    bail!("no pane {id}");
-                }
-                self.focus(target);
-                String::new()
-            }
-            Command::Close { pane } => {
-                let id = pane.or_else(|| self.focused_pane()).context("no pane")?;
-                if !self.panes.contains_key(&id) {
-                    bail!("no pane {id}");
-                }
-                self.close_pane(id);
-                String::new()
-            }
-            Command::Zoom => {
-                self.toggle_zoom();
-                String::new()
-            }
-            Command::Resize { dir, amount } => {
-                self.move_border(dir, amount);
-                String::new()
-            }
-            Command::GoToTab(n) => {
-                if n == 0 || n > self.tabs.len() {
-                    bail!("no tab {n} (there are {})", self.tabs.len());
-                }
-                self.go_to_tab(n - 1);
-                String::new()
-            }
-            Command::RenameTab(name) => {
-                let tab = self.tabs.get_mut(self.active).context("no tab")?;
-                tab.name = name;
-                tab.auto_name = false;
-                self.dirty = true;
-                String::new()
-            }
-            Command::Write { pane, text } => {
-                let id = match pane {
-                    Some(id) => id,
-                    None => self.focused_pane().context("no pane")?,
-                };
-                match self.panes.get(&id).context("no such pane")? {
-                    Pane::Term(p) => p.write(text.into_bytes()),
-                    Pane::Finder(f) => {
-                        if let Some(editor) = f.editor.and_then(|e| self.term(e)) {
-                            editor.write(text.into_bytes());
-                        } else {
-                            // Text for a finder is typed as keys, one character at a time.
-                            for c in text.chars() {
-                                let code = match c {
-                                    '\r' | '\n' => KeyCode::Enter,
-                                    '\x1b' => KeyCode::Esc,
-                                    '\t' => KeyCode::Tab,
-                                    '\x7f' => KeyCode::Backspace,
-                                    c => KeyCode::Char(c),
-                                };
-                                let action = match self.panes.get_mut(&id) {
-                                    Some(Pane::Finder(f)) => f.handle_key(&KeyEvent::new(code, KeyModifiers::NONE)),
-                                    _ => break,
-                                };
-                                self.finder_action(id, action);
-                            }
-                        }
-                    }
-                }
-                self.dirty = true;
-                String::new()
-            }
             Command::Finder { dir } => {
                 let dir = match dir {
                     Some(d) => d,
@@ -1594,48 +1619,8 @@ impl Server {
                 }
                 self.new_finder_tab(dir).to_string()
             }
-            Command::DetachAll => {
-                let ids: Vec<ClientId> =
-                    self.clients.iter().filter(|(i, c)| c.attached && **i != from).map(|(i, _)| *i).collect();
-                for id in ids {
-                    self.detach(id);
-                }
-                String::new()
-            }
+            Command::Action(a) => self.cli_action(a, from)?,
         })
-    }
-
-    fn pane_list(&self) -> Vec<serde_json::Value> {
-        let mut out = Vec::new();
-        for (ti, tab) in self.tabs.iter().enumerate() {
-            let layout = self.tab_layout(tab);
-            for id in tab.root.panes() {
-                let mut rect = layout.rect_of(id).unwrap_or_default();
-                if matches!(self.panes.get(&id), Some(Pane::Term(_))) {
-                    rect = self.body(rect);
-                }
-                let focused = ti == self.active && tab.focus == id;
-                let (kind, title, cwd, editor) = match self.panes.get(&id) {
-                    Some(Pane::Term(p)) => ("terminal", p.display_title(), p.cwd(), None),
-                    Some(Pane::Finder(f)) => ("finder", "finder".to_owned(), Some(f.dir.clone()), f.editor),
-                    None => continue,
-                };
-                out.push(serde_json::json!({
-                    "id": id,
-                    "tab": ti + 1,
-                    "tab_name": self.tab_label(tab),
-                    "kind": kind,
-                    "title": title,
-                    "name": self.pane_names.get(&id),
-                    "focused": focused,
-                    "visible": ti == self.active && (!tab.zoomed || tab.focus == id),
-                    "x": rect.x, "y": rect.y, "cols": rect.width, "rows": rect.height,
-                    "cwd": cwd,
-                    "editor_pane": editor,
-                }));
-            }
-        }
-        out
     }
 
     // ----- drawing -----
@@ -1654,16 +1639,17 @@ impl Server {
         self.dirty = false;
         let ids: Vec<ClientId> = self.clients.iter().filter(|(_, c)| c.attached).map(|(id, _)| *id).collect();
         for id in ids {
-            let (cols, rows, graphics) = match self.clients.get(&id) {
-                Some(c) => (c.cols, c.rows, c.graphics),
+            let (cols, rows, graphics, read_only) = match self.clients.get(&id) {
+                Some(c) => (c.cols, c.rows, c.graphics, c.read_only),
                 None => continue,
             };
-            let frame = self.compose(cols, rows, graphics);
+            let frame = self.compose(cols, rows, graphics, read_only);
             for job in frame.jobs {
                 self.images.request(job);
             }
             let Some(client) = self.clients.get_mut(&id) else { continue };
             client.tab_zones = frame.zones;
+            client.status_zones = frame.status_zones;
             let buf = frame.buf;
             let clear = client.prev.is_none();
             let mut prev = client.prev.take().unwrap_or_else(|| Buffer::empty(buf.area));
@@ -1709,7 +1695,7 @@ impl Server {
     }
 
     /// The full screen for a client of `cols` × `rows` whose terminal shows images as `graphics` says.
-    fn compose(&self, cols: u16, rows: u16, graphics: protocol::Graphics) -> Frame {
+    fn compose(&self, cols: u16, rows: u16, graphics: protocol::Graphics, read_only: bool) -> Frame {
         let mut buf = Buffer::empty(Rect::new(0, 0, cols, rows));
         let zones = self.draw_tab_bar(&mut buf);
         let content = self.content_area();
@@ -1766,8 +1752,9 @@ impl Server {
                 }
             }
         }
+        let mut status_zones = Vec::new();
         if rows >= 2 {
-            self.draw_status(&mut buf, rows - 1);
+            status_zones = self.draw_status(&mut buf, rows - 1, read_only);
         }
         if matches!(self.mode, Mode::Help) {
             self.draw_help(&mut buf);
@@ -1775,7 +1762,7 @@ impl Server {
         }
         // Never place the cursor on the tab or status bar.
         let cursor = cursor.filter(|c| c.y >= 1 && c.y + 1 < rows && c.x < cols);
-        Frame { buf, cursor, zones, images: placed, jobs }
+        Frame { buf, cursor, zones, status_zones, images: placed, jobs }
     }
 
     /// A pane's frame title: its name if it was renamed, otherwise its title or program.
@@ -1829,8 +1816,13 @@ impl Server {
                     Mode::Select(c) if c.pane == id => c.last_match.as_ref(),
                     _ => self.search.as_ref().filter(|s| s.pane == id).and_then(|s| s.current.as_ref()),
                 };
-                let decor =
-                    TermDecor { show_cursor, search_match, other_matches: &others, scroll_overlay: !self.frames };
+                let decor = TermDecor {
+                    show_cursor,
+                    search_match,
+                    other_matches: &others,
+                    scroll_overlay: !self.frames,
+                    colors: self.pane_colors.get(&id).copied().unwrap_or_default(),
+                };
                 draw_term(buf, body, p, &decor)
             }
             Pane::Finder(f) => {

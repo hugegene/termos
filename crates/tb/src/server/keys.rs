@@ -8,9 +8,10 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as TextLine, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Widget, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 use super::render::put_str;
-use super::{ClientId, Modal, Mode, NORMAL, Pane, Server};
+use super::{ClientId, Modal, Mode, NORMAL, Pane, Server, StatusZone};
 use crate::protocol::{Direction, FocusTarget, PaneId, SplitDir};
 
 fn ctrl(key: &KeyEvent, c: char) -> bool {
@@ -46,6 +47,13 @@ impl Server {
         if key.kind == KeyEventKind::Release {
             return;
         }
+        // A key bound in config.kdl replaces tb's own key in that mode.
+        if let Mode::Modal(m) = self.mode
+            && let Some(actions) = self.bindings.find(m, &key)
+        {
+            self.run_bound(client, actions);
+            return;
+        }
         match std::mem::replace(&mut self.mode, NORMAL) {
             Mode::Modal(Modal::Locked) => {
                 if !ctrl(&key, 'g') {
@@ -69,6 +77,29 @@ impl Server {
             }
             Mode::Help => {}
         }
+    }
+
+    /// Runs what a key is bound to in config.kdl.
+    fn run_bound(&mut self, client: ClientId, actions: Vec<super::config::Bound>) {
+        use super::config::Bound;
+        for a in actions {
+            match a {
+                Bound::Mode(m) => self.set_modal(m),
+                Bound::Action(a) => {
+                    if let Err(e) = self.cli_action(a, client) {
+                        self.flash(format!("{e:#}"));
+                    }
+                }
+                Bound::Detach => self.detach(client),
+                Bound::Quit => self.mode = Mode::ConfirmQuit,
+                Bound::BreakPane => self.break_pane(),
+                Bound::BreakPaneTo { right } => self.break_pane_to(right),
+                Bound::ToggleTab => self.toggle_last_tab(),
+                Bound::Search { down } => self.search_step(down),
+                Bound::SearchOption(c) => self.toggle_search_option(c),
+            }
+        }
+        self.dirty = true;
     }
 
     /// Switches mode. Leaving scroll and search mode ends the search.
@@ -468,8 +499,40 @@ impl Server {
     // ----- status bar and help -----
 
     /// The status bar: the modes in Normal mode, otherwise the current mode and its keys.
-    pub(super) fn draw_status(&self, buf: &mut Buffer, y: u16) {
-        let width = buf.area.width;
+    /// Extensions' status segments, right-aligned, in at most 60% of the bar. Returns the width used and
+    /// each segment's click area.
+    fn draw_segments(&self, buf: &mut Buffer, y: u16) -> (u16, Vec<StatusZone>) {
+        let full = buf.area.width;
+        let max = full * 3 / 5;
+        let style = Style::default().fg(Color::Black).bg(Color::Cyan);
+        let mut zones = Vec::new();
+        let mut x = full;
+        for seg in self.status.iter().rev() {
+            let text = format!(" {} ", seg.text);
+            let w = text.width() as u16;
+            let gap = u16::from(x < full);
+            if full - x + w + gap > max {
+                break;
+            }
+            x -= w + gap;
+            put_str(buf, x, y, &text, style, w);
+            zones.push((x, x + w, seg.id.clone()));
+        }
+        zones.reverse();
+        (full - x, zones)
+    }
+
+    pub(super) fn draw_status(&self, buf: &mut Buffer, y: u16, read_only: bool) -> Vec<StatusZone> {
+        let (used, zones) = self.draw_segments(buf, y);
+        // The rest of the bar ends a space before the segments.
+        let width = buf.area.width.saturating_sub(if used > 0 { used + 1 } else { 0 });
+        if read_only {
+            let badge = Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD);
+            let x = put_str(buf, 0, y, " WATCH ", badge, width);
+            let hint = format!(" session '{}', read-only · q or Ctrl+c stops watching", self.name);
+            put_str(buf, x, y, &hint, Style::default().fg(Color::DarkGray), width.saturating_sub(x));
+            return zones;
+        }
         let badge = |bg: Color| Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD);
         let dim = Style::default().fg(Color::DarkGray);
         let finder_hint = || match self.focused_pane().and_then(|id| self.panes.get(&id)) {
@@ -479,7 +542,9 @@ impl Server {
         let (mut x, hints) = match &self.mode {
             // A message briefly takes the mode list's place.
             Mode::Modal(Modal::Normal) if self.message.is_some() => (0, String::new()),
-            Mode::Modal(Modal::Normal) => (self.draw_mode_list(buf, y), finder_hint().unwrap_or_default().to_owned()),
+            Mode::Modal(Modal::Normal) => {
+                (self.draw_mode_list(buf, y, width), finder_hint().unwrap_or_default().to_owned())
+            }
             Mode::Modal(m) => {
                 let (name, bg) = match m {
                     Modal::Locked => ("LOCKED", Color::Red),
@@ -531,7 +596,7 @@ impl Server {
         x += 1;
         if let Some((msg, _)) = &self.message {
             put_str(buf, x, y, msg, Style::default().fg(Color::Yellow), width.saturating_sub(x));
-            return;
+            return zones;
         }
         // Drop whole hints from the end until the rest fits.
         let room = usize::from(width.saturating_sub(x));
@@ -547,10 +612,11 @@ impl Server {
         } else {
             put_str(buf, x, y, &shown, dim, room as u16);
         }
+        zones
     }
 
     /// "Ctrl + <g> LOCK <p> PANE …", shortened to fit. Returns the width used.
-    fn draw_mode_list(&self, buf: &mut Buffer, y: u16) -> u16 {
+    fn draw_mode_list(&self, buf: &mut Buffer, y: u16, width: u16) -> u16 {
         const MODES: [(char, &str); 8] = [
             ('g', "LOCK"),
             ('p', "PANE"),
@@ -561,7 +627,6 @@ impl Server {
             ('o', "SESSION"),
             ('q', "QUIT"),
         ];
-        let width = buf.area.width;
         let key = Style::default().add_modifier(Modifier::BOLD).fg(Color::Green);
         let label = Style::default();
         // Room left for a finder hint decides nothing; the mode list comes first.

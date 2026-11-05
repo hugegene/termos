@@ -11,7 +11,7 @@ use crossterm::event::{KeyEvent, MouseEvent};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 const MAX_FRAME: usize = 64 << 20;
 
 pub type PaneId = u32;
@@ -30,6 +30,11 @@ pub enum ClientKind {
     Attach { cols: u16, rows: u16, graphics: Graphics },
     /// A one-shot CLI command; the server replies once.
     Command(Command),
+    /// `tb subscribe`: events as JSON lines until the session ends. `panes` also send their text when it
+    /// changes; `scrollback` adds history to the first delivery (`Some(None)`: all of it).
+    Subscribe { panes: Vec<PaneId>, scrollback: Option<Option<usize>>, ansi: bool },
+    /// `tb watch`: like `Attach`, but read-only. Its keys are ignored and its size never changes the layout.
+    Watch { cols: u16, rows: u16, graphics: Graphics },
 }
 
 /// How a client's terminal shows images.
@@ -67,6 +72,10 @@ pub enum ServerMsg {
     Reply { ok: bool, text: String },
     /// The client should restore its terminal and exit.
     Exit { reason: String },
+    /// One event for a subscriber: a JSON object.
+    Event(String),
+    /// The client should attach to another session (`switch-session`).
+    Switch { session: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,46 +104,178 @@ pub enum FocusTarget {
 pub enum Command {
     /// Session summary for `tb ls`.
     Info,
-    ListPanes,
-    DumpScreen {
-        pane: Option<PaneId>,
-        full: bool,
-    },
     /// End the session. `forget` also deletes its saved layout; otherwise it can be restored.
     Kill {
         forget: bool,
     },
     /// Open a first tab if the session has none (after a restore it usually has).
     EnsureTab,
+    Finder {
+        dir: Option<PathBuf>,
+    },
+    /// `tb action …`: zellij's actions and `tb`'s own (step 6, the extension API).
+    Action(CliAction),
+}
+
+/// What `tb action` asks the server to do. Queries answer with JSON; the CLI formats it as text unless
+/// asked for JSON. `pane: None` means the focused pane, `tab: None` the active tab.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum CliAction {
+    // Queries.
+    ListTabs,
+    CurrentTabInfo,
+    ListPanes,
+    ListClients,
+    DumpScreen {
+        pane: Option<PaneId>,
+        full: bool,
+        ansi: bool,
+    },
+    DumpLayout,
+    // Tabs.
     NewTab {
         name: Option<String>,
         cwd: Option<PathBuf>,
         command: Vec<String>,
+        start_suspended: bool,
     },
-    Split {
-        dir: SplitDir,
+    CloseTab {
+        tab: Option<u32>,
+    },
+    GoToTab(usize),
+    GoToTabId(u32),
+    GoToTabName {
+        name: String,
+        create: bool,
+    },
+    CycleTab {
+        next: bool,
+    },
+    RenameTab {
+        tab: Option<u32>,
+        name: String,
+    },
+    UndoRenameTab {
+        tab: Option<u32>,
+    },
+    MoveTab {
+        tab: Option<u32>,
+        right: bool,
+    },
+    ToggleSync {
+        tab: Option<u32>,
+    },
+    // Panes.
+    NewPane {
+        dir: Option<SplitDir>,
+        name: Option<String>,
         cwd: Option<PathBuf>,
         command: Vec<String>,
+        start_suspended: bool,
     },
-    Focus(FocusTarget),
-    Close {
+    Edit {
+        file: PathBuf,
+        line: Option<u32>,
+        dir: Option<SplitDir>,
+        cwd: Option<PathBuf>,
+    },
+    ClosePane {
         pane: Option<PaneId>,
     },
-    Zoom,
+    Focus(FocusTarget),
+    FocusOrTab(Direction),
+    /// Swap the pane with its neighbour in `dir`, or with the next pane (`None`).
+    MovePane {
+        pane: Option<PaneId>,
+        dir: Option<Direction>,
+    },
+    MovePaneBackwards {
+        pane: Option<PaneId>,
+    },
+    RenamePane {
+        pane: Option<PaneId>,
+        name: String,
+    },
+    UndoRenamePane {
+        pane: Option<PaneId>,
+    },
+    ToggleFullscreen {
+        pane: Option<PaneId>,
+    },
+    ToggleFrames,
+    /// zellij's resize: grow or shrink on one side (or all sides with `None`).
     Resize {
+        pane: Option<PaneId>,
+        side: Option<Direction>,
+        grow: bool,
+    },
+    /// `tb`'s resize: move the nearest border in `dir` by `amount` cells.
+    MoveBorder {
+        pane: Option<PaneId>,
         dir: Direction,
         amount: u16,
     },
-    GoToTab(usize),
-    RenameTab(String),
+    Clear {
+        pane: Option<PaneId>,
+    },
+    EditScrollback {
+        pane: Option<PaneId>,
+    },
+    SetPaneColor {
+        pane: Option<PaneId>,
+        fg: Option<String>,
+        bg: Option<String>,
+        reset: bool,
+    },
+    Scroll {
+        pane: Option<PaneId>,
+        how: ScrollHow,
+    },
+    // Input.
     Write {
+        pane: Option<PaneId>,
+        bytes: Vec<u8>,
+    },
+    Paste {
         pane: Option<PaneId>,
         text: String,
     },
-    Finder {
-        dir: Option<PathBuf>,
+    SendKeys {
+        pane: Option<PaneId>,
+        keys: Vec<KeyEvent>,
     },
-    DetachAll,
+    // Session.
+    SwitchMode(String),
+    RenameSession(String),
+    SaveSession,
+    /// Detach every attached client.
+    Detach,
+    /// Move the active client to another session (starting it if needed).
+    SwitchSession(String),
+    /// Show `text` in the status bar as segment `id` (replacing that segment's text); `ttl` in seconds.
+    SetStatus {
+        id: String,
+        text: String,
+        ttl: Option<u64>,
+    },
+    /// Remove segment `id`, or every segment.
+    ClearStatus {
+        id: Option<String>,
+    },
+    /// Read config.kdl again; answers with the warnings.
+    ReloadConfig,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollHow {
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    HalfPageUp,
+    HalfPageDown,
+    Top,
+    Bottom,
 }
 
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {

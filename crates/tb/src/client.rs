@@ -14,7 +14,8 @@ use anyhow::{Context, bail};
 use crossterm::cursor::{SetCursorStyle, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange,
-    EnableMouseCapture, Event, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    EnableMouseCapture, Event, KeyCode, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::style::ResetColor;
@@ -22,8 +23,8 @@ use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 
 use crate::paths;
 use crate::protocol::{
-    ClientKind, ClientMsg, Command, Graphics, ImageProtocol, InputEvent, PROTOCOL_VERSION, ServerMsg, read_frame,
-    write_frame,
+    ClientKind, ClientMsg, Command, Graphics, ImageProtocol, InputEvent, PROTOCOL_VERSION, PaneId, ServerMsg,
+    read_frame, write_frame,
 };
 
 pub fn connect(session: &str) -> io::Result<UnixStream> {
@@ -71,7 +72,9 @@ pub fn command(session: &str, cmd: Command) -> anyhow::Result<String> {
     match read_frame::<_, ServerMsg>(&mut stream)? {
         ServerMsg::Reply { ok: true, text } => Ok(text),
         ServerMsg::Reply { ok: false, text } | ServerMsg::Exit { reason: text } => bail!(text),
-        ServerMsg::Output(_) => bail!("unexpected answer from the session"),
+        ServerMsg::Output(_) | ServerMsg::Event(_) | ServerMsg::Switch { .. } => {
+            bail!("unexpected answer from the session")
+        }
     }
 }
 
@@ -82,7 +85,8 @@ pub fn list_sessions(short: bool, reverse: bool) -> anyhow::Result<()> {
     let mut lines: Vec<(String, String)> = Vec::new();
     for name in paths::session_names() {
         match command(&name, Command::Info) {
-            Ok(info) => lines.push((name.clone(), format!("{name}: {info}{}", mark(&name)))),
+            // zellij's shape: the name first, details in brackets, so scripts can split on spaces.
+            Ok(info) => lines.push((name.clone(), format!("{name} [{info}]{}", mark(&name)))),
             Err(e) => {
                 if connect(&name).is_err() {
                     // Nobody answers: the socket is left over from a session that died.
@@ -101,7 +105,7 @@ pub fn list_sessions(short: bool, reverse: bool) -> anyhow::Result<()> {
     // Saved sessions that aren't running come back when attached.
     let running: Vec<String> = lines.iter().map(|(n, _)| n.clone()).collect();
     for name in paths::saved_names().into_iter().filter(|n| !running.contains(n)) {
-        let line = format!("{name} (exited, attach to restore)");
+        let line = format!("{name} (EXITED - attach to restore)");
         lines.push((name, line));
     }
     if reverse {
@@ -255,6 +259,47 @@ pub fn delete_session(session: &str, force: bool) -> anyhow::Result<()> {
     }
     fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
     Ok(())
+}
+
+/// `tb subscribe`: prints events as they happen until the session ends (or the subscribed panes close).
+/// With `json` every event is a JSON line; otherwise pane text is printed as plain lines and other events
+/// as JSON lines.
+pub fn subscribe(
+    session: &str,
+    panes: Vec<PaneId>,
+    scrollback: Option<Option<usize>>,
+    ansi: bool,
+    json: bool,
+) -> anyhow::Result<()> {
+    let mut stream = connect(session).with_context(|| format!("no session named '{session}'"))?;
+    let hello = ClientMsg::Hello { version: PROTOCOL_VERSION, kind: ClientKind::Subscribe { panes, scrollback, ansi } };
+    write_frame(&mut stream, &hello)?;
+    let mut out = io::stdout().lock();
+    loop {
+        match read_frame::<_, ServerMsg>(&mut stream) {
+            Ok(ServerMsg::Event(line)) => {
+                let text = if json {
+                    line
+                } else {
+                    match serde_json::from_str::<serde_json::Value>(&line) {
+                        Ok(v) if v["event"] == "pane_text" => v["lines"]
+                            .as_array()
+                            .map(|l| l.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("\n"))
+                            .unwrap_or_default(),
+                        _ => line,
+                    }
+                };
+                // A closed pipe (e.g. `| head`) ends the subscription quietly.
+                if writeln!(out, "{text}").and_then(|()| out.flush()).is_err() {
+                    return Ok(());
+                }
+            }
+            Ok(ServerMsg::Exit { reason }) if reason.starts_with("no pane") => bail!(reason),
+            Ok(ServerMsg::Reply { ok: false, text }) => bail!(text),
+            Ok(_) => return Ok(()),
+            Err(_) => return Ok(()),
+        }
+    }
 }
 
 /// Puts the terminal into the state the session needs, and restores it when dropped (also on panic).
@@ -444,49 +489,41 @@ pub fn ensure_outside() -> anyhow::Result<()> {
 
 pub fn attach(session: &str, run_commands: bool) -> anyhow::Result<()> {
     ensure_outside()?;
-    ensure_server(session, run_commands)?;
-    let mut stream = connect(session).with_context(|| format!("connecting to session '{session}'"))?;
-    let (cols, rows) = terminal::size().context("this command needs a terminal")?;
+    show(session, run_commands, false)
+}
+
+/// `tb watch`: shows a running session read-only. `q` or Ctrl+C stops watching.
+pub fn watch(session: &str) -> anyhow::Result<()> {
+    ensure_outside()?;
+    if connect(session).is_err() {
+        bail!("no session named '{session}'");
+    }
+    show(session, false, true)
+}
+
+/// How showing a session ended.
+enum End {
+    Reason(String),
+    /// `switch-session`: show this session next.
+    Switch(String),
+}
+
+/// Shows sessions in this terminal until one ends, the client detaches, or the user stops watching. The
+/// terminal stays in the session's state across `switch-session`.
+fn show(first: &str, run_commands: bool, read_only: bool) -> anyhow::Result<()> {
+    terminal::size().context("this command needs a terminal")?;
     let guard = TerminalGuard::enter()?;
     let graphics = detect_graphics();
-    let hello = ClientMsg::Hello { version: PROTOCOL_VERSION, kind: ClientKind::Attach { cols, rows, graphics } };
-    write_frame(&mut stream, &hello)?;
-    let mut reader = stream.try_clone()?;
-    let (done_tx, done_rx) = mpsc::channel::<String>();
-    thread::spawn(move || {
-        let reason = loop {
-            match read_frame::<_, ServerMsg>(&mut reader) {
-                Ok(ServerMsg::Output(bytes)) => {
-                    let mut out = io::stdout().lock();
-                    if out.write_all(&bytes).and_then(|()| out.flush()).is_err() {
-                        break "the terminal closed".to_owned();
-                    }
-                }
-                Ok(ServerMsg::Exit { reason }) => break reason,
-                Ok(ServerMsg::Reply { text, .. }) => break text,
-                Err(_) => break "lost the connection to the session".to_owned(),
-            }
-        };
-        let _ = done_tx.send(reason);
-    });
-
+    let mut session = first.to_owned();
+    let mut run_commands = run_commands;
     let reason = loop {
-        if let Ok(reason) = done_rx.try_recv() {
-            break reason;
+        if !read_only {
+            ensure_server(&session, run_commands)?;
         }
-        if !event::poll(Duration::from_millis(50))? {
-            continue;
-        }
-        let msg = match event::read()? {
-            Event::Key(k) => ClientMsg::Input(InputEvent::Key(k)),
-            Event::Mouse(m) => ClientMsg::Input(InputEvent::Mouse(m)),
-            Event::Paste(s) => ClientMsg::Input(InputEvent::Paste(s)),
-            Event::Resize(cols, rows) => ClientMsg::Resize { cols, rows },
-            Event::FocusGained => ClientMsg::Input(InputEvent::FocusGained),
-            Event::FocusLost => ClientMsg::Input(InputEvent::FocusLost),
-        };
-        if write_frame(&mut stream, &msg).is_err() {
-            break done_rx.recv_timeout(Duration::from_secs(1)).unwrap_or_else(|_| "lost the connection".into());
+        run_commands = false;
+        match show_one(&session, graphics, read_only)? {
+            End::Switch(next) => session = next,
+            End::Reason(reason) => break reason,
         }
     };
     drop(guard);
@@ -496,6 +533,68 @@ pub fn attach(session: &str, run_commands: bool) -> anyhow::Result<()> {
         other => println!("[{other}]"),
     }
     Ok(())
+}
+
+fn show_one(session: &str, graphics: Graphics, read_only: bool) -> anyhow::Result<End> {
+    let mut stream = connect(session).with_context(|| format!("connecting to session '{session}'"))?;
+    let (cols, rows) = terminal::size().context("this command needs a terminal")?;
+    let kind = if read_only {
+        ClientKind::Watch { cols, rows, graphics }
+    } else {
+        ClientKind::Attach { cols, rows, graphics }
+    };
+    write_frame(&mut stream, &ClientMsg::Hello { version: PROTOCOL_VERSION, kind })?;
+    let mut reader = stream.try_clone()?;
+    let (done_tx, done_rx) = mpsc::channel::<End>();
+    thread::spawn(move || {
+        let end = loop {
+            match read_frame::<_, ServerMsg>(&mut reader) {
+                Ok(ServerMsg::Output(bytes)) => {
+                    let mut out = io::stdout().lock();
+                    if out.write_all(&bytes).and_then(|()| out.flush()).is_err() {
+                        break End::Reason("the terminal closed".to_owned());
+                    }
+                }
+                Ok(ServerMsg::Exit { reason }) => break End::Reason(reason),
+                Ok(ServerMsg::Reply { text, .. }) => break End::Reason(text),
+                Ok(ServerMsg::Switch { session }) => break End::Switch(session),
+                Ok(ServerMsg::Event(_)) => {}
+                Err(_) => break End::Reason("lost the connection to the session".to_owned()),
+            }
+        };
+        let _ = done_tx.send(end);
+    });
+
+    loop {
+        if let Ok(end) = done_rx.try_recv() {
+            return Ok(end);
+        }
+        if !event::poll(Duration::from_millis(50))? {
+            continue;
+        }
+        let msg = match event::read()? {
+            Event::Resize(cols, rows) => ClientMsg::Resize { cols, rows },
+            // Watching: only q and Ctrl+C do anything.
+            Event::Key(k) if read_only => {
+                let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
+                if k.code == KeyCode::Char('q') || ctrl_c {
+                    let _ = write_frame(&mut stream, &ClientMsg::Detach);
+                    return Ok(End::Reason(format!("stopped watching session {session}")));
+                }
+                continue;
+            }
+            _ if read_only => continue,
+            Event::Key(k) => ClientMsg::Input(InputEvent::Key(k)),
+            Event::Mouse(m) => ClientMsg::Input(InputEvent::Mouse(m)),
+            Event::Paste(s) => ClientMsg::Input(InputEvent::Paste(s)),
+            Event::FocusGained => ClientMsg::Input(InputEvent::FocusGained),
+            Event::FocusLost => ClientMsg::Input(InputEvent::FocusLost),
+        };
+        if write_frame(&mut stream, &msg).is_err() {
+            let end = done_rx.recv_timeout(Duration::from_secs(1));
+            return Ok(end.unwrap_or_else(|_| End::Reason("lost the connection".into())));
+        }
+    }
 }
 
 #[cfg(test)]

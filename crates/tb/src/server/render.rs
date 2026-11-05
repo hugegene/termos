@@ -89,6 +89,8 @@ pub struct TermDecor<'a> {
     pub other_matches: &'a [Match],
     /// Show the scroll position over the pane's top-right corner (when no frame shows it).
     pub scroll_overlay: bool,
+    /// Default foreground and background set with `set-pane-color`.
+    pub colors: (Option<Color>, Option<Color>),
 }
 
 /// Draws a terminal pane into `rect`. Returns the cursor position if it should be shown.
@@ -115,6 +117,12 @@ pub fn draw_term(buf: &mut Buffer, rect: Rect, pane: &TermPane, decor: &TermDeco
         let (x, y) = (rect.x + col as u16, rect.y + line as u16);
         let Some(target) = buf.cell_mut((x, y)) else { continue };
         let mut style = cell_style(cell);
+        if let (Some(fg), Some(Color::Reset)) = (decor.colors.0, style.fg) {
+            style.fg = Some(fg);
+        }
+        if let (Some(bg), Some(Color::Reset)) = (decor.colors.1, style.bg) {
+            style.bg = Some(bg);
+        }
         if selection.is_some_and(|s| s.contains(indexed.point)) {
             style.add_modifier.toggle(Modifier::REVERSED);
         }

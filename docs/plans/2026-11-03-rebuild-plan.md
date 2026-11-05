@@ -442,6 +442,11 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
 - **2026-11-05:** step 6 also gets **keys that run commands** and **status-bar text from extensions**.
   - Keys use zellij's keybind syntax in `~/.config/tb/config.kdl`, the file the launch config will grow.
   - The step's estimate is now ~3–5k lines.
+- **2026-11-05:** **step 6 built.**
+  - The CLI is the extension API, with its reference in [docs/cli.md](../cli.md).
+  - `prbot` runs on `tb` with 7 lines changed ([finding](../findings/2026-11-05-prbot-on-tb.md)).
+  - The protocol version is now 3.
+  - Details are in the [CLI extension plan](2026-11-05-cli-extensions.md).
 
 ---
 

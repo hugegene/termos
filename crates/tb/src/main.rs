@@ -1,7 +1,10 @@
 //! `tb`: a terminal workspace with persistent sessions, tabs, split panes and a built-in file finder.
 //! ("tb" is a working name until the product name is chosen.)
 
+mod cli;
 mod client;
+mod kdl;
+mod keyspec;
 mod logger;
 mod paths;
 mod protocol;
@@ -11,12 +14,18 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::bail;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
 
-use protocol::{Command, Direction, FocusTarget, SplitDir};
+use protocol::Command;
 
 #[derive(Parser)]
-#[command(name = "tb", version, about = "Terminal workspace: persistent sessions, tabs, split panes and a file finder")]
+// The extension API's version is in `--version`. Within a version, commands, flags, JSON fields and events
+// are only ever added, never renamed, removed or changed in meaning (docs/cli.md).
+#[command(
+    name = "tb",
+    version = concat!(env!("CARGO_PKG_VERSION"), " (extension API 1)"),
+    about = "Terminal workspace: persistent sessions, tabs, split panes and a file finder"
+)]
 struct Cli {
     /// Session name (default: the session you're in, else "main")
     #[arg(short, long)]
@@ -25,11 +34,12 @@ struct Cli {
     cmd: Option<Cmd>,
 }
 
-/// `-s NAME` on each command that works on one session. (A single global `-s` would clash with `ls -s`.)
+/// `-s NAME` on each command that works on one session. It's given before any further subcommand
+/// (`tb action -s work new-tab`), because zellij's actions use `-s` for their own flags.
 #[derive(Args, Default)]
 struct SessionOpt {
     /// Session name (default: the session you're in, else "main")
-    #[arg(short, long, global = true)]
+    #[arg(short, long)]
     session: Option<String>,
 }
 
@@ -120,13 +130,42 @@ enum Cmd {
         #[command(flatten)]
         s: SessionOpt,
     },
-    /// Change the session from scripts: tabs, splits, focus and more
+    /// Change the session from scripts: zellij's actions (same names and flags) and tb's own
     #[command(visible_alias = "ac")]
     Action {
         #[command(flatten)]
         s: SessionOpt,
         #[command(subcommand)]
-        action: ActionCmd,
+        action: cli::ActionCmd,
+    },
+    /// Run COMMAND in a new pane (zellij's `run`); prints the pane's id. The session comes from `tb -s`
+    #[command(visible_alias = "r")]
+    Run(cli::PaneArgs),
+    /// Open FILE in the editor in a new pane (zellij's `edit`); prints the pane's id
+    #[command(visible_alias = "e")]
+    Edit(cli::EditArgs),
+    /// Print events as JSON lines until the session ends: tabs and panes opening, closing, renaming and
+    /// gaining focus, mode changes, clients. With -p, also those panes' text whenever it changes. The
+    /// session comes from `tb -s`
+    Subscribe {
+        /// Panes whose text to print when it changes (e.g. terminal_1 or 1)
+        #[arg(short, long = "pane-id", num_args = 1.., value_parser = cli::pane_id)]
+        pane_id: Vec<protocol::PaneId>,
+        /// raw: pane text as plain lines; json: every event as a JSON line
+        #[arg(short, long, value_enum, default_value = "raw")]
+        format: SubscribeFormat,
+        /// Include the scrollback in the first delivery: all of it, or the last N lines
+        #[arg(short, long, num_args = 0..=1, default_missing_value = "all")]
+        scrollback: Option<String>,
+        /// Keep colours and styles in pane text
+        #[arg(long)]
+        ansi: bool,
+    },
+    /// Show a running session read-only (zellij's `watch`); q or Ctrl+C stops watching
+    #[command(visible_alias = "w")]
+    Watch {
+        /// Session name (default: the session you're in, else "main")
+        name: Option<String>,
     },
     /// List the session's panes
     ListPanes {
@@ -135,16 +174,16 @@ enum Cmd {
         /// Print JSON
         #[arg(short, long)]
         json: bool,
+        /// Every column
+        #[arg(short, long)]
+        all: bool,
     },
     /// Print a pane's text (default: the focused pane)
     DumpScreen {
         #[command(flatten)]
         s: SessionOpt,
-        #[arg(short, long)]
-        pane: Option<u32>,
-        /// Include the scrollback
-        #[arg(long)]
-        full: bool,
+        #[command(flatten)]
+        a: cli::DumpScreenArgs,
     },
     #[command(name = "__server", hide = true)]
     Server {
@@ -154,86 +193,10 @@ enum Cmd {
     },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum SplitArg {
-    Right,
-    Down,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum DirArg {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-impl From<DirArg> for Direction {
-    fn from(d: DirArg) -> Self {
-        match d {
-            DirArg::Left => Direction::Left,
-            DirArg::Right => Direction::Right,
-            DirArg::Up => Direction::Up,
-            DirArg::Down => Direction::Down,
-        }
-    }
-}
-
-#[derive(Subcommand)]
-enum ActionCmd {
-    /// Open a new tab running a shell, or COMMAND after `--`
-    NewTab {
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        cwd: Option<PathBuf>,
-        #[arg(last = true)]
-        command: Vec<String>,
-    },
-    /// Split the focused pane
-    Split {
-        #[arg(value_enum)]
-        dir: SplitArg,
-        #[arg(long)]
-        cwd: Option<PathBuf>,
-        #[arg(last = true)]
-        command: Vec<String>,
-    },
-    /// Focus a pane: left, right, up, down, next, prev, or a pane id
-    #[command(visible_alias = "move-focus")]
-    Focus { target: String },
-    /// Close a pane (default: the focused one)
-    #[command(visible_alias = "close-pane")]
-    Close {
-        #[arg(short, long)]
-        pane: Option<u32>,
-    },
-    /// Zoom or unzoom the focused pane
-    #[command(visible_alias = "toggle-fullscreen")]
-    Zoom,
-    /// Move the focused pane's nearest border
-    Resize {
-        #[arg(value_enum)]
-        dir: DirArg,
-        #[arg(default_value_t = 2)]
-        amount: u16,
-    },
-    /// Go to tab N (1-based)
-    GoToTab { index: usize },
-    /// Rename the current tab
-    RenameTab { name: String },
-    /// Type text into a pane (default: the focused one)
-    #[command(visible_alias = "write-chars")]
-    Write {
-        #[arg(short, long)]
-        pane: Option<u32>,
-        text: String,
-        /// Press Enter after the text
-        #[arg(long)]
-        enter: bool,
-    },
-    /// Detach every other client
-    Detach,
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum SubscribeFormat {
+    Raw,
+    Json,
 }
 
 /// The session a command works on: a name given after the command, then `-s` after the command, then `-s`
@@ -248,65 +211,6 @@ fn pick_session(given: [Option<String>; 3], inside: Option<String>) -> anyhow::R
 
 fn absolute(p: PathBuf) -> anyhow::Result<PathBuf> {
     Ok(if p.is_absolute() { p } else { std::env::current_dir()?.join(p) })
-}
-
-fn print(text: &str) {
-    if !text.is_empty() {
-        println!("{text}");
-    }
-}
-
-fn action(a: ActionCmd) -> anyhow::Result<Command> {
-    Ok(match a {
-        ActionCmd::NewTab { name, cwd, command } => {
-            Command::NewTab { name, cwd: cwd.map(absolute).transpose()?, command }
-        }
-        ActionCmd::Split { dir, cwd, command } => Command::Split {
-            dir: match dir {
-                SplitArg::Right => SplitDir::Right,
-                SplitArg::Down => SplitDir::Down,
-            },
-            cwd: cwd.map(absolute).transpose()?,
-            command,
-        },
-        ActionCmd::Focus { target } => Command::Focus(match target.as_str() {
-            "left" => FocusTarget::Dir(Direction::Left),
-            "right" => FocusTarget::Dir(Direction::Right),
-            "up" => FocusTarget::Dir(Direction::Up),
-            "down" => FocusTarget::Dir(Direction::Down),
-            "next" => FocusTarget::Next,
-            "prev" => FocusTarget::Prev,
-            id => match id.parse() {
-                Ok(id) => FocusTarget::Pane(id),
-                Err(_) => bail!("focus target must be left, right, up, down, next, prev or a pane id"),
-            },
-        }),
-        ActionCmd::Close { pane } => Command::Close { pane },
-        ActionCmd::Zoom => Command::Zoom,
-        ActionCmd::Resize { dir, amount } => Command::Resize { dir: dir.into(), amount },
-        ActionCmd::GoToTab { index } => Command::GoToTab(index),
-        ActionCmd::RenameTab { name } => Command::RenameTab(name),
-        ActionCmd::Write { pane, text, enter } => Command::Write { pane, text: if enter { text + "\r" } else { text } },
-        ActionCmd::Detach => Command::DetachAll,
-    })
-}
-
-fn format_panes(json: &str) -> anyhow::Result<String> {
-    let panes: Vec<serde_json::Value> = serde_json::from_str(json)?;
-    let mut out =
-        vec![format!("{:>4}  {:>3}  {:<8}  {:>7}  {:<5}  {}", "PANE", "TAB", "KIND", "SIZE", "FOCUS", "TITLE")];
-    for p in panes {
-        out.push(format!(
-            "{:>4}  {:>3}  {:<8}  {:>7}  {:<5}  {}",
-            p["id"].to_string(),
-            p["tab"].to_string(),
-            p["kind"].as_str().unwrap_or(""),
-            format!("{}x{}", p["cols"], p["rows"]),
-            if p["focused"].as_bool() == Some(true) { "*" } else { "" },
-            p["title"].as_str().unwrap_or(""),
-        ));
-    }
-    Ok(out.join("\n"))
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
@@ -353,13 +257,22 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 client::attach(&session, false)?;
             }
         }
-        Cmd::Action { s, action: a } => print(&client::command(&session(None, s)?, action(a)?)?),
-        Cmd::ListPanes { s, json } => {
-            let text = client::command(&session(None, s)?, Command::ListPanes)?;
-            print(&if json { text } else { format_panes(&text)? });
+        Cmd::Action { s, action } => cli::run(&session(None, s)?, action)?,
+        Cmd::Run(a) => cli::send_plain(&session(None, SessionOpt::default())?, cli::new_pane(a)?)?,
+        Cmd::Edit(a) => cli::send_plain(&session(None, SessionOpt::default())?, cli::edit(a)?)?,
+        Cmd::ListPanes { s, json, all } => {
+            cli::list_panes(&session(None, s)?, cli::ListPanesArgs { json, all, ..Default::default() })?
         }
-        Cmd::DumpScreen { s, pane, full } => {
-            print(&client::command(&session(None, s)?, Command::DumpScreen { pane, full })?)
+        Cmd::DumpScreen { s, a } => cli::dump_screen(&session(None, s)?, a)?,
+        Cmd::Watch { name } => client::watch(&session(name, SessionOpt::default())?)?,
+        Cmd::Subscribe { pane_id, format, scrollback, ansi } => {
+            let scrollback = match scrollback.as_deref() {
+                None => None,
+                Some("all") => Some(None),
+                Some(n) => Some(Some(n.parse().map_err(|_| anyhow::anyhow!("--scrollback takes a number of lines"))?)),
+            };
+            let json = matches!(format, SubscribeFormat::Json);
+            client::subscribe(&session(None, SessionOpt::default())?, pane_id, scrollback, ansi, json)?
         }
     }
     Ok(())
@@ -420,12 +333,28 @@ mod tests {
         assert!(matches!(parse(&["da", "-y", "-f"]).cmd, Some(Cmd::DeleteAll { yes: true, force: true })));
         assert!(matches!(parse(&["kill-all-sessions"]).cmd, Some(Cmd::KillAll { yes: false })));
         assert!(matches!(parse(&["delete-all-sessions"]).cmd, Some(Cmd::DeleteAll { .. })));
-        // `-s` works before and after `action`'s own subcommand.
-        for args in [&["ac", "-s", "w", "go-to-tab", "2"][..], &["action", "go-to-tab", "2", "-s", "w"]] {
-            match parse(args).cmd {
-                Some(Cmd::Action { s, .. }) => assert_eq!(s.session.as_deref(), Some("w"), "{args:?}"),
+        // `-s` names the session before `action`'s own subcommand (after it, zellij's flags use `-s`).
+        for args in [&["ac", "-s", "w", "go-to-tab", "2"][..], &["-s", "w", "action", "go-to-tab", "2"]] {
+            let cli = parse(args);
+            match cli.cmd {
+                Some(Cmd::Action { s, .. }) => assert_eq!(s.session.or(cli.session).as_deref(), Some("w"), "{args:?}"),
                 _ => panic!("{args:?} isn't action"),
             }
+        }
+    }
+
+    /// docs/cli.md is the extension API's reference: every action must be in it.
+    #[test]
+    fn every_action_is_documented() {
+        let doc = include_str!("../../../docs/cli.md");
+        let cmd = Cli::command();
+        let action = cmd.find_subcommand("action").expect("an action command");
+        for sub in action.get_subcommands().filter(|s| s.get_name() != "help") {
+            let name = sub.get_name();
+            assert!(doc.contains(&format!("`{name}")), "docs/cli.md doesn't mention `{name}`");
+        }
+        for top in ["run", "edit", "watch", "subscribe"] {
+            assert!(doc.contains(&format!("`tb {top}")), "docs/cli.md doesn't mention `tb {top}`");
         }
     }
 

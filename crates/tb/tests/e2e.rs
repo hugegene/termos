@@ -275,7 +275,7 @@ fn attach_type_split_detach_reattach() {
     s.send(b"\x0fd");
     s.wait_exit();
     s.wait_for("[detached from session e2e-attach]");
-    assert!(env.tb(&["ls"]).contains("e2e-attach: 1 tabs, 0 attached"));
+    assert!(env.tb(&["ls"]).contains("e2e-attach [1 tabs, 0 attached]"));
 
     // Reattaching shows the same panes and their content.
     let s2 = env.attach(100, 30);
@@ -407,7 +407,7 @@ fn programs_exiting_close_panes_and_the_session() {
     env.tb(&["action", "split", "down", "--", "/bin/sh", "-c", "sleep 0.3"]);
     assert_eq!(env.panes().len(), 2);
     wait("the split to close", || (env.panes().len() == 1).then_some(()));
-    env.tb(&["action", "write", "--enter", "exit"]);
+    env.tb(&["action", "write-chars", "--enter", "exit"]);
     // zellij's name for `ls` works too.
     wait("the session to end", || (!env.tb(&["list-sessions"]).contains("e2e-exit")).then_some(()));
     assert!(!Path::new(&env.sock).join("e2e-exit.sock").exists());
@@ -631,7 +631,7 @@ fn sessions_come_back_after_kill() {
     env.tb(&["kill"]);
     s.wait_exit();
     let ls = env.tb(&["ls"]);
-    assert!(ls.contains("e2e-persist (exited, attach to restore)"), "{ls}");
+    assert!(ls.contains("e2e-persist (EXITED - attach to restore)"), "{ls}");
 
     // Attaching brings it back: tabs, names, folders, the finder's selection, and the command at the prompt.
     let s = env.attach(100, 30);
@@ -692,24 +692,24 @@ fn zellij_session_commands() {
         .env("TB_SESSION", "zj-b")
         .output()
         .unwrap();
-    assert!(String::from_utf8_lossy(&out.stdout).contains("zj-b: 1 tabs, 0 attached (current)"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("zj-b [1 tabs, 0 attached] (current)"));
 
     // Two tabs in zj-a; `kill-session NAME` keeps the layout, and `attach -b` brings both tabs back.
     env.ok(&["action", "-s", "zj-a", "new-tab"]);
     env.ok(&["kill-session", "zj-a"]);
-    wait("zj-a exited", || ls().contains("zj-a (exited, attach to restore)").then_some(()));
+    wait("zj-a exited", || ls().contains("zj-a (EXITED - attach to restore)").then_some(()));
     env.ok(&["attach", "-b", "zj-a"]);
-    assert!(ls().contains("zj-a: 2 tabs"), "{}", ls());
+    assert!(ls().contains("zj-a [2 tabs"), "{}", ls());
     // `--forget` starts it fresh instead.
     env.ok(&["k", "zj-a"]);
-    wait("zj-a exited", || ls().contains("zj-a (exited").then_some(()));
+    wait("zj-a exited", || ls().contains("zj-a (EXITED").then_some(()));
     env.ok(&["attach", "-b", "--forget", "zj-a"]);
-    assert!(ls().contains("zj-a: 1 tabs"), "{}", ls());
+    assert!(ls().contains("zj-a [1 tabs"), "{}", ls());
 
     // `-f` runs a restored command instead of only typing it.
     env.ok(&["ac", "-s", "zj-b", "new-tab", "--", "sleep", "300"]);
     env.ok(&["kill-session", "zj-b"]);
-    wait("zj-b exited", || ls().contains("zj-b (exited").then_some(()));
+    wait("zj-b exited", || ls().contains("zj-b (EXITED").then_some(()));
     env.ok(&["attach", "-b", "-f", "zj-b"]);
     wait("sleep running again", || {
         let panes: Vec<serde_json::Value> = serde_json::from_str(&env.ok(&["list-panes", "-s", "zj-b", "-j"])).unwrap();
@@ -718,12 +718,12 @@ fn zellij_session_commands() {
 
     // `kill-all-sessions -y` ends both and keeps their layouts.
     env.ok(&["ka", "-y"]);
-    wait("both exited", || (ls().matches("(exited").count() == 2).then_some(()));
+    wait("both exited", || (ls().matches("(EXITED").count() == 2).then_some(()));
     // Without `-y` it asks, and anything but y keeps the sessions (here stdin is empty: no).
     env.ok(&["attach", "-b", "zj-a"]);
     let out = env.ok(&["kill-all-sessions"]);
     assert!(out.contains("End zj-a"), "{out}");
-    assert!(ls().contains("zj-a: "), "still running: {}", ls());
+    assert!(ls().contains("zj-a ["), "still running: {}", ls());
 
     // `delete-all-sessions -y` forgets exited sessions only; `-f` also ends and forgets running ones.
     let out = env.ok(&["da", "-y"]);
@@ -737,6 +737,446 @@ fn zellij_session_commands() {
     assert!(!env.run(&["delete-session", "zj-c"]).status.success(), "refuses a running session");
     env.ok(&["d", "-f", "zj-c"]);
     wait("zj-c gone", || (ls().trim() == "no sessions").then_some(()));
+}
+
+/// Parses JSON output from `tb`.
+fn json(text: &str) -> serde_json::Value {
+    serde_json::from_str(text).unwrap_or_else(|e| panic!("not JSON ({e}): {text}"))
+}
+
+/// zellij's tab actions: ids, names, lists, going to, renaming, moving, syncing and closing tabs.
+#[test]
+fn zellij_tab_actions() {
+    let env = Env::new("e2e-tab-actions");
+    env.tb(&["start"]);
+    // new-tab prints the new tab's id; list-tabs prints zellij's columns.
+    let two: u32 = env.tb(&["action", "new-tab", "-n", "two"]).trim().parse().expect("a tab id");
+    let three: u32 = env.tb(&["action", "new-tab", "--name", "three"]).trim().parse().unwrap();
+    let text = env.tb(&["action", "list-tabs"]);
+    assert!(text.starts_with("TAB_ID  POSITION  NAME\n"), "{text}");
+    assert!(text.contains(&format!("{two}  1  two")), "{text}");
+    assert_eq!(env.tb(&["action", "query-tab-names"]).lines().skip(1).collect::<Vec<_>>(), ["two", "three"]);
+    let tabs = json(&env.tb(&["action", "list-tabs", "-j"]));
+    for field in ["tab_id", "position", "name", "active", "is_fullscreen_active", "is_sync_panes_active"] {
+        assert!(tabs[0].get(field).is_some(), "list-tabs -j lacks {field}: {tabs}");
+    }
+    assert_eq!(tabs[2]["active"], true, "the newest tab is active");
+    // Going to tabs by id and by name, and current-tab-info.
+    env.tb(&["action", "go-to-tab-by-id", &two.to_string()]);
+    assert_eq!(json(&env.tb(&["action", "current-tab-info", "-j"]))["name"], "two");
+    env.tb(&["action", "go-to-tab-name", "three"]);
+    assert_eq!(json(&env.tb(&["action", "current-tab-info", "-j"]))["tab_id"], three);
+    assert!(
+        Command::new(TB)
+            .args(["-s", &env.session, "action", "go-to-tab-name", "nope"])
+            .envs(env.vars.iter().map(|(k, v)| (k, v)))
+            .output()
+            .unwrap()
+            .status
+            .code()
+            != Some(0)
+    );
+    env.tb(&["action", "go-to-tab-name", "-c", "made"]);
+    assert_eq!(json(&env.tb(&["action", "current-tab-info", "-j"]))["name"], "made");
+    // Renaming by id, and undoing it (the name follows the program again).
+    env.tb(&["action", "rename-tab-by-id", &two.to_string(), "renamed"]);
+    assert!(env.tb(&["action", "query-tab-names"]).contains("renamed"));
+    env.tb(&["action", "undo-rename-tab", "-t", &two.to_string()]);
+    assert!(!env.tb(&["action", "query-tab-names"]).contains("renamed"));
+    // Moving a tab by id keeps the active tab active; sync by id.
+    env.tb(&["action", "move-tab", "left", "-t", &three.to_string()]);
+    let tabs = json(&env.tb(&["action", "list-tabs", "-j"]));
+    let pos = |id: u32| tabs.as_array().unwrap().iter().find(|t| t["tab_id"] == id).unwrap()["position"].clone();
+    assert_eq!(pos(three), 1, "{tabs}");
+    assert_eq!(json(&env.tb(&["action", "current-tab-info", "-j"]))["name"], "made");
+    env.tb(&["action", "toggle-active-sync-tab", "-t", &three.to_string()]);
+    let tabs = json(&env.tb(&["action", "list-tabs", "-j"]));
+    assert_eq!(tabs.as_array().unwrap().iter().find(|t| t["tab_id"] == three).unwrap()["is_sync_panes_active"], true);
+    // Next and previous wrap around; closing by id.
+    env.tb(&["action", "go-to-next-tab"]);
+    assert_eq!(json(&env.tb(&["action", "current-tab-info", "-j"]))["position"], 0);
+    env.tb(&["action", "go-to-previous-tab"]);
+    assert_eq!(json(&env.tb(&["action", "current-tab-info", "-j"]))["name"], "made");
+    env.tb(&["action", "close-tab-by-id", &three.to_string()]);
+    env.tb(&["action", "close-tab"]);
+    assert_eq!(json(&env.tb(&["action", "list-tabs", "-j"])).as_array().unwrap().len(), 2);
+}
+
+/// zellij's pane actions: new-pane and run print ids; list-panes has zellij's fields; focus, rename,
+/// fullscreen, colours, edit and close work by id.
+#[test]
+fn zellij_pane_actions() {
+    let mut env = Env::new("e2e-panes");
+    let editor = env.root.join("editor.sh");
+    let args = env.root.join("editor-args");
+    fs::write(&editor, format!("#!/bin/sh\necho \"$@\" > {}\nsleep 300\n", args.display())).unwrap();
+    Command::new("chmod").arg("755").arg(&editor).status().unwrap();
+    env.set("TB_EDITOR", editor.to_str().unwrap());
+    let s = env.attach(120, 40);
+    s.wait_for("$");
+    let first = env.focused();
+    let side = env.tb(&["action", "new-pane", "-d", "right", "-n", "side", "--", "sleep", "300"]);
+    let side_id: u64 = side.trim().strip_prefix("terminal_").expect("terminal_N").parse().unwrap();
+    s.wait_for("┌ side ");
+    let ran = Command::new(TB)
+        .args(["-s", &env.session, "run", "-d", "down", "--", "sleep", "301"])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&ran.stdout).trim().starts_with("terminal_"), "{ran:?}");
+    // zellij's text columns and JSON fields.
+    let text = env.tb(&["action", "list-panes", "-c"]);
+    assert!(text.starts_with("PANE_ID  TYPE  TITLE  COMMAND  CWD\n"), "{text}");
+    assert!(text.contains(&format!("terminal_{side_id}  terminal")), "{text}");
+    let panes = json(&env.tb(&["action", "list-panes", "-j"]));
+    let pane = panes.as_array().unwrap().iter().find(|p| p["id"] == side_id).unwrap().clone();
+    for field in
+        ["is_plugin", "is_focused", "title", "tab_id", "tab_name", "pane_command", "pane_cwd", "terminal_command"]
+    {
+        assert!(pane.get(field).is_some(), "list-panes -j lacks {field}: {pane}");
+    }
+    assert_eq!(pane["terminal_command"], "sleep 300");
+    // Focus by id (bare and terminal_N), rename and undo, fullscreen by id.
+    env.tb(&["action", "focus-pane-id", &first.to_string()]);
+    assert_eq!(env.focused(), first);
+    env.tb(&["action", "focus-pane-id", &format!("terminal_{side_id}")]);
+    assert_eq!(env.focused(), side_id);
+    env.tb(&["action", "rename-pane", "-p", &first.to_string(), "main-shell"]);
+    s.wait_for("┌ main-shell ");
+    env.tb(&["action", "undo-rename-pane", "-p", &first.to_string()]);
+    wait("name gone", || (!s.text().contains("main-shell")).then_some(()));
+    env.tb(&["action", "toggle-fullscreen", "-p", &first.to_string()]);
+    let panes = json(&env.tb(&["action", "list-panes", "-j"]));
+    assert!(panes.as_array().unwrap().iter().any(|p| p["id"] == first && p["is_fullscreen"] == true), "{panes}");
+    env.tb(&["action", "toggle-fullscreen"]);
+    // Colours, as zellij writes them.
+    env.tb(&["action", "set-pane-color", "-p", &first.to_string(), "--bg", "rgb:10/20/30"]);
+    let colour = |env: &Env| {
+        json(&env.tb(&["action", "list-panes", "-j"])).as_array().unwrap().iter().find(|p| p["id"] == first).unwrap()
+            ["default_bg"]
+            .clone()
+    };
+    assert_eq!(colour(&env), "#102030");
+    env.tb(&["action", "set-pane-color", "-p", &first.to_string(), "--reset"]);
+    assert_eq!(colour(&env), serde_json::Value::Null);
+    // edit opens the editor at a line, in a new pane.
+    let file = env.root.join("notes.txt");
+    fs::write(&file, "a\nb\nc\n").unwrap();
+    let edited = env.tb(&["action", "edit", "-l", "3", file.to_str().unwrap()]);
+    assert!(edited.trim().starts_with("terminal_"), "{edited}");
+    let got = wait("editor started", || fs::read_to_string(&args).ok().filter(|a| !a.is_empty()));
+    assert_eq!(got.trim(), format!("+3 {}", file.display()));
+    // Close by id.
+    env.tb(&["action", "close-pane", "-p", &format!("terminal_{side_id}")]);
+    assert!(!json(&env.tb(&["action", "list-panes", "-j"])).as_array().unwrap().iter().any(|p| p["id"] == side_id));
+}
+
+/// zellij's input, scrolling and session actions.
+#[test]
+fn zellij_input_and_session_actions() {
+    let env = Env::new("e2e-input");
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    let id = env.focused().to_string();
+    // write-chars and send-keys; write takes bytes ("echo bytes" and Enter); paste.
+    env.tb(&["action", "write-chars", "echo one"]);
+    env.tb(&["action", "send-keys", "Enter"]);
+    s.wait_for("one");
+    env.tb(&["action", "write", "-p", &id, "101", "99", "104", "111", "32", "98", "121", "116", "101", "115", "13"]);
+    s.wait_for("bytes");
+    env.tb(&["action", "paste", "echo pasted"]);
+    env.tb(&["action", "send-keys", "Enter"]);
+    s.wait_for("pasted");
+    // dump-screen: to a file, and with colours.
+    let out = env.root.join("screen.txt");
+    env.tb(&["action", "dump-screen", "--path", out.to_str().unwrap()]);
+    assert!(fs::read_to_string(&out).unwrap().contains("bytes"));
+    env.tb(&["action", "write-chars", "--enter", "printf '\\033[31mred\\033[0m\\n'"]);
+    s.wait_for("red");
+    assert!(env.tb(&["action", "dump-screen", "-a"]).contains("\x1b[0;31mred"));
+    // Scrolling shows in the frame; clear empties the pane.
+    env.tb(&["action", "write-chars", "--enter", "seq 1 200"]);
+    s.wait_for("200");
+    env.tb(&["action", "scroll-to-top"]);
+    s.wait_for("SCROLL:");
+    env.tb(&["action", "scroll-to-bottom"]);
+    wait("back at the bottom", || (!s.text().contains("SCROLL:")).then_some(()));
+    env.tb(&["action", "clear"]);
+    wait("cleared", || (!env.tb(&["action", "dump-screen"]).contains("200")).then_some(()));
+    // switch-mode shows in the status bar.
+    env.tb(&["action", "switch-mode", "locked"]);
+    s.wait_for("LOCKED");
+    env.tb(&["action", "switch-mode", "normal"]);
+    // list-clients shows the attached client.
+    let clients = env.tb(&["action", "list-clients"]);
+    assert!(clients.starts_with("CLIENT_ID  PANE_ID  RUNNING_COMMAND\n") && clients.lines().count() == 2, "{clients}");
+    // save-session writes the saved layout; dump-layout prints it.
+    env.tb(&["action", "save-session"]);
+    assert!(env.root.join(format!("state/sessions/{}.json", env.session)).exists());
+    assert!(json(&env.tb(&["action", "dump-layout"]))["tabs"].is_array());
+    // rename-session: the session answers under its new name; detach ends the client.
+    let new = format!("{}-renamed", env.session);
+    env.tb(&["action", "rename-session", &new]);
+    let ls = env.tb(&["ls"]);
+    assert!(ls.contains(&format!("{new} [")), "{ls}");
+    let detach = Command::new(TB)
+        .args(["-s", &new, "action", "detach"])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .output()
+        .unwrap();
+    assert!(detach.status.success(), "{detach:?}");
+    s.wait_exit();
+    let _ = Command::new(TB).args(["-s", &new, "kill"]).envs(env.vars.iter().map(|(k, v)| (k, v))).output();
+}
+
+/// A `tb subscribe` running in the background; its output lines are collected.
+struct Subscriber {
+    child: std::process::Child,
+    lines: Arc<Mutex<Vec<String>>>,
+}
+
+impl Subscriber {
+    fn start(env: &Env, args: &[&str]) -> Subscriber {
+        use std::io::BufRead;
+        let mut child = Command::new(TB)
+            .args(["-s", &env.session, "subscribe"])
+            .args(args)
+            .envs(env.vars.iter().map(|(k, v)| (k, v)))
+            .env_remove("TB_SESSION")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let out = child.stdout.take().unwrap();
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let sink = lines.clone();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                sink.lock().unwrap().push(line);
+            }
+        });
+        Subscriber { child, lines }
+    }
+
+    /// Waits for a line containing `needle`, and returns it.
+    fn wait_for(&self, needle: &str) -> String {
+        wait(needle, || self.lines.lock().unwrap().iter().find(|l| l.contains(needle)).cloned())
+    }
+
+    /// Waits for a JSON event with these fields.
+    fn wait_event(&self, fields: serde_json::Value) -> serde_json::Value {
+        wait(&fields.to_string(), || {
+            self.lines
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .find(|e| fields.as_object().unwrap().iter().all(|(k, v)| &e[k] == v))
+        })
+    }
+}
+
+impl Drop for Subscriber {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// `tb subscribe`: session events as JSON lines, and a pane's text as it changes.
+#[test]
+fn subscribe_reports_events() {
+    let env = Env::new("e2e-subscribe");
+    env.tb(&["start"]);
+    let first = env.focused().to_string();
+    // The first delivery is the subscribed pane's text, so once it arrives, events are flowing.
+    let events = Subscriber::start(&env, &["-f", "json", "-p", &first]);
+    events.wait_event(serde_json::json!({"event": "pane_text"}));
+    let tab: u64 = env.tb(&["action", "new-tab", "-n", "two"]).trim().parse().unwrap();
+    events.wait_event(serde_json::json!({"event": "tab_opened", "tab_id": tab, "name": "two"}));
+    events.wait_event(serde_json::json!({"event": "tab_focused", "tab_id": tab}));
+    env.tb(&["action", "rename-tab", "renamed"]);
+    events.wait_event(serde_json::json!({"event": "tab_renamed", "tab_id": tab, "name": "renamed"}));
+    // A pane that exits reports its exit status.
+    let pane = env.tb(&["action", "new-pane", "--", "sh", "-c", "sleep 0.5; exit 3"]);
+    let id: u64 = pane.trim().strip_prefix("terminal_").unwrap().parse().unwrap();
+    events.wait_event(serde_json::json!({"event": "pane_opened", "pane_id": id}));
+    events.wait_event(serde_json::json!({"event": "pane_closed", "pane_id": id, "exit_status": 3}));
+    env.tb(&["action", "switch-mode", "locked"]);
+    events.wait_event(serde_json::json!({"event": "mode_changed", "mode": "locked"}));
+    env.tb(&["action", "switch-mode", "normal"]);
+    env.tb(&["action", "close-tab"]);
+    events.wait_event(serde_json::json!({"event": "tab_closed", "tab_id": tab}));
+    // Raw format: the pane's text, printed when it changes.
+    let text = Subscriber::start(&env, &["-p", &format!("terminal_{first}")]);
+    env.tb(&["action", "write-chars", "-p", &first, "--enter", "echo hello-sub"]);
+    text.wait_for("hello-sub");
+    // A pane that doesn't exist is an error.
+    let bad = env.run(&["-s", &env.session, "subscribe", "-p", "999"]);
+    assert!(!bad.status.success() && String::from_utf8_lossy(&bad.stderr).contains("no pane 999"), "{bad:?}");
+}
+
+/// Status-bar text from extensions: segments by id, expiry, clearing, and clicks reported to subscribers.
+#[test]
+fn status_segments() {
+    let env = Env::new("e2e-status");
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    let first = env.focused().to_string();
+    let events = Subscriber::start(&env, &["-f", "json", "-p", &first]);
+    events.wait_event(serde_json::json!({"event": "pane_text"}));
+    env.tb(&["action", "set-status", "--id", "prbot", "PR #487 needs review"]);
+    env.tb(&["action", "set-status", "--id", "clock", "12:00"]);
+    let bottom = |s: &Screen| s.text().lines().last().unwrap_or_default().to_owned();
+    wait("both segments", || {
+        (bottom(&s).contains("PR #487 needs review") && bottom(&s).contains("12:00")).then_some(())
+    });
+    // Setting an id again replaces its text, in place.
+    env.tb(&["action", "set-status", "--id", "prbot", "PR #490 too"]);
+    wait("replaced", || {
+        let b = bottom(&s);
+        (b.contains("PR #490 too") && !b.contains("#487") && b.find("#490") < b.find("12:00")).then_some(())
+    });
+    // A click on a segment reaches subscribers with the segment's id.
+    let line = bottom(&s);
+    let x = line[..line.find("12:00").unwrap()].chars().count() as u16;
+    s.send(&click(x, 29));
+    events.wait_event(serde_json::json!({"event": "status_clicked", "id": "clock", "button": "left"}));
+    // --ttl expires a segment; clear-status removes one, or all.
+    env.tb(&["action", "set-status", "--id", "brief", "--ttl", "1", "gone soon"]);
+    s.wait_for("gone soon");
+    wait("expired", || (!bottom(&s).contains("gone soon")).then_some(()));
+    env.tb(&["action", "clear-status", "--id", "clock"]);
+    wait("clock cleared", || (!bottom(&s).contains("12:00")).then_some(()));
+    env.tb(&["action", "clear-status"]);
+    wait("all cleared", || (!bottom(&s).contains("PR #490")).then_some(()));
+}
+
+/// `switch-session` moves the attached client to another session; `tb watch` shows a session read-only.
+#[test]
+fn switch_session_and_watch() {
+    let env = Env::new("e2e-switch");
+    let other = format!("{}-other", env.session);
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    env.tb(&["action", "switch-session", &other]);
+    wait("switched", || {
+        let ls = env.tb(&["ls"]);
+        (ls.contains(&format!("{other} [1 tabs, 1 attached]"))
+            && ls.contains(&format!("{} [1 tabs, 0 attached]", env.session)))
+        .then_some(())
+    });
+    s.wait_for("$");
+    // A watcher sees the session, can't type into it, and doesn't change its size.
+    let size =
+        |env: &Env| json(&env.ok(&["-s", &other, "action", "current-tab-info", "-j"]))["viewport_columns"].clone();
+    let before = size(&env);
+    let w = Screen::spawn(&env, &["watch", &other], 60, 20);
+    w.wait_for("WATCH");
+    w.wait_for("read-only");
+    w.send(b"echo typed-by-watcher\r");
+    sleep(Duration::from_millis(500));
+    assert!(!env.ok(&["-s", &other, "dump-screen"]).contains("typed-by-watcher"));
+    assert_eq!(size(&env), before, "the watcher's size doesn't change the layout");
+    // The attached client can still type, and the watcher sees it.
+    s.send(b"echo from-the-owner\r");
+    w.wait_for("from-the-owner");
+    w.send(b"q");
+    w.wait_exit();
+    assert!(env.ok(&["ls"]).contains(&format!("{other} [1 tabs, 1 attached]")));
+}
+
+/// Keys bound in config.kdl, in zellij's syntax: Run a command, type text; reload-config reports what it
+/// skipped, and a broken file keeps the old bindings.
+#[test]
+fn config_key_bindings() {
+    let mut env = Env::new("e2e-keys");
+    let config = env.root.join("config.kdl");
+    fs::write(
+        &config,
+        r#"
+keybinds clear-defaults=true {
+    tab {
+        bind "p" { Run "sh" "-c" "echo bound-run; sleep 300" { name "bound"; }; SwitchToMode "Normal"; }
+    }
+    normal {
+        bind "Alt y" { WriteChars "echo from-binding"; Write 13; }
+    }
+}
+"#,
+    )
+    .unwrap();
+    env.set("TB_CONFIG", config.to_str().unwrap());
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    // Ctrl+t then p: the bound Run opens a named pane, and the binding switches back to normal mode.
+    s.send(b"\x14p");
+    s.wait_for("┌ bound ");
+    s.wait_for("bound-run");
+    s.wait_for("<g> LOCK");
+    // Alt+y types into the focused pane.
+    env.tb(&["action", "focus-previous-pane"]);
+    // A line the command printed (not the echoed command line).
+    let printed = |word: &'static str| move |t: &str| t.lines().any(|l| unframe(l).starts_with(word));
+    s.send(b"\x1by");
+    s.wait_until("from-binding printed", printed("from-binding"));
+    // reload-config lists what it skipped; the bindings it could load still work.
+    fs::write(&config, "keybinds {\n  normal {\n    bind \"Alt y\" { WriteChars \"echo reloaded\"; Write 13; }\n    bind \"Alt u\" { ToggleFloatingPanes; }\n  }\n}\n")
+        .unwrap();
+    let warnings = env.tb(&["action", "reload-config"]);
+    assert!(
+        warnings.contains("line 4: skipped this binding: tb has no action 'ToggleFloatingPanes' yet"),
+        "{warnings}"
+    );
+    s.send(b"\x1by");
+    s.wait_until("reloaded printed", printed("reloaded"));
+    // A file that isn't KDL is an error, and the old bindings stay.
+    fs::write(&config, "keybinds {\n  normal {\n    bind \"Alt y\" { WriteChars \"never\n").unwrap();
+    let broken = env.run(&["-s", &env.session, "action", "reload-config"]);
+    assert!(!broken.status.success() && String::from_utf8_lossy(&broken.stderr).contains("line 3"), "{broken:?}");
+    s.send(b"\x1by");
+    wait("old binding still works", || (s.text().matches("reloaded").count() >= 4).then_some(()));
+}
+
+/// docs/examples/exit-watcher.py, the example extension, against a real session: a failing pane puts a
+/// warning in the status bar, and clicking it clears it.
+#[test]
+fn example_extension_runs() {
+    if Command::new("python3").arg("--version").output().is_err() {
+        eprintln!("python3 isn't installed; skipping");
+        return;
+    }
+    let env = Env::new("e2e-example");
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/examples/exit-watcher.py");
+    let mut child = Command::new("python3")
+        .arg(script)
+        .arg(&env.session)
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB", TB)
+        .env_remove("TB_SESSION")
+        .spawn()
+        .unwrap();
+    let bottom = |s: &Screen| s.text().lines().last().unwrap_or_default().to_owned();
+    // The extension subscribes in the background, so try until it has seen a failure.
+    let shown = (0..10).any(|_| {
+        env.tb(&["action", "new-pane", "--", "sh", "-c", "sleep 0.3; exit 2"]);
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_millis(1500) {
+            if bottom(&s).contains("exited 2") {
+                return true;
+            }
+            sleep(Duration::from_millis(50));
+        }
+        false
+    });
+    assert!(shown, "no warning; the bar shows: {}", bottom(&s));
+    let line = bottom(&s);
+    let x = line[..line.find("exited 2").unwrap()].chars().count() as u16;
+    s.send(&click(x, 29));
+    wait("warning cleared", || (!bottom(&s).contains("exited 2")).then_some(()));
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Opens a finder on a folder holding one picture, with images forced to `protocol`.

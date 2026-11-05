@@ -1,6 +1,6 @@
 # Plan: rebuild step 6, the CLI as the extension API
 
-**Status:** planned · **Date:** 2026-11-05 · **Part of:** [rebuild plan](2026-11-03-rebuild-plan.md) §11, step 6 ·
+**Status:** built (2026-11-05) · **Date:** 2026-11-05 · **Part of:** [rebuild plan](2026-11-03-rebuild-plan.md) §11, step 6 ·
 **Follows:** [zellij's session commands](2026-11-04-zellij-cli.md) (built) · **Findings:**
 [zellij's actions](../findings/2026-11-05-zellij-actions.md), [zellij's session commands](../findings/2026-11-04-zellij-cli.md)
 
@@ -116,34 +116,35 @@ text add about 1k lines.
 
 ## Steps
 
-- [ ] Measure each zellij action's arguments, output and JSON fields, in a throwaway `tftest-*` session, and
+- [x] Measure each zellij action's arguments, output and JSON fields, in a throwaway `tftest-*` session, and
   record a finding.
-- [ ] Tab and pane ids in every output; accept `terminal_N`; creating commands print the new id.
-- [ ] **Tabs:**
+- [x] Tab and pane ids in every output; accept `terminal_N`; creating commands print the new id.
+- [x] **Tabs:**
   - `list-tabs`, `query-tab-names`, `current-tab-info`
   - `close-tab`, `close-tab-by-id`
   - `go-to-tab-by-id`, `go-to-tab-name`, `go-to-next-tab`, `go-to-previous-tab`
   - `rename-tab-by-id`, `undo-rename-tab`
   - `move-tab`, `toggle-active-sync-tab`
-- [ ] **Panes:**
+- [x] **Panes:**
   - `new-pane` (zellij's flags) and `run`; `edit`
   - `move-pane`, `move-pane-backwards`, `move-focus-or-tab`
   - `rename-pane`, `undo-rename-pane`
   - `toggle-pane-frames`, `clear`, `edit-scrollback`, `set-pane-color`
   - zellij's forms of `new-tab`, `resize`, `dump-screen` and `list-panes`
-- [ ] **Scrolling:** `scroll-up`/`scroll-down`, `page-scroll-*`, `half-page-scroll-*`, `scroll-to-top`,
+- [x] **Scrolling:** `scroll-up`/`scroll-down`, `page-scroll-*`, `half-page-scroll-*`, `scroll-to-top`,
   `scroll-to-bottom`.
-- [ ] **Input:** `write` (bytes), `paste` (bracketed), `send-keys`.
-- [ ] **Session and clients:** `list-clients`, `switch-mode`, `rename-session`, `save-session`,
+- [x] **Input:** `write` (bytes), `paste` (bracketed), `send-keys`.
+- [x] **Session and clients:** `list-clients`, `switch-mode`, `rename-session`, `save-session`,
   `switch-session`, `watch`.
-- [ ] **Events:** `subscribe`.
-- [ ] **Keys that run commands:**
-  - Measure the KDL parser crate (version, license, dependencies) and record a finding.
+- [x] **Events:** `subscribe`.
+- [x] **Keys that run commands:**
+  - Measure the KDL parser crate (version, license, dependencies) and record a finding. (None was available
+    offline; `tb` has its own small parser, [finding](../findings/2026-11-05-kdl-parser.md).)
   - Parse zellij's `keybinds` syntax for `Run`, `NewTab`, `SwitchToMode` and the CLI actions.
   - Add `reload-config`.
-- [ ] **Status text:** `set-status`, `clear-status`, `--ttl`, the bar layout, `status_clicked` events.
-- [ ] **API:** the version, the stability rules, `docs/cli.md` and an example extension.
-- [ ] **Tests:** end-to-end tests for each group of commands, plus the `prbot` acceptance run.
+- [x] **Status text:** `set-status`, `clear-status`, `--ttl`, the bar layout, `status_clicked` events.
+- [x] **API:** the version, the stability rules, `docs/cli.md` and an example extension.
+- [x] **Tests:** end-to-end tests for each group of commands, plus the `prbot` acceptance run.
 
 ## Open questions
 
@@ -158,3 +159,45 @@ None at the moment. Both earlier questions (keys that start an extension, and st
   - **Status-bar text** from extensions: `set-status` and `clear-status`, with click events.
 
   The size estimate rose to 3–5k lines.
+- **2026-11-05:** built.
+  - **Code:**
+    - `cli.rs`: `tb action` with zellij's names, flags and text columns
+    - `server/actions.rs`: the actions and the JSON
+    - `server/events.rs`: `subscribe`
+    - `server/config.rs` and `kdl.rs`: key bindings
+    - `keyspec.rs`: zellij's key names
+    - status segments in `keys.rs`
+    - `switch-session` and `watch` in `client.rs`
+  - **Reference:** [docs/cli.md](../cli.md), with the example extension
+    [docs/examples/exit-watcher.py](../examples/exit-watcher.py).
+  - **Tests:**
+    - 13 unit tests: ids, `resize` forms, text columns, colours, modes, key names, the KDL parser, bindings,
+      events, and every action being in `docs/cli.md`
+    - 9 end-to-end tests: tab actions, pane actions, input and session actions, `subscribe`, status
+      segments, `switch-session` and `watch`, key bindings, the example extension
+    - The suite passed 3 runs in a row, and the real Neovim test passed too.
+  - **Acceptance:** `prbot`'s own tab code runs on `tb` with 7 lines changed
+    ([finding](../findings/2026-11-05-prbot-on-tb.md)).
+  - **Changes from the plan:**
+    - **Events** are differences between summaries of the session, sent at most 10 times a second, so every
+      code path is covered without hooks. Something that appears and disappears within 0.1 s may go
+      unreported.
+    - **The API version is in `tb --version`** (`extension API 1`), not in an `"api"` JSON field, because
+      list output is a JSON array.
+    - **`tb ls` prints zellij's shape** (`NAME [2 tabs, 1 attached]`, `NAME (EXITED - attach to restore)`).
+      `prbot` parses it; the acceptance run found this.
+    - **`write` now takes bytes, as zellij's does;** typing text is `write-chars` (`--enter` stays).
+    - **`-s SESSION` goes before `action`'s subcommand** (`tb action -s work new-tab`), because zellij's
+      actions use `-s` for their own flags (`list-panes -s`, `new-pane -s`).
+    - **The protocol version is now 3.** A session started by an older `tb` refuses new clients; `tb kill`
+      ends it, and attaching restores it.
+    - **Also bindable,** because the user's zellij config uses them: `BreakPane`, `BreakPaneLeft`,
+      `BreakPaneRight`, `ToggleTab`, `Search` and `SearchToggleOption`. Loading the user's whole zellij
+      `config.kdl` gives 342 bindings and 24 warnings. The warnings are the ignored `clear-defaults`, and
+      bindings that use plugins, floating, stacked or pinned panes, swap layouts, pane groups, or the rename
+      and search-input modes.
+  - **Known gaps:**
+    - `rename-session` leaves the old `TB_SESSION` in panes that are already running.
+    - `switch-session` moves the client that typed last.
+    - `dump-screen --ansi` writes basic SGR (styles, 16/256/RGB colours), not hyperlinks.
+    - Floating-pane actions come with step 8.
