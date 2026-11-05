@@ -311,25 +311,58 @@ fn detect_graphics() -> Graphics {
         _ => None,
     };
     if let Some(protocol) = forced {
+        if protocol == ImageProtocol::Sixel {
+            // Forced: ask for the colours anyway, but keep sixel whatever the answer.
+            sixel_colors_ok();
+        }
         return Graphics { protocol, cell_px };
     }
     // Images rarely make it through another multiplexer.
     if ["TMUX", "ZELLIJ", "STY"].iter().any(|k| env::var_os(k).is_some()) {
         return Graphics { protocol: ImageProtocol::Blocks, cell_px };
     }
-    let replies = query_terminal();
+    let replies = query_terminal("\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[16t\x1b[c");
     let answers = parse_replies(&replies);
     cell_px = cell_px.or(answers.cell_px);
-    let protocol = choose_protocol(&answers, &var("TERM_PROGRAM"), &var("LC_TERMINAL"));
+    let mut protocol = choose_protocol(&answers, &var("TERM_PROGRAM"), &var("LC_TERMINAL"));
+    if protocol == ImageProtocol::Sixel && !sixel_colors_ok() {
+        protocol = ImageProtocol::Blocks;
+    }
     Graphics { protocol, cell_px }
 }
 
 /// Asks the terminal about kitty graphics, its cell size and its device attributes, and returns the raw
 /// answers. Every terminal answers the device attributes query, so its answer ends the wait.
-fn query_terminal() -> Vec<u8> {
+/// Our sixel images use 216 colours; xterm in VT340 mode has 16 colour registers unless a program asks for
+/// more (XTSMGRAPHICS). Asks for 256 and returns false if the terminal refuses.
+fn sixel_colors_ok() -> bool {
+    sixel_registers_ok(&query_terminal("\x1b[?1;3;256S\x1b[c"))
+}
+
+/// Reads the XTSMGRAPHICS answer `CSI ? 1 ; status ; value S`. No answer means the terminal doesn't support
+/// the query (most sixel terminals have plenty of colours), so that counts as fine.
+fn sixel_registers_ok(bytes: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(bytes);
+    // Find a `CSI ? … S` answer; a device-attributes answer (`CSI ? … c`) can start the same way.
+    let answer = text.match_indices("\x1b[?").find_map(|(i, _)| {
+        let rest = &text[i + 3..];
+        let end = rest.find(|c: char| !(c.is_ascii_digit() || c == ';'))?;
+        (rest[end..].starts_with('S')).then(|| &rest[..end])
+    });
+    let Some(params) = answer else { return true };
+    let nums: Vec<Option<u32>> = params.split(';').map(|n| n.parse().ok()).collect();
+    match nums.as_slice() {
+        [Some(1), Some(0), Some(n), ..] => *n >= 216,
+        [Some(1), Some(0)] => true,
+        _ => false,
+    }
+}
+
+/// Sends `query` and reads the answers for up to a second, stopping at the device-attributes answer that
+/// every terminal sends (so `query` must end with `CSI c`).
+fn query_terminal(query: &str) -> Vec<u8> {
     use std::os::fd::AsFd;
     let mut out = io::stdout();
-    let query = "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[16t\x1b[c";
     if out.write_all(query.as_bytes()).and_then(|()| out.flush()).is_err() {
         return Vec::new();
     }
@@ -483,5 +516,17 @@ mod tests {
         assert_eq!(choose_protocol(&xterm, "iTerm.app", ""), ImageProtocol::Iterm2, "iTerm2 beats sixel");
         assert_eq!(choose_protocol(&parse_replies(b"\x1b[?6c"), "", ""), ImageProtocol::Blocks);
         assert!(!has_device_attributes(b"\x1b_Gi=31;OK\x1b\\"));
+    }
+
+    #[test]
+    fn sixel_colour_answers_are_read() {
+        // xterm with sixel on grants 256; with sixel off it answers status 3.
+        assert!(sixel_registers_ok(b"\x1b[?1;0;256S\x1b[?63;1;2;4;6;9;15;16;22;28c"));
+        assert!(!sixel_registers_ok(b"\x1b[?1;3S\x1b[?64;1;2;6;9c"));
+        assert!(!sixel_registers_ok(b"\x1b[?1;0;16S\x1b[?63;4c"), "too few colours");
+        // No answer (the query is unknown): fine. A VT100 device-attributes answer isn't mistaken for one.
+        assert!(sixel_registers_ok(b"\x1b[?62;4c"));
+        assert!(sixel_registers_ok(b"\x1b[?1;2c"));
+        assert!(sixel_registers_ok(b""));
     }
 }
