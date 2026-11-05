@@ -69,11 +69,14 @@ pub struct TermPane {
     pub title: Option<String>,
     pub cols: u16,
     pub rows: u16,
+    /// Cell size in pixels, from the attached terminal (8×16 if it's unknown). Programs that size images
+    /// (chafa, zellij, yazi) read it from the PTY and from `CSI 14 t` / `CSI 16 t`.
+    pub cell: (u16, u16),
 }
 
-fn window_size(cols: u16, rows: u16) -> WindowSize {
-    // Pixel sizes are guesses; few programs use them, and none may divide by them if they're zero.
-    WindowSize { num_cols: cols, num_lines: rows, cell_width: 8, cell_height: 16 }
+fn window_size(cols: u16, rows: u16, cell: (u16, u16)) -> WindowSize {
+    // Never zero: some programs divide by it.
+    WindowSize { num_cols: cols, num_lines: rows, cell_width: cell.0.max(1), cell_height: cell.1.max(1) }
 }
 
 impl TermPane {
@@ -81,6 +84,7 @@ impl TermPane {
         id: PaneId,
         cols: u16,
         rows: u16,
+        cell: (u16, u16),
         opts: SpawnOptions,
         session: &str,
         tx: Sender<Ev>,
@@ -99,14 +103,14 @@ impl TermPane {
         let shell = opts.command.split_first().map(|(p, args)| tty::Shell::new(p.clone(), args.to_vec()));
         let options = tty::Options { shell, working_directory: opts.cwd, drain_on_exit: true, env };
 
-        let pty = tty::new(&options, window_size(cols, rows), u64::from(id))?;
+        let pty = tty::new(&options, window_size(cols, rows, cell), u64::from(id))?;
         let pid = pty.child().id();
         let master = pty.file().try_clone().ok();
         let event_loop = EventLoop::new(term.clone(), proxy, pty, true, false)?;
         let sender = event_loop.channel();
         // Detached: when the loop ends, the PTY is dropped on its own thread (that drop waits for the child).
         drop(event_loop.spawn());
-        Ok(TermPane { term, sender, master, pid, command, title: None, cols, rows })
+        Ok(TermPane { term, sender, master, pid, command, title: None, cols, rows, cell })
     }
 
     pub fn write(&self, bytes: Vec<u8>) {
@@ -115,15 +119,19 @@ impl TermPane {
         }
     }
 
-    pub fn resize(&mut self, cols: u16, rows: u16) {
+    pub fn resize(&mut self, cols: u16, rows: u16, cell: (u16, u16)) {
         let (cols, rows) = (cols.max(2), rows.max(1));
-        if (cols, rows) == (self.cols, self.rows) {
+        if (cols, rows, cell) == (self.cols, self.rows, self.cell) {
             return;
+        }
+        if (cols, rows) != (self.cols, self.rows) {
+            self.term.lock().resize(Size { cols: usize::from(cols), lines: usize::from(rows) });
         }
         self.cols = cols;
         self.rows = rows;
-        self.term.lock().resize(Size { cols: usize::from(cols), lines: usize::from(rows) });
-        let _ = self.sender.send(Msg::Resize(window_size(cols, rows)));
+        self.cell = cell;
+        // Also when only the cell size changed: programs get SIGWINCH and read the new pixel size.
+        let _ = self.sender.send(Msg::Resize(window_size(cols, rows, cell)));
     }
 
     pub fn shutdown(&self) {

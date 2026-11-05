@@ -68,6 +68,8 @@ struct Env {
     sock: PathBuf,
     session: String,
     vars: Vec<(String, String)>,
+    /// The cell size in pixels that the test terminal reports.
+    cell: (u16, u16),
 }
 
 impl Env {
@@ -84,7 +86,7 @@ impl Env {
             ("PS1".to_owned(), "$ ".to_owned()),
             ("TB_EDITOR".to_owned(), String::new()),
         ];
-        Env { _dir: dir, root, sock, session: session.to_owned(), vars }
+        Env { _dir: dir, root, sock, session: session.to_owned(), vars, cell: (8, 16) }
     }
 
     fn set(&mut self, key: &str, value: &str) {
@@ -166,7 +168,7 @@ impl Screen {
             drain_on_exit: true,
             env: vars,
         };
-        let ws = WindowSize { num_lines: rows, num_cols: cols, cell_width: 8, cell_height: 16 };
+        let ws = WindowSize { num_lines: rows, num_cols: cols, cell_width: env.cell.0, cell_height: env.cell.1 };
         let pty = tty::new(&options, ws, 0).unwrap();
         let event_loop = EventLoop::new(term.clone(), proxy.clone(), pty, true, false).unwrap();
         let tx = event_loop.channel();
@@ -653,6 +655,21 @@ fn sessions_come_back_after_kill() {
     env.tb(&["delete", "--force"]);
     s.wait_exit();
     wait("forgotten", || env.tb(&["ls"]).contains("no sessions").then_some(()));
+}
+
+/// Programs in a pane see the real terminal's cell size, so tools like chafa keep images in shape.
+#[test]
+fn panes_get_the_terminal_cell_size() {
+    let mut env = Env::new("e2e-cell");
+    env.set("TB_IMAGES", "blocks");
+    env.cell = (10, 21);
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    let pane = &env.panes()[0];
+    let (cols, rows) = (pane["cols"].as_u64().unwrap(), pane["rows"].as_u64().unwrap());
+    // `CSI 14 t` asks for the text area in pixels; the answer comes back as typed input, echoed as `^[[4;…t`.
+    s.send(b"printf '\\033[14t'\r");
+    s.wait_for(&format!("[4;{};{}t", rows * 21, cols * 10));
 }
 
 #[test]

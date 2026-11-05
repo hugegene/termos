@@ -170,6 +170,8 @@ pub struct Server {
     active: usize,
     /// Size of the client that typed last; the layout follows it.
     size: (u16, u16),
+    /// That client's cell size in pixels (8×16 if it's unknown), passed on to the panes.
+    cell_px: (u16, u16),
     active_client: Option<ClientId>,
     mode: Mode,
     drag: Option<Drag>,
@@ -261,6 +263,7 @@ impl Server {
             tabs: Vec::new(),
             active: 0,
             size: (80, 24),
+            cell_px: images::DEFAULT_CELL,
             active_client: None,
             mode: NORMAL,
             drag: None,
@@ -422,9 +425,8 @@ impl Server {
         }
         if self.active_client == Some(id) {
             self.active_client = self.clients.iter().find(|(_, c)| c.attached).map(|(id, _)| *id);
-            if let Some(c) = self.active_client.and_then(|i| self.clients.get(&i)) {
-                let (cols, rows) = (c.cols, c.rows);
-                self.set_size(cols, rows);
+            if let Some(c) = self.active_client {
+                self.follow_client(c);
             }
         }
         self.drag = None;
@@ -458,7 +460,7 @@ impl Server {
                         }
                         log::info!("client {id} shows images with {:?}", graphics);
                         self.active_client = Some(id);
-                        self.set_size(cols, rows);
+                        self.follow_client(id);
                         if self.tabs.is_empty()
                             && let Err(e) = self.new_tab(None, SpawnOptions::default())
                         {
@@ -501,10 +503,7 @@ impl Server {
     fn make_active(&mut self, id: ClientId) {
         if self.active_client != Some(id) {
             self.active_client = Some(id);
-            if let Some(c) = self.clients.get(&id) {
-                let (cols, rows) = (c.cols, c.rows);
-                self.set_size(cols, rows);
-            }
+            self.follow_client(id);
         }
     }
 
@@ -530,6 +529,18 @@ impl Server {
 
     fn content_area(&self) -> Rect {
         Rect::new(0, 1, self.size.0, self.size.1.saturating_sub(2))
+    }
+
+    /// Makes the layout and the panes' pixel sizes follow a client.
+    fn follow_client(&mut self, id: ClientId) {
+        let Some(c) = self.clients.get(&id) else { return };
+        let (cols, rows) = (c.cols, c.rows);
+        let cell = c.graphics.cell_px.filter(|&(w, h)| w > 0 && h > 0).unwrap_or(images::DEFAULT_CELL);
+        if cell != self.cell_px {
+            self.cell_px = cell;
+            self.apply_layout();
+        }
+        self.set_size(cols, rows);
     }
 
     fn set_size(&mut self, cols: u16, rows: u16) {
@@ -586,10 +597,10 @@ impl Server {
     }
 
     fn resize_pane(&mut self, id: PaneId, rect: Rect) {
-        let (frames, body) = (self.frames, self.body(rect));
+        let (frames, body, cell) = (self.frames, self.body(rect), self.cell_px);
         let editor = match self.panes.get_mut(&id) {
             Some(Pane::Term(p)) => {
-                p.resize(body.width, body.height);
+                p.resize(body.width, body.height, cell);
                 None
             }
             Some(Pane::Finder(f)) => {
@@ -602,7 +613,7 @@ impl Server {
         if let Some((eid, body)) = editor
             && let Some(Pane::Term(p)) = self.panes.get_mut(&eid)
         {
-            p.resize(body.width, body.height);
+            p.resize(body.width, body.height, cell);
         }
     }
 
@@ -637,7 +648,7 @@ impl Server {
     fn spawn_term(&mut self, opts: SpawnOptions) -> std::io::Result<PaneId> {
         let id = self.alloc_pane();
         let area = self.content_area();
-        let pane = TermPane::spawn(id, area.width, area.height, opts, &self.name, self.tx.clone())?;
+        let pane = TermPane::spawn(id, area.width, area.height, self.cell_px, opts, &self.name, self.tx.clone())?;
         self.panes.insert(id, Pane::Term(pane));
         Ok(id)
     }
@@ -1151,7 +1162,7 @@ impl Server {
     fn open_editor(&mut self, finder_id: PaneId, path: PathBuf) {
         let opts = editor::command(&path);
         let id = self.alloc_pane();
-        match TermPane::spawn(id, 80, 24, opts, &self.name, self.tx.clone()) {
+        match TermPane::spawn(id, 80, 24, self.cell_px, opts, &self.name, self.tx.clone()) {
             Ok(p) => {
                 self.panes.insert(id, Pane::Term(p));
                 if let Some(Pane::Finder(f)) = self.panes.get_mut(&finder_id) {
@@ -1197,8 +1208,8 @@ impl Server {
                     let size = alacritty_terminal::event::WindowSize {
                         num_cols: p.cols,
                         num_lines: p.rows,
-                        cell_width: 8,
-                        cell_height: 16,
+                        cell_width: p.cell.0,
+                        cell_height: p.cell.1,
                     };
                     p.write(format(size).into_bytes());
                 }

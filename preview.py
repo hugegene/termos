@@ -377,6 +377,20 @@ def image_dims(p: Path) -> str:
     return f"{m.group(1)}×{m.group(2)}" if m else ""
 
 
+def font_ratio() -> str:
+    """Cell width ÷ height for chafa. chafa reads it from the terminal's pixel size, but zellij reports
+    impossible ones (cells 2 pixels wide), which stretch images into wide strips; then assume 1:2."""
+    import fcntl
+    import struct
+    try:
+        rows, cols, xpx, ypx = struct.unpack("HHHH", fcntl.ioctl(1, termios.TIOCGWINSZ, b"\0" * 8))
+        if rows and cols and xpx and ypx and 0.3 <= (xpx / cols) / (ypx / rows) <= 0.8:
+            return f"{xpx // cols}/{ypx // rows}"
+    except OSError:
+        pass
+    return "1/2"
+
+
 def render_image(p: Path, cols: int, rows: int) -> Preview:
     info = " · ".join(x for x in ("image", image_dims(p)) if x)
     chafa = shutil.which("chafa")
@@ -384,8 +398,8 @@ def render_image(p: Path, cols: int, rows: int) -> Preview:
         return Preview(["", "  (install chafa to preview images)"], info)
     if image_mode() == "sixel":
         return Preview([], info, image_cmd=[chafa, "-f", "sixels", "--size", f"{cols}x{rows}",
-                                            "--animate", "off", str(p)])
-    out = run([chafa, "-f", "symbols", "-c", "full", "--size", f"{cols}x{rows}",
+                                            "--font-ratio", font_ratio(), "--animate", "off", str(p)])
+    out = run([chafa, "-f", "symbols", "-c", "full", "--size", f"{cols}x{rows}", "--font-ratio", font_ratio(),
                "--animate", "off", "--polite", "on", str(p)])
     if out is None:
         return Preview(["", "  (could not decode this image)"], info)
