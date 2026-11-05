@@ -7,7 +7,7 @@
 ## Decision
 
 **Other people extend `tb` by writing programs that call its CLI**, the way `prbot` (`~/claudehook`) drives
-zellij today. There is no plugin system. `tb`'s CLI becomes a stable, documented API with six parts:
+zellij today. There is no plugin system. `tb`'s CLI becomes a stable, documented API with eight parts:
 
 1. **zellij's commands, names and flags.** Every zellij command that maps onto a `tb` feature gets zellij's
    name, aliases and flags, and `tb`'s own names stay as aliases. A zellij script then ports by changing
@@ -52,6 +52,38 @@ zellij today. There is no plugin system. `tb`'s CLI becomes a stable, documented
    - Failures exit non-zero, with the message on stderr.
    - `docs/cli.md` is the reference, kept in step with `tb help`, with one example extension.
 
+7. **Keys that run commands** (decided 2026-11-05). A user can bind a key to start an extension, as zellij's
+   `Run` action does.
+   - **Where:** `~/.config/tb/config.kdl`, in **zellij's keybind syntax**, so a zellij `bind` block copies
+     across unchanged:
+     ```kdl
+     keybinds {
+         tab {
+             bind "p" { Run "prbot" "ls"; SwitchToMode "Normal"; }
+         }
+     }
+     ```
+   - **Actions in this step:**
+     - `Run`, with zellij's `cwd`, `direction`, `name` and `close_on_exit` options
+     - `NewTab`, with a command
+     - `SwitchToMode`
+     - any other `tb action` command, by its zellij name
+   - **Clashes:** a binding replaces the built-in key in that mode.
+   - **When it's read:** when the session starts, and on `tb action reload-config`.
+   - **The rest of config** (themes, options, layouts) stays at launch (step 9), which extends the same
+     file, so there's only one config format.
+8. **Status-bar text from extensions** (decided 2026-11-05). zellij can only do this with plugins (its bars
+   are plugins), so these are `tb`'s own commands:
+   - `tb action set-status --id prbot "PR #487 needs review"` shows the text in the bottom bar, and
+     `tb action clear-status --id prbot` removes it.
+   - **Segments:** each `--id` is one segment, so several extensions share the bar. `--ttl SECS` makes the
+     text expire. Plain text only for now.
+   - **Layout:** segments sit at the right end of the bottom bar. When space is short, the key hints shrink
+     first.
+   - **Clicks:** clicking a segment sends a `status_clicked` event with its id through `tb subscribe`, so the
+     extension can react, for example by opening the PR's tab.
+   - **Not saved with the session:** after a restore, extensions set their text again.
+
 **Safety stays as it is.**
 - Only the session's own user can connect: the socket is `0600`, and the server checks the peer's uid.
 - Extensions run with the user's rights, in their own process, so a buggy extension can't take sessions down.
@@ -60,7 +92,8 @@ zellij today. There is no plugin system. `tb`'s CLI becomes a stable, documented
 **Acceptance test:** a copy of `prbot`, with only `zellij` → `tb` and the variable names changed, opens,
 renames, finds and closes its tabs in a throwaway `tb` session.
 
-**Size:** about 2–4k lines, **estimate**. The event stream is the largest new piece.
+**Size:** about 3–5k lines, **estimate**. The event stream is the largest new piece; key bindings and status
+text add about 1k lines.
 
 ## Options considered
 
@@ -75,6 +108,11 @@ renames, finds and closes its tabs in a throwaway `tb` session.
 | | **`TB_*` only** | ✅ Scripts rename two variables |
 | Reacting to changes | Polling the lists | ❌ Slow and wasteful |
 | | **`tb subscribe`** | ✅ |
+| Key-binding format | A small format of our own (TOML) | ❌ A second format, beside the full config at launch |
+| | Bindings registered through the CLI only (`tb bind`) | ❌ Lost when the session ends; users expect a config file |
+| | **zellij's KDL keybind syntax** | ✅ zellij snippets copy across; launch grows the same file. Needs a KDL parser crate (to measure) |
+| Status text | One shared line that any extension overwrites | ❌ Extensions would erase each other |
+| | **A segment per extension id, with click events** | ✅ |
 
 ## Steps
 
@@ -99,16 +137,24 @@ renames, finds and closes its tabs in a throwaway `tb` session.
 - [ ] **Session and clients:** `list-clients`, `switch-mode`, `rename-session`, `save-session`,
   `switch-session`, `watch`.
 - [ ] **Events:** `subscribe`.
+- [ ] **Keys that run commands:**
+  - Measure the KDL parser crate (version, license, dependencies) and record a finding.
+  - Parse zellij's `keybinds` syntax for `Run`, `NewTab`, `SwitchToMode` and the CLI actions.
+  - Add `reload-config`.
+- [ ] **Status text:** `set-status`, `clear-status`, `--ttl`, the bar layout, `status_clicked` events.
 - [ ] **API:** the version, the stability rules, `docs/cli.md` and an example extension.
 - [ ] **Tests:** end-to-end tests for each group of commands, plus the `prbot` acceptance run.
 
 ## Open questions
 
-1. **Keys that start an extension**, for example "Ctrl+t p runs my extension". This needs key config,
-   which is part of launch (step 9). Should a minimal `bind` come forward into this step?
-2. **Extension UI beyond a pane**, for example a status-bar segment set with `tb action set-status`. Is that
-   in scope?
+None at the moment. Both earlier questions (keys that start an extension, and status-bar text) were answered
+"yes" on 2026-11-05; see items 7 and 8.
 
 ## Change log
 
 - **2026-11-05:** written. The user set the aim: other people extend `tb` through its CLI.
+- **2026-11-05:** the user said yes to both open questions.
+  - **Keys that run commands come into this step:** zellij's keybind syntax in `~/.config/tb/config.kdl`.
+  - **Status-bar text** from extensions: `set-status` and `clear-status`, with click events.
+
+  The size estimate rose to 3–5k lines.

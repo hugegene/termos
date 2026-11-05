@@ -305,7 +305,7 @@ Because this is for other people, some zellij features become expected.
 | Scriptable CLI (`action`, `list-panes`, `dump-screen`) | ✅ From step 1; all of zellij's CLI, as the extension API, in step 6 |
 | Scrollback search, copy mode, clipboard | ✅ Step 3 |
 | Floating panes (pop-up shell) | ✅ Step 8; useful on phones |
-| Layout files, themes, config | ✅ Small version for launch |
+| Layout files, themes, config | ✅ Small version for launch; keys that run commands come earlier, in step 6 |
 | Key modes with on-screen hints | ✅ Simple version for launch |
 | Stacked panes, auto-arrange layouts | Maybe |
 | Plugin system (WebAssembly) | ❌ Extensions use the CLI instead (step 6) |
@@ -379,7 +379,7 @@ Sizes are rough estimates.
 | **3. Daily driver** | Scrollback, copy mode, search, OSC 52 clipboard, mouse selection | **Switch our daily use from zellij** |
 | **4. Persistence** | Reboot recovery: layout, folders, names, finder state; programs that were running come back as commands waiting at the prompt | Sessions survive reboots, crashes and Ctrl+Q |
 | **5. Finder extras** | CSV grid editor; kitty, iTerm2 and sixel images | Full replacement for the prototype |
-| **6. CLI and extensions** | Every zellij command `tb` has the features for, with zellij's names and flags; stable tab and pane ids; JSON output; events (`tb subscribe`); a stable, documented API ([CLI extension plan](2026-11-05-cli-extensions.md)) | Other people extend `tb` from any language; zellij scripts such as `prbot` port by renaming (**~2–4k lines**) |
+| **6. CLI and extensions** | Every zellij command `tb` has the features for, with zellij's names and flags; stable tab and pane ids; JSON output; events (`tb subscribe`); keys that run commands (zellij's keybind syntax); status-bar text from extensions; a stable, documented API ([CLI extension plan](2026-11-05-cli-extensions.md)) | Other people extend `tb` from any language; zellij scripts such as `prbot` port by renaming (**~3–5k lines**) |
 | **7. Phone** | Everything for phones: the one-pane layout below ~80 columns, per-client layouts, plain keys and taps for every action; then the PWA ([phone plan](2026-11-03-phone-interface.md) P1–P4) | SSH-from-phone ready (**~10–15k lines** total before the PWA) |
 | **8. Floating panes** | Floating (pop-up) panes; maybe stacked and pinned panes and swap layouts, zellij's other gaps; their 12 CLI actions | No missing zellij pane features |
 | **Parallel track** | Daemon: poller, webhook, events into the finder; drives sessions through the step 6 CLI | Independent process; can start anytime |
@@ -439,6 +439,9 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
   - **Order:** it comes before the phone, because it's smaller and it unblocks scripts like `prbot`.
   - **Renumbered:** Phone is now step 7, floating panes step 8 (with their 12 CLI actions), and launch step 9.
   - Plan: [CLI extension plan](2026-11-05-cli-extensions.md).
+- **2026-11-05:** step 6 also gets **keys that run commands** and **status-bar text from extensions**.
+  - Keys use zellij's keybind syntax in `~/.config/tb/config.kdl`, the file the launch config will grow.
+  - The step's estimate is now ~3–5k lines.
 
 ---
 
