@@ -34,8 +34,11 @@ meaning. Failures exit non-zero with the message on stderr.
   from 1) change as tabs open, close and move; ids don't.
 - **Creating prints the new id:** `new-tab` prints a tab id (`3`), and `new-pane`, `run` and `edit` print a
   pane id (`terminal_7`).
-- **Pane ids are accepted as `7`, `terminal_7` or `finder_7`.** A finder pane prints as `finder_7`; zellij has
-  no such kind.
+- **Pane ids are accepted as `7`, `terminal_7`, `finder_7` or `preview_8`.** zellij has neither of the last
+  two kinds.
+  - **A finder is two panes:** its file list (kind `finder`) and its preview (kind `preview`).
+  - **Closing either closes both.**
+  - **Keys you send to either one** go to the finder, as if typed there.
 
 ## Commands
 
@@ -150,13 +153,13 @@ Fields for features `tb` lacks have fixed values: `panes_to_hide` (0), `are_floa
 - `tab_id`, `tab_position`, `tab_name`
 
 `tb` adds:
-- `kind`: `terminal` or `finder`
+- `kind`: `terminal`, `finder` (a finder's file list) or `preview` (a finder's preview)
 - `tab`: position from 1
 - `name`: given with `rename-pane`
 - `focused`, `visible`
 - `x`, `y`, `cols`, `rows`
 - `cwd`
-- `editor_pane`: a finder's Neovim pane
+- `editor_pane`: a finder's Neovim pane, on both of its panes; Neovim shows in the preview
 
 **`list-clients`**: `client_id`, `pane_id`, `running_command`, `active`, `cols`, `rows`, `images`.
 

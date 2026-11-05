@@ -456,6 +456,10 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
   - **Text first;** `t` switches to the pages, at fit width with zoom.
   - **poppler-utils** is a new optional external program (§6).
   - Details are in the [PDF preview plan](2026-11-05-pdf-preview.md).
+- **2026-11-05:** the finder is now **two panes**, its file list and its preview, as in the zellij version.
+  - Its border drags, and resize mode and fullscreen work on each half.
+  - The CLI has a new pane kind, `preview`.
+  - Details are in the [two-pane finder plan](2026-11-05-finder-divider.md).
 
 ---
 

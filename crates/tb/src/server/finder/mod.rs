@@ -1,5 +1,6 @@
-//! The built-in finder: a file list and a preview, drawn by the server. Enter opens Neovim in an embedded
-//! terminal inside the preview area.
+//! The built-in finder: two panes drawn by the server, the file list (`Pane::Finder`, which owns this state)
+//! and the preview (`Pane::Preview`, which points at it). Enter opens Neovim in an embedded terminal inside the
+//! preview pane. Plan: docs/plans/2026-11-05-finder-divider.md.
 
 mod grid;
 mod highlight;
@@ -32,8 +33,11 @@ use super::render::{Cursor, TermDecor, draw_frame, draw_term, fill, put_str};
 use crate::protocol::PaneId;
 use view::{Body, View};
 
-/// Below this width the finder shows one side at a time (list, or preview when it has focus).
-const NARROW: u16 = 60;
+/// Below this width a finder tab shows one of its panes at a time: the focused one.
+pub const NARROW: u16 = 60;
+
+/// The file list's share of a new finder tab's width, as in the zellij version.
+pub const LIST_SHARE: f32 = 0.35;
 
 /// Half-block colours for an image: (top, bottom) per cell.
 type ImageCells = Vec<Vec<(Color, Color)>>;
@@ -50,7 +54,6 @@ pub struct FinderState {
     pub dir: PathBuf,
     pub selected: Option<String>,
     pub show_hidden: bool,
-    pub focus_preview: bool,
     pub scroll: usize,
     /// The file open in the editor.
     pub editing: Option<PathBuf>,
@@ -92,9 +95,14 @@ pub struct ImageSlot {
 /// What the server should do after a finder key or click.
 pub enum Action {
     None,
+    /// Open Neovim on the file, in the preview pane, and focus it.
     OpenEditor(PathBuf),
     /// Show a short message on the status bar.
     Flash(String),
+    /// Move focus to the finder's preview pane.
+    FocusPreview,
+    /// Move focus to the finder's file list.
+    FocusFiles,
 }
 
 struct Request {
@@ -121,7 +129,6 @@ pub struct Finder {
     show_hidden: bool,
     filter: String,
     filtering: bool,
-    focus_preview: bool,
     preview_path: Option<PathBuf>,
     preview_kind: Option<Kind>,
     view: Option<View>,
@@ -145,8 +152,13 @@ pub struct Finder {
     /// The CSV grid editor, while editing a CSV file.
     grid: Option<grid::Grid>,
     pub editing: Option<PathBuf>,
-    rect: Rect,
-    /// Draw the list and the preview in boxes (zellij-style pane frames) instead of a separator line.
+    /// The editor or grid was opened from the list, so focus goes back there when it closes.
+    edit_from_list: bool,
+    /// The file list's pane.
+    list_rect: Rect,
+    /// The preview's pane.
+    preview_rect: Rect,
+    /// Draw the list and the preview in boxes (zellij-style pane frames) instead of under a title line.
     pub frames: bool,
     requests: Sender<Request>,
     watcher: Option<notify::RecommendedWatcher>,
@@ -311,7 +323,6 @@ impl Finder {
             show_hidden: false,
             filter: String::new(),
             filtering: false,
-            focus_preview: false,
             preview_path: None,
             preview_kind: None,
             view: None,
@@ -327,7 +338,9 @@ impl Finder {
             editor: None,
             grid: None,
             editing: None,
-            rect,
+            edit_from_list: false,
+            list_rect: rect,
+            preview_rect: rect,
             frames,
             requests: spawn_worker(id, tx.clone(), seq),
             watcher: watcher(id, tx),
@@ -344,7 +357,6 @@ impl Finder {
             dir: self.dir.clone(),
             selected: self.current().map(|e| e.name.clone()),
             show_hidden: self.show_hidden,
-            focus_preview: self.focus_preview,
             scroll: self.scroll,
             editing: self.editing.clone(),
             pdf_pages: self.pdf_pages,
@@ -359,39 +371,20 @@ impl Finder {
         self.pdf_zoom = state.pdf_zoom;
         let dir = self.dir.clone();
         self.cd(dir, state.selected.clone());
-        self.focus_preview = state.focus_preview;
         self.scroll = state.scroll;
     }
 
     // ----- layout -----
 
-    /// (list, separator, preview) areas inside `rect`. In a narrow pane one side gets everything. With
-    /// frames the two boxes touch and there is no separator.
-    fn areas(&self, rect: Rect) -> (Rect, Option<Rect>, Rect) {
-        if rect.width < NARROW {
-            let empty = Rect::new(rect.x, rect.y, 0, rect.height);
-            let preview = self.focus_preview || self.editor.is_some() || self.grid.is_some();
-            return if preview { (empty, None, rect) } else { (rect, None, empty) };
-        }
-        let list_w = (rect.width * 35 / 100).clamp(16, rect.width - 20);
-        if self.frames {
-            return (
-                Rect::new(rect.x, rect.y, list_w, rect.height),
-                None,
-                Rect::new(rect.x + list_w, rect.y, rect.width - list_w, rect.height),
-            );
-        }
-        (
-            Rect::new(rect.x, rect.y, list_w, rect.height),
-            Some(Rect::new(rect.x + list_w, rect.y, 1, rect.height)),
-            Rect::new(rect.x + list_w + 1, rect.y, rect.width - list_w - 1, rect.height),
-        )
+    /// Where preview content (and the editor and grid) goes in a preview pane at `p`: inside its box, or below
+    /// its header line.
+    fn body_of(&self, p: Rect) -> Rect {
+        if self.frames { inner(p) } else { Rect::new(p.x, p.y + 1, p.width, p.height.saturating_sub(1)) }
     }
 
-    /// Where preview content (and the editor) goes: inside the preview box, or below the header line.
-    pub fn body_rect(&self, rect: Rect) -> Rect {
-        let (_, _, p) = self.areas(rect);
-        if self.frames { inner(p) } else { Rect::new(p.x, p.y + 1, p.width, p.height.saturating_sub(1)) }
+    /// Where preview content (and the editor and grid) goes in the preview pane.
+    pub fn body_rect(&self) -> Rect {
+        self.body_of(self.preview_rect)
     }
 
     /// Where the list's entries go inside the list area: inside its box, or below the title line.
@@ -400,34 +393,39 @@ impl Finder {
     }
 
     fn list_rows(&self) -> usize {
-        usize::from(self.rect.height.saturating_sub(if self.frames { 2 } else { 1 })).max(1)
+        usize::from(self.list_rect.height.saturating_sub(if self.frames { 2 } else { 1 })).max(1)
     }
 
     fn preview_rows(&self) -> usize {
-        usize::from(self.body_rect(self.rect).height).max(1)
+        usize::from(self.body_rect().height).max(1)
     }
 
     fn preview_width(&self) -> u16 {
         // One column of left padding.
-        self.body_rect(self.rect).width.saturating_sub(1).max(10)
+        self.body_rect().width.saturating_sub(1).max(10)
     }
 
     /// The page view's size in pixels: the picture area of the preview, at the active client's cell size.
     fn viewport_px(&self) -> (u32, u32) {
-        let body = self.body_rect(self.rect);
+        let body = self.body_rect();
         let (cw, ch) = self.cell_px;
         (u32::from(body.width.saturating_sub(2)) * u32::from(cw), u32::from(body.height) * u32::from(ch))
     }
 
-    /// Called when the pane is resized, or the active client's cell size (in pixels) changes.
-    pub fn resize(&mut self, rect: Rect, cell: (u16, u16)) {
-        self.rect = rect;
+    /// Called when the file list's pane is resized.
+    pub fn resize_list(&mut self, rect: Rect) {
+        self.list_rect = rect;
+        self.ensure_visible();
+    }
+
+    /// Called when the preview's pane is resized, or the active client's cell size (in pixels) changes.
+    pub fn resize_preview(&mut self, rect: Rect, cell: (u16, u16)) {
+        self.preview_rect = rect;
         self.cell_px = cell;
-        let body = self.body_rect(rect);
+        let body = self.body_rect();
         if let Some(g) = self.grid.as_mut() {
             g.resize(body.width, body.height);
         }
-        self.ensure_visible();
         let width = self.preview_width();
         if let Some(p) = self.pdf.as_mut() {
             // A PDF wraps its text again and renders its page again; it isn't reloaded.
@@ -622,6 +620,7 @@ impl Finder {
             p.rezoom(zoom, new, (vw, vh));
             new
         };
+        let mut action = Action::None;
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => p.scroll(3 * row, zoom, vh),
             KeyCode::Char('k') | KeyCode::Up => p.scroll(-3 * row, zoom, vh),
@@ -644,13 +643,13 @@ impl Finder {
             KeyCode::Char('h') | KeyCode::Left => {
                 // Panning when the page is wider than the pane; otherwise back to the list.
                 if !p.pan(-pan, vw) {
-                    self.focus_preview = false;
+                    action = Action::FocusFiles;
                 }
             }
-            KeyCode::Char('q') | KeyCode::Esc | KeyCode::Tab => self.focus_preview = false,
+            KeyCode::Char('q') | KeyCode::Esc | KeyCode::Tab => action = Action::FocusFiles,
             _ => {}
         }
-        Action::None
+        action
     }
 
     /// The mouse wheel over the preview: scrolls text, or a PDF page.
@@ -706,6 +705,11 @@ impl Finder {
         }
     }
 
+    /// The editor or grid was opened from the list (so focus goes back there when it closes).
+    pub fn edit_from_list(&self) -> bool {
+        self.edit_from_list
+    }
+
     /// The editor closed: show the (possibly changed) file again.
     pub fn editor_closed(&mut self) {
         self.editor = None;
@@ -742,27 +746,27 @@ impl Finder {
             return Action::None;
         }
         if self.editable().is_some() {
-            return self.edit_current();
+            return self.edit_current(true);
         }
-        self.focus_preview = true;
-        Action::None
+        Action::FocusPreview
     }
 
-    /// Edits the selected file: CSV and TSV in the grid, other text in Neovim.
-    fn edit_current(&mut self) -> Action {
+    /// Edits the selected file: CSV and TSV in the grid, other text in Neovim. Both show in the preview pane,
+    /// which gets focus. `from_list` says focus goes back to the list afterwards.
+    fn edit_current(&mut self, from_list: bool) -> Action {
         let Some(path) = self.editable() else { return Action::None };
+        self.edit_from_list = from_list;
         let finder_core::Kind::Csv { delimiter } = finder_core::detect(&path) else {
             return Action::OpenEditor(path);
         };
         match grid::Grid::open(&path, delimiter) {
             Ok(g) => {
                 self.grid = Some(g);
-                // In a narrow pane the preview side only shows once the grid is open, so size it now.
-                let body = self.body_rect(self.rect);
+                let body = self.body_rect();
                 if let Some(g) = self.grid.as_mut() {
                     g.resize(body.width, body.height);
                 }
-                Action::None
+                Action::FocusPreview
             }
             Err(e) => Action::Flash(e),
         }
@@ -777,18 +781,22 @@ impl Finder {
 
     // ----- input -----
 
-    pub fn handle_key(&mut self, key: &KeyEvent) -> Action {
-        let action = self.handle_key_inner(key);
+    /// A key typed in the file list (`preview` false) or in the preview pane (`preview` true).
+    pub fn handle_key(&mut self, key: &KeyEvent, preview: bool) -> Action {
+        let action = self.handle_key_inner(key, preview);
         self.pdf_request();
         action
     }
 
-    fn handle_key_inner(&mut self, key: &KeyEvent) -> Action {
+    fn handle_key_inner(&mut self, key: &KeyEvent, preview: bool) -> Action {
         if let Some(g) = self.grid.as_mut() {
             if let grid::Outcome::Close = g.handle_key(key) {
                 self.grid = None;
                 self.reload();
                 self.request_preview(true);
+                if self.edit_from_list {
+                    return Action::FocusFiles;
+                }
             }
             return Action::None;
         }
@@ -796,6 +804,7 @@ impl Finder {
         if key.code == KeyCode::Char('E')
             && let Some(p) = self.editable()
         {
+            self.edit_from_list = !preview;
             return Action::OpenEditor(p);
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -826,10 +835,10 @@ impl Finder {
         if key.code == KeyCode::Char('t') && !ctrl && self.pdf.is_some() {
             return self.toggle_pdf_view();
         }
-        if self.focus_preview && self.pdf_pages_view() {
+        if preview && self.pdf_pages_view() {
             return self.pdf_page_key(key, ctrl, g_pending);
         }
-        if self.focus_preview {
+        if preview {
             let page = self.preview_rows() as isize;
             match key.code {
                 KeyCode::Char(']') if self.pdf.is_some() => self.pdf_text_jump(true),
@@ -844,8 +853,8 @@ impl Finder {
                 KeyCode::Char('g') => self.pending_g = true,
                 KeyCode::Home => self.scroll = 0,
                 KeyCode::Char('G') | KeyCode::End => self.scroll_by(isize::MAX / 2),
-                KeyCode::Enter | KeyCode::Char('e') => return self.edit_current(),
-                KeyCode::Char('h' | 'q') | KeyCode::Left | KeyCode::Esc | KeyCode::Tab => self.focus_preview = false,
+                KeyCode::Enter | KeyCode::Char('e') => return self.edit_current(false),
+                KeyCode::Char('h' | 'q') | KeyCode::Left | KeyCode::Esc | KeyCode::Tab => return Action::FocusFiles,
                 _ => {}
             }
             return Action::None;
@@ -866,9 +875,9 @@ impl Finder {
                 if self.current().is_some_and(|e| e.is_dir) {
                     return self.activate();
                 }
-                self.focus_preview = true;
+                return Action::FocusPreview;
             }
-            KeyCode::Char('e') => return self.edit_current(),
+            KeyCode::Char('e') => return self.edit_current(true),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.up(),
             KeyCode::Char('.') => {
                 self.show_hidden = !self.show_hidden;
@@ -891,41 +900,39 @@ impl Finder {
                 self.filter.clear();
                 self.refilter(None);
             }
-            KeyCode::Tab => self.focus_preview = true,
+            KeyCode::Tab => return Action::FocusPreview,
             _ => {}
         }
         Action::None
     }
 
-    /// A mouse event at absolute screen coordinates inside the finder's `rect`.
-    pub fn handle_mouse(&mut self, ev: &MouseEvent) -> Action {
-        let action = self.handle_mouse_inner(ev);
+    /// A mouse event at absolute screen coordinates, in the file list (`preview` false) or the preview pane.
+    /// The server has already focused the pane that was clicked.
+    pub fn handle_mouse(&mut self, ev: &MouseEvent, preview: bool) -> Action {
+        let action = self.handle_mouse_inner(ev, preview);
         self.pdf_request();
         action
     }
 
-    fn handle_mouse_inner(&mut self, ev: &MouseEvent) -> Action {
-        let (list, _, preview) = self.areas(self.rect);
+    fn handle_mouse_inner(&mut self, ev: &MouseEvent, preview: bool) -> Action {
         if self.grid.is_some() {
-            let body = self.body_rect(self.rect);
+            let body = self.body_rect();
             if let Some(g) = self.grid.as_mut()
-                && super::layout::contains(preview, ev.column, ev.row)
+                && preview
             {
                 g.handle_mouse(ev, body);
             }
             return Action::None;
         }
         let (x, y) = (ev.column, ev.row);
-        let in_list = super::layout::contains(list, x, y);
-        let in_preview = super::layout::contains(preview, x, y);
+        let in_list = !preview && super::layout::contains(self.list_rect, x, y);
         match ev.kind {
             MouseEventKind::ScrollDown if in_list => self.move_selection(3),
             MouseEventKind::ScrollUp if in_list => self.move_selection(-3),
-            MouseEventKind::ScrollDown if in_preview => self.preview_wheel(3),
-            MouseEventKind::ScrollUp if in_preview => self.preview_wheel(-3),
+            MouseEventKind::ScrollDown if preview => self.preview_wheel(3),
+            MouseEventKind::ScrollUp if preview => self.preview_wheel(-3),
             MouseEventKind::Down(MouseButton::Left) if in_list => {
-                self.focus_preview = false;
-                let rows = self.entries_rect(list);
+                let rows = self.entries_rect(self.list_rect);
                 if !super::layout::contains(rows, x, y) {
                     return Action::None;
                 }
@@ -942,25 +949,24 @@ impl Finder {
                     return self.activate();
                 }
             }
-            MouseEventKind::Down(MouseButton::Left) if in_preview => self.focus_preview = true,
             _ => {}
         }
         Action::None
     }
 
-    /// One line of key hints for the status bar.
-    pub fn hint(&self) -> &'static str {
+    /// One line of key hints for the status bar, for the file list or (with `preview`) the preview pane.
+    pub fn hint(&self, preview: bool) -> &'static str {
         if let Some(g) = &self.grid {
             g.hint()
         } else if self.editor.is_some() {
             "editing · Alt+s save · Alt+q close"
         } else if self.filtering {
             "filter: type to narrow · Enter keep · Esc clear"
-        } else if self.focus_preview && self.pdf_pages_view() {
+        } else if preview && self.pdf_pages_view() {
             "pdf · j/k scroll · [ ] page · +/- zoom · t text · h back"
-        } else if self.focus_preview && self.pdf.is_some() {
+        } else if preview && self.pdf.is_some() {
             "pdf · j/k scroll · [ ] page · t pages · h back"
-        } else if self.focus_preview {
+        } else if preview {
             "preview · j/k scroll · Space/b page · Enter edit · h back"
         } else if self.pdf.is_some() {
             "j/k move · l preview · t text/pages · h up · / filter · . hidden"
@@ -971,39 +977,36 @@ impl Finder {
 
     // ----- drawing -----
 
-    /// Draws the finder into `rect`. `accent` colours the active box's frame when the pane has focus. With
+    /// Draws the file list into its pane at `list`. `accent` colours the frame when the pane has focus.
+    pub fn render_list(&self, buf: &mut Buffer, list: Rect, focused: bool, accent: Color) {
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let active = focused && self.editor.is_none() && self.grid.is_none();
+        if self.frames {
+            let title = self.list_title(usize::from(list.width.saturating_sub(4)));
+            let style = if active { bold.fg(accent) } else { Style::default() };
+            draw_frame(buf, list, &title, "", style);
+        } else {
+            let title = format!(" {} ", self.list_title(usize::from(list.width.saturating_sub(2))));
+            put_str(buf, list.x, list.y, &title, bold.fg(Color::Blue), list.width);
+        }
+        self.render_entries(buf, self.entries_rect(list), active);
+    }
+
+    /// Draws the preview into its pane at `preview`: the file's preview, the editor or the CSV grid. With
     /// `images`, a picture is left blank and handed back for the server to draw; otherwise it's drawn as blocks.
-    pub fn render(
+    pub fn render_preview(
         &self,
         buf: &mut Buffer,
-        rect: Rect,
+        preview: Rect,
         focused: bool,
         accent: Color,
         editor: Option<&TermPane>,
         images: Option<&mut Vec<ImageSlot>>,
     ) -> Option<Cursor> {
-        let (list, sep, preview) = self.areas(rect);
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let frame_style = |active: bool| if active { bold.fg(accent) } else { Style::default() };
-        let list_active = focused && !self.focus_preview && self.editor.is_none() && self.grid.is_none();
-        if list.width > 0 {
-            if self.frames {
-                let title = self.list_title(usize::from(list.width.saturating_sub(4)));
-                draw_frame(buf, list, &title, "", frame_style(list_active));
-            } else {
-                let title = format!(" {} ", self.list_title(usize::from(list.width.saturating_sub(2))));
-                put_str(buf, list.x, list.y, &title, bold.fg(Color::Blue), list.width);
-            }
-            self.render_list(buf, self.entries_rect(list), list_active);
-        }
-        if let Some(sep) = sep {
-            fill(buf, sep, "│", Style::default().fg(Color::DarkGray));
-        }
-        if preview.width == 0 {
-            return None;
-        }
         let header = Rect::new(preview.x, preview.y, preview.width, 1);
-        let body = self.body_rect(rect);
+        let body = self.body_of(preview);
         let name = self
             .editing
             .as_ref()
@@ -1011,7 +1014,7 @@ impl Finder {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let preview_active = focused && (self.focus_preview || self.editor.is_some() || self.grid.is_some());
+        let preview_active = focused;
         if let Some(g) = &self.grid {
             let name = g.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             if self.frames {
@@ -1157,7 +1160,7 @@ impl Finder {
     }
 
     /// Draws the entries into `area` (inside the list box, or below the title line).
-    fn render_list(&self, buf: &mut Buffer, area: Rect, active: bool) {
+    fn render_entries(&self, buf: &mut Buffer, area: Rect, active: bool) {
         let bold = Style::default().add_modifier(Modifier::BOLD);
         if let Some(msg) = &self.message {
             put_str(buf, area.x + 1, area.y, msg, Style::default().fg(Color::Red), area.width.saturating_sub(1));
@@ -1189,22 +1192,36 @@ impl Finder {
         }
     }
 
-    /// The finder as plain text, for `tb dump-screen`.
-    pub fn text(&self, editor: Option<&TermPane>) -> String {
-        let area = Rect::new(0, 0, self.rect.width, self.rect.height);
+    /// The file list as plain text, for `tb dump-screen`.
+    pub fn list_text(&self) -> String {
+        let area = Rect::new(0, 0, self.list_rect.width, self.list_rect.height);
         let mut buf = Buffer::empty(area);
-        self.render(&mut buf, area, false, Color::Green, editor, None);
-        let mut out = Vec::new();
-        for y in 0..area.height {
-            let mut line = String::new();
-            for x in 0..area.width {
-                line.push_str(buf[(x, y)].symbol());
-            }
-            out.push(line.trim_end().to_owned());
-        }
-        while out.last().is_some_and(String::is_empty) {
-            out.pop();
-        }
-        out.join("\n")
+        self.render_list(&mut buf, area, false, Color::Green);
+        buffer_text(&buf)
     }
+
+    /// The preview pane as plain text, for `tb dump-screen`.
+    pub fn preview_text(&self, editor: Option<&TermPane>) -> String {
+        let area = Rect::new(0, 0, self.preview_rect.width, self.preview_rect.height);
+        let mut buf = Buffer::empty(area);
+        self.render_preview(&mut buf, area, false, Color::Green, editor, None);
+        buffer_text(&buf)
+    }
+}
+
+/// A buffer's text, one line per row, without trailing spaces or blank lines at the end.
+fn buffer_text(buf: &Buffer) -> String {
+    let area = buf.area;
+    let mut out = Vec::new();
+    for y in 0..area.height {
+        let mut line = String::new();
+        for x in 0..area.width {
+            line.push_str(buf[(x, y)].symbol());
+        }
+        out.push(line.trim_end().to_owned());
+    }
+    while out.last().is_some_and(String::is_empty) {
+        out.pop();
+    }
+    out.join("\n")
 }

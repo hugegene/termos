@@ -136,6 +136,7 @@ impl Server {
                 let kind = match self.panes.get(&id) {
                     Some(Pane::Term(_)) => "terminal",
                     Some(Pane::Finder(_)) => "finder",
+                    Some(Pane::Preview { .. }) => "preview",
                     None => continue,
                 };
                 panes.push(PaneSummary {
@@ -155,15 +156,18 @@ impl Server {
 
     /// A pane's screen as `subscribe` sends it; `scrollback` adds that many lines of history (`None`: all).
     fn pane_text(&self, id: PaneId, ansi: bool, scrollback: Option<Option<usize>>) -> Option<Value> {
+        let lines =
+            |text: String| json!({"event": "pane_text", "pane_id": id, "lines": text.lines().collect::<Vec<_>>()});
         let term = match self.panes.get(&id)? {
             Pane::Term(p) => p,
-            Pane::Finder(f) => match f.editor.and_then(|e| self.term(e)) {
+            Pane::Finder(f) => return Some(lines(f.list_text())),
+            // A finder's editor shows in its preview pane.
+            Pane::Preview { finder } => match self.finder_editor(*finder).and_then(|e| self.term(e)) {
                 Some(p) => p,
-                None => {
-                    return Some(
-                        json!({"event": "pane_text", "pane_id": id, "lines": f.text(None).lines().collect::<Vec<_>>()}),
-                    );
-                }
+                None => match self.panes.get(finder)? {
+                    Pane::Finder(f) => return Some(lines(f.preview_text(None))),
+                    _ => return None,
+                },
             },
         };
         let full = scrollback.is_some();

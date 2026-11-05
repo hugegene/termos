@@ -2,7 +2,11 @@
 //!
 //! What comes back: tabs, the split layout, names, each terminal's folder, and the finders' state. Programs
 //! can't come back; a command that was running is typed at the new shell's prompt, without Enter.
+//!
+//! A finder is two panes, its file list and its preview. Each saves the list's pane id as `link`, so they
+//! find each other again. A finder saved before previews were panes of their own gets a new preview pane.
 
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -11,12 +15,20 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use super::finder::{Finder, FinderState};
+use super::finder::{self, Finder, FinderState};
 use super::layout::Node;
 use super::pane::SpawnOptions;
 use super::{Pane, Server, Tab};
 use crate::paths;
 use crate::protocol::{PaneId, SplitDir};
+
+/// What restoring needs to link a finder's two panes again: saved link → the file list's new pane, and the
+/// preview panes that still point nowhere, with their saved link.
+#[derive(Default)]
+struct Links {
+    finders: HashMap<u32, PaneId>,
+    previews: Vec<(PaneId, u32)>,
+}
 
 const VERSION: u32 = 1;
 
@@ -48,7 +60,10 @@ pub enum SavedNode {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
 pub enum PaneKind {
     Terminal,
+    /// A finder's file list.
     Finder,
+    /// A finder's preview.
+    Preview,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -61,6 +76,9 @@ pub struct SavedPane {
     /// The command running in the terminal, if it wasn't the shell.
     pub command: Option<Vec<String>>,
     pub finder: Option<FinderState>,
+    /// For a finder's two panes: the file list's pane id when it was saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<u32>,
 }
 
 pub fn load(session: &str) -> Option<Saved> {
@@ -161,11 +179,20 @@ impl Server {
                 cwd: Some(f.dir.clone()),
                 command: None,
                 finder: Some(f.state()),
+                link: Some(id),
             },
-            Some(Pane::Term(p)) => {
-                SavedPane { kind: PaneKind::Terminal, name, cwd: p.cwd(), command: p.running_command(), finder: None }
+            Some(Pane::Preview { finder }) => {
+                SavedPane { kind: PaneKind::Preview, name, cwd: None, command: None, finder: None, link: Some(*finder) }
             }
-            None => SavedPane { kind: PaneKind::Terminal, name, cwd: None, command: None, finder: None },
+            Some(Pane::Term(p)) => SavedPane {
+                kind: PaneKind::Terminal,
+                name,
+                cwd: p.cwd(),
+                command: p.running_command(),
+                finder: None,
+                link: None,
+            },
+            None => SavedPane { kind: PaneKind::Terminal, name, cwd: None, command: None, finder: None, link: None },
         }
     }
 
@@ -188,9 +215,10 @@ impl Server {
     /// With `run_commands`, the commands that were running are run, not just typed.
     pub(super) fn restore(&mut self, saved: Saved, run_commands: bool) {
         self.frames = saved.frames;
+        let mut links = Links::default();
         for t in saved.tabs {
             let mut leaves = Vec::new();
-            let Some(root) = self.restore_node(&t.layout, &mut leaves) else { continue };
+            let Some(root) = self.restore_node(&t.layout, &mut leaves, &mut links) else { continue };
             let focus = leaves.get(t.focus).copied().unwrap_or(leaves[0]);
             self.next_tab_id += 1;
             self.tabs.push(Tab {
@@ -203,6 +231,7 @@ impl Server {
                 sync: t.sync,
             });
         }
+        self.link_finders(links);
         if run_commands {
             for input in self.pending_input.values_mut() {
                 input.text.push('\r');
@@ -214,16 +243,52 @@ impl Server {
         log::info!("restored {} tabs", self.tabs.len());
     }
 
-    fn restore_node(&mut self, node: &SavedNode, leaves: &mut Vec<PaneId>) -> Option<Node> {
+    /// Points each restored preview at its file list. A preview whose list is gone is dropped, and a list
+    /// without a preview (as every finder saved before previews had panes of their own) gets one beside it.
+    fn link_finders(&mut self, links: Links) {
+        for (preview, link) in links.previews {
+            match links.finders.get(&link) {
+                Some(&files) => {
+                    self.panes.insert(preview, Pane::Preview { finder: files });
+                }
+                None => self.remove_restored(preview),
+            }
+        }
+        let lonely: Vec<PaneId> = links.finders.values().copied().filter(|f| self.preview_of(*f).is_none()).collect();
+        for files in lonely {
+            let preview = self.alloc_pane();
+            self.panes.insert(preview, Pane::Preview { finder: files });
+            if let Some(tab) = self.tabs.iter_mut().find(|t| t.root.contains(files)) {
+                tab.root.split_with(files, preview, SplitDir::Right, finder::LIST_SHARE);
+            }
+        }
+    }
+
+    /// Takes a restored pane out of its tab (dropping the tab if it was alone there).
+    fn remove_restored(&mut self, id: PaneId) {
+        self.panes.remove(&id);
+        let Some(ti) = self.tabs.iter().position(|t| t.root.contains(id)) else { return };
+        let tab = &mut self.tabs[ti];
+        if tab.root == Node::Leaf(id) {
+            self.tabs.remove(ti);
+            return;
+        }
+        tab.root.remove(id);
+        if tab.focus == id {
+            tab.focus = tab.root.panes()[0];
+        }
+    }
+
+    fn restore_node(&mut self, node: &SavedNode, leaves: &mut Vec<PaneId>, links: &mut Links) -> Option<Node> {
         match node {
             SavedNode::Pane(p) => {
-                let id = self.restore_pane(p)?;
+                let id = self.restore_pane(p, links)?;
                 leaves.push(id);
                 Some(Node::Leaf(id))
             }
             SavedNode::Split { dir, ratio, a, b } => {
-                let a = self.restore_node(a, leaves);
-                let b = self.restore_node(b, leaves);
+                let a = self.restore_node(a, leaves, links);
+                let b = self.restore_node(b, leaves, links);
                 match (a, b) {
                     (Some(a), Some(b)) => {
                         Some(Node::Split { dir: *dir, ratio: *ratio, a: Box::new(a), b: Box::new(b) })
@@ -235,7 +300,7 @@ impl Server {
         }
     }
 
-    fn restore_pane(&mut self, p: &SavedPane) -> Option<PaneId> {
+    fn restore_pane(&mut self, p: &SavedPane, links: &mut Links) -> Option<PaneId> {
         let dir = usable_dir(p.cwd.as_deref());
         let id = match p.kind {
             PaneKind::Terminal => {
@@ -264,6 +329,17 @@ impl Server {
                 if let Some(file) = editing {
                     self.open_editor(id, file);
                 }
+                // Finders saved before previews had panes of their own have no link; give them one.
+                let link = p.link.unwrap_or(u32::MAX - id);
+                links.finders.insert(link, id);
+                id
+            }
+            PaneKind::Preview => {
+                // Linked to its file list once every pane is back (the list may come later).
+                let link = p.link?;
+                let id = self.alloc_pane();
+                self.panes.insert(id, Pane::Preview { finder: PaneId::MAX });
+                links.previews.push((id, link));
                 id
             }
         };
@@ -325,6 +401,7 @@ mod tests {
                         cwd: Some("/tmp".into()),
                         command: Some(vec!["make".into()]),
                         finder: None,
+                        link: None,
                     })),
                     b: Box::new(SavedNode::Pane(SavedPane {
                         kind: PaneKind::Finder,
@@ -332,6 +409,7 @@ mod tests {
                         cwd: Some("/".into()),
                         command: None,
                         finder: Some(FinderState { dir: "/".into(), ..FinderState::default() }),
+                        link: Some(3),
                     })),
                 },
             }],

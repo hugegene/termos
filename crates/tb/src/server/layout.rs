@@ -170,13 +170,18 @@ impl Node {
 
     /// Replaces the leaf `target` with a split holding `target` and `new`. Returns false if not found.
     pub fn split(&mut self, target: PaneId, new: PaneId, dir: SplitDir) -> bool {
+        self.split_with(target, new, dir, 0.5)
+    }
+
+    /// Like `split`, with `target` getting `ratio` of the space.
+    pub fn split_with(&mut self, target: PaneId, new: PaneId, dir: SplitDir, ratio: f32) -> bool {
         match self {
             Node::Leaf(id) if *id == target => {
-                *self = Node::Split { dir, ratio: 0.5, a: Box::new(Node::Leaf(target)), b: Box::new(Node::Leaf(new)) };
+                *self = Node::Split { dir, ratio, a: Box::new(Node::Leaf(target)), b: Box::new(Node::Leaf(new)) };
                 true
             }
             Node::Leaf(_) => false,
-            Node::Split { a, b, .. } => a.split(target, new, dir) || b.split(target, new, dir),
+            Node::Split { a, b, .. } => a.split_with(target, new, dir, ratio) || b.split_with(target, new, dir, ratio),
         }
     }
 

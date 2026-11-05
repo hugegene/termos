@@ -639,7 +639,9 @@ fn sessions_come_back_after_kill() {
     s.wait_for(" 2 finder ");
     s.wait_for("┌ b.txt ");
     let panes = env.panes();
-    assert_eq!(panes.len(), 3, "{panes:?}");
+    // The finder is two panes, its file list and its preview, linked again.
+    let kinds: Vec<_> = panes.iter().map(|p| p["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["terminal", "terminal", "finder", "preview"], "{panes:?}");
     assert_eq!(panes[0]["cwd"].as_str(), Some(proj.to_str().unwrap()));
     let second = panes[1]["id"].as_u64().unwrap().to_string();
     wait("sleep typed, not run", || env.tb(&["dump-screen", "-p", &second]).contains("$ sleep 300").then_some(()));
@@ -1291,6 +1293,97 @@ fn pdf_page_view_with_kitty_images() {
     // Each scroll step is a new picture, placed in turn; on to page 2 at the end of page 1.
     s.send(b"jjjjj   ");
     s.wait_until("page 2 placed", |t| t.contains("page 2/2") && !t.contains('▀') && !t.contains("rendering"));
+}
+
+/// The finder's file list and preview are two real panes: borders drag, the preview goes fullscreen, closing
+/// one closes both, and a narrow tab shows one at a time.
+#[test]
+fn finder_is_two_panes() {
+    let env = Env::new("e2e-twopane");
+    let files = env.root.join("files");
+    fs::create_dir_all(&files).unwrap();
+    fs::write(files.join("a.txt"), "first file\n").unwrap();
+    env.tb(&["start"]);
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let s = env.attach(100, 30);
+    s.wait_for("first file");
+    let pane = |kind: &str| env.panes().into_iter().find(|p| p["kind"] == kind).unwrap();
+    let (list, preview) = (pane("finder"), pane("preview"));
+    assert_eq!((list["pane_columns"].as_u64(), preview["pane_columns"].as_u64()), (Some(35), Some(65)));
+    assert_eq!(list["is_focused"], true);
+
+    // Drag the border (where the two frames meet, columns 34 and 35) to column 50.
+    s.send(b"\x1b[<0;36;11M\x1b[<32;45;11M\x1b[<32;51;11M\x1b[<0;51;11m");
+    wait("the list wider", || (pane("finder")["pane_columns"].as_u64() > Some(45)).then_some(()));
+
+    // l focuses the preview pane; Ctrl+p f makes it fullscreen, and h comes back to the list.
+    s.send(b"l");
+    wait("preview focused", || (pane("preview")["is_focused"] == true).then_some(()));
+    s.send(b"\x10f");
+    wait("preview fullscreen", || (pane("preview")["is_fullscreen"] == true).then_some(()));
+    assert_eq!(pane("finder")["visible"], false);
+    s.send(b"h");
+    wait("back to the list", || {
+        let list = pane("finder");
+        (list["is_focused"] == true && list["visible"] == true).then_some(())
+    });
+
+    // Closing the preview closes the finder too.
+    let id = pane("preview")["id"].as_u64().unwrap();
+    env.tb(&["action", "close-pane", "-p", &format!("preview_{id}")]);
+    wait("both gone", || env.panes().iter().all(|p| p["kind"] == "terminal").then_some(()));
+    drop(s);
+
+    // In a narrow terminal a finder tab shows its focused pane; l and h switch.
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let s = env.attach(50, 24);
+    s.wait_for("a.txt");
+    wait("only the list", || (pane("preview")["visible"] == false && pane("finder")["visible"] == true).then_some(()));
+    s.send(b"l");
+    s.wait_for("first file");
+    wait("only the preview", || (pane("finder")["visible"] == false).then_some(()));
+}
+
+/// A session saved when the finder was one pane comes back with the finder as two.
+#[test]
+fn old_one_pane_finder_comes_back_as_two() {
+    let env = Env::new("e2e-oldfinder");
+    let files = env.root.join("files");
+    fs::create_dir_all(&files).unwrap();
+    fs::write(files.join("a.txt"), "a").unwrap();
+    fs::write(files.join("b.txt"), "the second file\n").unwrap();
+    let dir = files.to_str().unwrap();
+    let saved = serde_json::json!({
+        "version": 1, "frames": true, "active": 0,
+        "tabs": [{
+            "name": "finder", "auto_name": false, "zoomed": false, "sync": false, "focus": 0,
+            "layout": {"Pane": {
+                "kind": "Finder", "name": null, "cwd": dir, "command": null,
+                "finder": {"dir": dir, "selected": "b.txt", "show_hidden": false, "focus_preview": true,
+                           "scroll": 0, "editing": null}
+            }}
+        }]
+    });
+    let sessions = env.root.join("state/sessions");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(sessions.join(format!("{}.json", env.session)), saved.to_string()).unwrap();
+
+    let s = env.attach(100, 30);
+    s.wait_for("the second file");
+    let kinds: Vec<_> = env.panes().iter().map(|p| p["kind"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(kinds, ["finder", "preview"]);
 }
 
 #[test]

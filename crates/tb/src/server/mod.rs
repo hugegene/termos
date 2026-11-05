@@ -121,7 +121,12 @@ struct Frame {
 
 enum Pane {
     Term(TermPane),
+    /// A finder's file list. It owns the finder.
     Finder(Box<Finder>),
+    /// A finder's preview: drawn from, and driven through, the finder in pane `finder`.
+    Preview {
+        finder: PaneId,
+    },
 }
 
 struct Tab {
@@ -637,10 +642,39 @@ impl Server {
         id
     }
 
-    /// The tab layout as shown: a zoomed tab shows only its focused pane.
+    /// A tab that shows only its focused pane: zoomed (fullscreen), or a finder's tab too narrow for its file
+    /// list and preview side by side.
+    fn shows_one(&self, tab: &Tab) -> bool {
+        tab.zoomed
+            || (self.content_area().width < finder::NARROW
+                && tab.root.panes().iter().any(|id| matches!(self.panes.get(id), Some(Pane::Preview { .. }))))
+    }
+
+    /// The finder behind a finder pane, and whether the pane is its preview (rather than its file list).
+    fn finder_of(&self, id: PaneId) -> Option<(PaneId, bool)> {
+        match self.panes.get(&id)? {
+            Pane::Finder(_) => Some((id, false)),
+            Pane::Preview { finder } => Some((*finder, true)),
+            Pane::Term(_) => None,
+        }
+    }
+
+    /// The preview pane of the finder in pane `finder`.
+    fn preview_of(&self, finder: PaneId) -> Option<PaneId> {
+        self.panes.iter().find_map(|(id, p)| matches!(p, Pane::Preview { finder: f } if *f == finder).then_some(*id))
+    }
+
+    fn finder_mut(&mut self, id: PaneId) -> Option<&mut Finder> {
+        match self.panes.get_mut(&id)? {
+            Pane::Finder(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// The tab layout as shown: a zoomed tab, or a narrow finder tab, shows only its focused pane.
     fn tab_layout(&self, tab: &Tab) -> Layout {
         let area = self.content_area();
-        if tab.zoomed {
+        if self.shows_one(tab) {
             Layout { panes: vec![(tab.focus, area)], separators: Vec::new() }
         } else {
             tab.root.layout(area, self.frames)
@@ -660,7 +694,7 @@ impl Server {
             .iter()
             .flat_map(|t| {
                 let mut panes = t.root.layout(area, self.frames).panes;
-                if t.zoomed {
+                if self.shows_one(t) {
                     for (id, r) in &mut panes {
                         if *id == t.focus {
                             *r = area;
@@ -685,8 +719,17 @@ impl Server {
             }
             Some(Pane::Finder(f)) => {
                 f.frames = frames;
-                f.resize(rect, cell);
-                f.editor.map(|e| (e, f.body_rect(rect)))
+                f.resize_list(rect);
+                None
+            }
+            Some(Pane::Preview { finder }) => {
+                let fid = *finder;
+                // The editor shows in the preview pane, so it follows this pane's size.
+                self.finder_mut(fid).and_then(|f| {
+                    f.frames = frames;
+                    f.resize_preview(rect, cell);
+                    f.editor.map(|e| (e, f.body_rect()))
+                })
             }
             None => None,
         };
@@ -701,12 +744,16 @@ impl Server {
         self.tabs.get(self.active).map(|t| t.focus)
     }
 
-    /// The terminal that receives typing: the focused terminal pane, or the editor in a focused finder.
+    /// The terminal that receives typing: the focused terminal pane, or the editor of a focused finder.
     fn typing_target(&self) -> Option<PaneId> {
         let id = self.focused_pane()?;
         match self.panes.get(&id)? {
             Pane::Term(_) => Some(id),
             Pane::Finder(f) => f.editor,
+            Pane::Preview { finder } => match self.panes.get(finder)? {
+                Pane::Finder(f) => f.editor,
+                _ => None,
+            },
         }
     }
 
@@ -722,6 +769,10 @@ impl Server {
         match self.panes.get(&id)? {
             Pane::Term(p) => p.cwd(),
             Pane::Finder(f) => Some(f.dir.clone()),
+            Pane::Preview { finder } => match self.panes.get(finder)? {
+                Pane::Finder(f) => Some(f.dir.clone()),
+                _ => None,
+            },
         }
     }
 
@@ -746,9 +797,9 @@ impl Server {
         }
     }
 
-    /// A finder keeps its name when it moves to a tab of its own.
+    /// A finder's pane keeps the name "finder" when it moves to a tab of its own.
     fn tab_name_for(&self, id: PaneId) -> Option<String> {
-        matches!(self.panes.get(&id), Some(Pane::Finder(_))).then(|| "finder".to_owned())
+        self.finder_of(id).map(|_| "finder".to_owned())
     }
 
     fn remember_tab(&mut self) {
@@ -774,12 +825,23 @@ impl Server {
         Ok(id)
     }
 
+    /// A tab with a finder: its file list (focused) and its preview, side by side. Returns the list's pane.
     fn new_finder_tab(&mut self, dir: PathBuf) -> PaneId {
-        let id = self.alloc_pane();
-        let finder = Finder::new(id, dir, self.content_area(), self.frames, self.tx.clone());
-        self.panes.insert(id, Pane::Finder(Box::new(finder)));
-        self.push_tab(Some("finder".into()), id);
-        id
+        let (files, preview) = self.add_finder(dir);
+        self.push_tab(Some("finder".into()), files);
+        self.tabs[self.active].root.split_with(files, preview, SplitDir::Right, finder::LIST_SHARE);
+        self.apply_layout();
+        files
+    }
+
+    /// Makes a finder's two panes, not yet in any tab: the file list, which owns the finder, and its preview.
+    fn add_finder(&mut self, dir: PathBuf) -> (PaneId, PaneId) {
+        let files = self.alloc_pane();
+        let finder = Finder::new(files, dir, self.content_area(), self.frames, self.tx.clone());
+        self.panes.insert(files, Pane::Finder(Box::new(finder)));
+        let preview = self.alloc_pane();
+        self.panes.insert(preview, Pane::Preview { finder: files });
+        (files, preview)
     }
 
     fn split(&mut self, dir: SplitDir, opts: SpawnOptions) -> std::io::Result<PaneId> {
@@ -887,7 +949,7 @@ impl Server {
                     e.shutdown();
                 }
             }
-            None => {}
+            Some(Pane::Preview { .. }) | None => {}
         }
         self.pane_names.remove(&id);
         self.pane_colors.remove(&id);
@@ -899,15 +961,32 @@ impl Server {
         }
     }
 
+    /// Closes a pane. A finder's file list and preview are one finder, so closing either closes both.
     fn close_pane(&mut self, id: PaneId) {
+        let partner = match self.panes.get(&id) {
+            Some(Pane::Finder(_)) => self.preview_of(id),
+            Some(Pane::Preview { finder }) => Some(*finder),
+            _ => None,
+        };
+        self.close_one(id);
+        if let Some(other) = partner {
+            self.close_one(other);
+        }
+    }
+
+    fn close_one(&mut self, id: PaneId) {
         if !self.panes.contains_key(&id) {
             return;
         }
         self.dirty = true;
         if let Some(owner) = self.editor_owner(id) {
             self.drop_pane(id);
-            if let Some(Pane::Finder(f)) = self.panes.get_mut(&owner) {
+            let back = self.finder_mut(owner).is_some_and(|f| {
                 f.editor_closed();
+                f.edit_from_list()
+            });
+            if back {
+                self.focus_unzoomed(owner);
             }
             self.apply_layout();
             return;
@@ -967,6 +1046,10 @@ impl Server {
             let target = id.and_then(|id| match self.panes.get(&id)? {
                 Pane::Term(_) => Some(id),
                 Pane::Finder(f) => f.editor,
+                Pane::Preview { finder } => match self.panes.get(finder)? {
+                    Pane::Finder(f) => f.editor,
+                    _ => None,
+                },
             });
             if let Some(p) = target.and_then(|t| self.term(t)) {
                 let mode = *p.term.lock().mode();
@@ -980,10 +1063,27 @@ impl Server {
     fn focus_pane(&mut self, id: PaneId) {
         let Some(ti) = self.tabs.iter().position(|t| t.root.contains(id)) else { return };
         let old = self.focused_pane();
+        let moved = self.tabs[ti].focus != id;
         self.active = ti;
         self.tabs[ti].focus = id;
         self.focus_changed(old, Some(id));
+        // A narrow finder tab shows the focused pane, so the panes' sizes change.
+        if moved && self.shows_one(&self.tabs[ti]) {
+            self.apply_layout();
+        }
         self.dirty = true;
+    }
+
+    /// Focuses a pane, leaving fullscreen if another pane of its tab was fullscreen.
+    fn focus_unzoomed(&mut self, id: PaneId) {
+        if let Some(tab) = self.tabs.iter_mut().find(|t| t.root.contains(id))
+            && tab.zoomed
+            && tab.focus != id
+        {
+            tab.zoomed = false;
+            self.apply_layout();
+        }
+        self.focus_pane(id);
     }
 
     fn focus(&mut self, target: FocusTarget) {
@@ -1240,8 +1340,19 @@ impl Server {
     fn finder_action(&mut self, finder_id: PaneId, action: Action) {
         match action {
             Action::None => {}
-            Action::OpenEditor(path) => self.open_editor(finder_id, path),
+            Action::OpenEditor(path) => {
+                self.open_editor(finder_id, path);
+                if let Some(preview) = self.preview_of(finder_id) {
+                    self.focus_unzoomed(preview);
+                }
+            }
             Action::Flash(text) => self.flash(text),
+            Action::FocusPreview => {
+                if let Some(preview) = self.preview_of(finder_id) {
+                    self.focus_unzoomed(preview);
+                }
+            }
+            Action::FocusFiles => self.focus_unzoomed(finder_id),
         }
     }
 
@@ -1267,9 +1378,9 @@ impl Server {
                 self.dirty = true;
                 if self.event_summary.is_some() {
                     self.changed_panes.insert(id);
-                    // A finder's editor shows in the finder's pane.
-                    if let Some(owner) = self.editor_owner(id) {
-                        self.changed_panes.insert(owner);
+                    // A finder's editor shows in the finder's preview pane.
+                    if let Some(preview) = self.editor_owner(id).and_then(|owner| self.preview_of(owner)) {
+                        self.changed_panes.insert(preview);
                     }
                 }
                 if let Some(p) = self.pending_input.get_mut(&id) {
@@ -1368,21 +1479,22 @@ impl Server {
             }
             return;
         }
-        let action = match self.panes.get_mut(&id) {
-            Some(Pane::Finder(f)) => match f.editor {
+        let Some((fid, preview)) = self.finder_of(id) else {
+            self.type_into(id, key);
+            return;
+        };
+        let action = match self.finder_mut(fid) {
+            Some(f) => match f.editor {
+                // While a file is open in the editor, typing goes to it from either of the finder's panes.
                 Some(editor) => {
                     self.type_into(editor, key);
                     return;
                 }
-                None => f.handle_key(key),
+                None => f.handle_key(key, preview),
             },
-            Some(Pane::Term(_)) => {
-                self.type_into(id, key);
-                return;
-            }
             None => return,
         };
-        self.finder_action(id, action);
+        self.finder_action(fid, action);
     }
 
     fn type_into(&self, id: PaneId, key: &KeyEvent) {
@@ -1442,18 +1554,22 @@ impl Server {
         if matches!(ev.kind, MouseEventKind::Down(_)) && id != focus {
             self.focus_pane(id);
         }
-        match self.panes.get_mut(&id) {
-            Some(Pane::Finder(f)) => {
-                if let Some(editor) = f.editor {
-                    let body = f.body_rect(rect);
-                    if layout::contains(body, x, y) {
-                        self.term_mouse(client, editor, body, &ev);
-                    }
-                    return;
+        if let Some((fid, preview)) = self.finder_of(id) {
+            let Some(f) = self.finder_mut(fid) else { return };
+            if let Some(editor) = f.editor {
+                // The editor shows in the preview pane; the file list waits while it's open.
+                let body = f.body_rect();
+                if preview && layout::contains(body, x, y) {
+                    self.term_mouse(client, editor, body, &ev);
                 }
-                let action = f.handle_mouse(&ev);
-                self.finder_action(id, action);
+                return;
             }
+            let action = f.handle_mouse(&ev, preview);
+            self.finder_action(fid, action);
+            return;
+        }
+        match self.panes.get_mut(&id) {
+            Some(Pane::Finder(_) | Pane::Preview { .. }) => {}
             Some(Pane::Term(_)) => {
                 // A click on the frame only focuses.
                 let body = self.body(rect);
@@ -1793,6 +1909,7 @@ impl Server {
         match self.panes.get(&id) {
             Some(Pane::Term(p)) => p.display_title(),
             Some(Pane::Finder(f)) => finder::home_relative(&f.dir),
+            Some(Pane::Preview { .. }) => "preview".into(),
             None => String::new(),
         }
     }
@@ -1841,8 +1958,13 @@ impl Server {
                 draw_term(buf, body, p, &decor)
             }
             Pane::Finder(f) => {
+                f.render_list(buf, rect, focused, accent);
+                None
+            }
+            Pane::Preview { finder } => {
+                let Some(Pane::Finder(f)) = self.panes.get(finder) else { return None };
                 let editor = f.editor.and_then(|e| self.term(e));
-                f.render(buf, rect, focused, accent, editor, slots).filter(|_| show_cursor)
+                f.render_preview(buf, rect, focused, accent, editor, slots).filter(|_| show_cursor)
             }
         }
     }

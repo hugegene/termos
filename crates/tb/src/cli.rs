@@ -58,7 +58,7 @@ pub fn pane_id(s: &str) -> Result<PaneId, String> {
     if s.starts_with("plugin_") {
         return Err(format!("'{s}': tb has no plugin panes"));
     }
-    let n = s.strip_prefix("terminal_").or_else(|| s.strip_prefix("finder_")).unwrap_or(s);
+    let n = ["terminal_", "finder_", "preview_"].iter().find_map(|k| s.strip_prefix(k)).unwrap_or(s);
     n.parse().map_err(|_| format!("not a pane id: '{s}' (use 3 or terminal_3)"))
 }
 
@@ -857,6 +857,7 @@ mod tests {
         assert_eq!(pane_id("3"), Ok(3));
         assert_eq!(pane_id("terminal_3"), Ok(3));
         assert_eq!(pane_id("finder_4"), Ok(4));
+        assert_eq!(pane_id("preview_5"), Ok(5));
         assert!(pane_id("plugin_1").is_err());
         assert!(pane_id("x").is_err());
     }

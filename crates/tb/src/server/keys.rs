@@ -535,9 +535,12 @@ impl Server {
         }
         let badge = |bg: Color| Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD);
         let dim = Style::default().fg(Color::DarkGray);
-        let finder_hint = || match self.focused_pane().and_then(|id| self.panes.get(&id)) {
-            Some(Pane::Finder(f)) => Some(f.hint()),
-            _ => None,
+        let finder_hint = || {
+            let (fid, preview) = self.focused_pane().and_then(|id| self.finder_of(id))?;
+            match self.panes.get(&fid)? {
+                Pane::Finder(f) => Some(f.hint(preview)),
+                _ => None,
+            }
         };
         let (mut x, hints) = match &self.mode {
             // A message briefly takes the mode list's place.

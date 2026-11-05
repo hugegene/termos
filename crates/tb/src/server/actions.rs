@@ -91,14 +91,20 @@ impl Server {
             CliAction::ListClients => serde_json::to_string(&self.client_list())?,
             CliAction::DumpScreen { pane, full, ansi } => {
                 let id = self.pane_or_focused(pane)?;
+                // A finder's editor shows in its preview pane.
                 let term = match self.panes.get(&id).context("no such pane")? {
                     Pane::Term(p) => Some(p),
-                    Pane::Finder(f) => f.editor.and_then(|e| self.term(e)),
+                    Pane::Finder(_) => None,
+                    Pane::Preview { finder } => self.finder_editor(*finder).and_then(|e| self.term(e)),
                 };
                 match (term, &self.panes[&id]) {
                     (Some(p), _) if ansi => p.ansi_text(full),
                     (Some(p), Pane::Term(_)) => p.text(full),
-                    (_, Pane::Finder(f)) => f.text(term),
+                    (_, Pane::Finder(f)) => f.list_text(),
+                    (term, Pane::Preview { finder }) => match self.panes.get(finder) {
+                        Some(Pane::Finder(f)) => f.preview_text(term),
+                        _ => String::new(),
+                    },
                     (None, Pane::Term(_)) => unreachable!(),
                 }
             }
@@ -442,7 +448,18 @@ impl Server {
         let id = self.pane_or_focused(pane)?;
         match &self.panes[&id] {
             Pane::Term(_) => Ok(id),
-            Pane::Finder(f) => f.editor.with_context(|| format!("pane {id} is a finder, not a terminal")),
+            Pane::Finder(_) | Pane::Preview { .. } => {
+                let (fid, _) = self.finder_of(id).context("no such pane")?;
+                self.finder_editor(fid).with_context(|| format!("pane {id} is a finder, not a terminal"))
+            }
+        }
+    }
+
+    /// The editor open in the finder in pane `finder`, if any.
+    pub(super) fn finder_editor(&self, finder: PaneId) -> Option<PaneId> {
+        match self.panes.get(&finder)? {
+            Pane::Finder(f) => f.editor,
+            _ => None,
         }
     }
 
@@ -497,8 +514,9 @@ impl Server {
     pub(super) fn write_to(&mut self, id: PaneId, bytes: Vec<u8>) {
         match self.panes.get(&id) {
             Some(Pane::Term(p)) => p.write(bytes),
-            Some(Pane::Finder(f)) => {
-                if let Some(editor) = f.editor.and_then(|e| self.term(e)) {
+            Some(Pane::Finder(_) | Pane::Preview { .. }) => {
+                let editor = self.finder_of(id).and_then(|(fid, _)| self.finder_editor(fid));
+                if let Some(editor) = editor.and_then(|e| self.term(e)) {
                     editor.write(bytes);
                     return;
                 }
@@ -520,21 +538,21 @@ impl Server {
 
     /// A key for one pane, whether or not it has focus.
     fn key_to(&mut self, id: PaneId, key: &KeyEvent) {
-        let action = match self.panes.get_mut(&id) {
-            Some(Pane::Term(_)) => {
-                self.type_into(id, key);
-                return;
-            }
-            Some(Pane::Finder(f)) => match f.editor {
+        let Some((fid, preview)) = self.finder_of(id) else {
+            self.type_into(id, key);
+            return;
+        };
+        let action = match self.finder_mut(fid) {
+            Some(f) => match f.editor {
                 Some(editor) => {
                     self.type_into(editor, key);
                     return;
                 }
-                None => f.handle_key(key),
+                None => f.handle_key(key, preview),
             },
             None => return,
         };
-        self.finder_action(id, action);
+        self.finder_action(fid, action);
     }
 
     /// Renames the session: its socket, saved layout and log follow the new name.
@@ -617,6 +635,13 @@ impl Server {
                     Some(Pane::Finder(f)) => {
                         ("finder", "finder".to_owned(), Some(f.dir.clone()), f.editor, None, None, frame, None)
                     }
+                    Some(Pane::Preview { finder }) => {
+                        let (dir, editor) = match self.panes.get(finder) {
+                            Some(Pane::Finder(f)) => (Some(f.dir.clone()), f.editor),
+                            _ => (None, None),
+                        };
+                        ("preview", "preview".to_owned(), dir, editor, None, None, frame, None)
+                    }
                     None => continue,
                 };
                 out.push(json!({
@@ -656,7 +681,7 @@ impl Server {
                     "tab": ti + 1,
                     "name": self.pane_names.get(&id),
                     "focused": focused,
-                    "visible": ti == self.active && (!tab.zoomed || tab.focus == id),
+                    "visible": ti == self.active && (!self.shows_one(tab) || tab.focus == id),
                     "x": rect.x, "y": rect.y, "cols": rect.width, "rows": rect.height,
                     "cwd": cwd,
                     "editor_pane": editor,
@@ -671,7 +696,7 @@ impl Server {
         let pane = self.focused_pane();
         let running = pane.and_then(|id| match self.panes.get(&id)? {
             Pane::Term(p) => p.running_command().map(|c| c.join(" ")).or_else(|| p.program()),
-            Pane::Finder(_) => Some("finder".to_owned()),
+            Pane::Finder(_) | Pane::Preview { .. } => Some("finder".to_owned()),
         });
         let mut ids: Vec<&ClientId> = self.clients.iter().filter(|(_, c)| c.attached).map(|(id, _)| id).collect();
         ids.sort();
