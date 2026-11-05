@@ -73,3 +73,5 @@ behaviour, so nothing that works in zellij fails in `tb`.
   - **Tests:** 3 unit tests (`Cli::command().debug_assert()`, parsing, the order the session is picked in) and
     the end-to-end test `zellij_session_commands`. The suite passed 3 runs in a row. Other tests now also run
     `kill-all-sessions -y` when they finish, in their own socket folder, so no test leaves a session running.
+- **2026-11-05:** the rest of zellij's CLI (its 72 actions, `run`, `edit`, `watch`, `subscribe`) is planned as
+  rebuild step 6, where the CLI becomes the extension API: [CLI extension plan](2026-11-05-cli-extensions.md).
