@@ -17,6 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use finder_core::link::Target;
 use finder_core::pdf::PdfInfo;
 use finder_core::tool::ToolError;
 use finder_core::{Entry, Kind, Limits, human_size};
@@ -38,6 +39,9 @@ pub const NARROW: u16 = 60;
 
 /// The file list's share of a new finder tab's width, as in the zellij version.
 pub const LIST_SHARE: f32 = 0.35;
+
+/// How many files Backspace can go back through after following links.
+const HISTORY: usize = 100;
 
 /// Half-block colours for an image: (top, bottom) per cell.
 type ImageCells = Vec<Vec<(Color, Color)>>;
@@ -165,6 +169,8 @@ pub struct Finder {
     pending_g: bool,
     last_click: Option<(Instant, usize)>,
     message: Option<String>,
+    /// The files links were followed from, and their scroll positions, for Backspace in the preview.
+    history: Vec<(PathBuf, usize)>,
 }
 
 /// What the worker remembers about a PDF: when the file last changed, what `pdfinfo` said, and whether its
@@ -347,6 +353,7 @@ impl Finder {
             pending_g: false,
             last_click: None,
             message: None,
+            history: Vec::new(),
         };
         f.cd(dir, None);
         f
@@ -772,6 +779,66 @@ impl Finder {
         }
     }
 
+    // ----- links -----
+
+    /// The link under a click in the preview, at absolute screen coordinates.
+    fn link_at(&self, x: u16, y: u16) -> Option<String> {
+        let view = self.view.as_ref().filter(|_| self.pdf.is_none())?;
+        let body = self.body_rect();
+        // Lines are drawn after one column of padding.
+        if !super::layout::contains(body, x, y) || x == body.x {
+            return None;
+        }
+        let (line, col) = (self.text_top() + usize::from(y - body.y), usize::from(x - body.x - 1));
+        view.links.iter().find(|l| l.line == line && (l.start..l.end).contains(&col)).map(|l| l.url.clone())
+    }
+
+    /// A click on a link in the preview: shows its target, remembering where we were for Backspace.
+    fn follow(&mut self, url: &str) -> Action {
+        let Some(from) = self.preview_path.clone() else { return Action::None };
+        let base = from.parent().unwrap_or(Path::new("/"));
+        let target = match finder_core::link::resolve(url, base) {
+            Some(Target::Path(p)) => p,
+            Some(Target::Heading(_)) => return Action::Flash("links to headings aren't followed yet".into()),
+            Some(Target::External(url)) => return Action::Flash(format!("not opened: {url}")),
+            None => return Action::None,
+        };
+        if target == from {
+            return Action::None;
+        }
+        if std::fs::metadata(&target).is_err() {
+            return Action::Flash(format!("no such file: {url}"));
+        }
+        if self.history.len() >= HISTORY {
+            self.history.remove(0);
+        }
+        self.history.push((from, self.scroll));
+        self.show(&target)
+    }
+
+    /// Backspace in the preview: back to the file the last link was followed from.
+    fn back(&mut self) -> Action {
+        let Some((path, scroll)) = self.history.pop() else { return Action::None };
+        let action = self.show(&path);
+        // Kept until the view arrives, as after a restore.
+        self.scroll = scroll;
+        action
+    }
+
+    /// Lists the folder `path` is in and selects it, so the preview shows it.
+    fn show(&mut self, path: &Path) -> Action {
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return Action::None };
+        let name = name.to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            self.show_hidden = true;
+        }
+        self.cd(dir.to_path_buf(), Some(name));
+        if self.current().map(|e| e.path.as_path()) != Some(path) {
+            return Action::Flash(format!("can't show {}", home_relative(path)));
+        }
+        Action::None
+    }
+
     fn up(&mut self) {
         if let Some(parent) = self.dir.parent().map(Path::to_path_buf) {
             let name = self.dir.file_name().map(|n| n.to_string_lossy().into_owned());
@@ -834,6 +901,9 @@ impl Finder {
         }
         if key.code == KeyCode::Char('t') && !ctrl && self.pdf.is_some() {
             return self.toggle_pdf_view();
+        }
+        if preview && key.code == KeyCode::Backspace {
+            return self.back();
         }
         if preview && self.pdf_pages_view() {
             return self.pdf_page_key(key, ctrl, g_pending);
@@ -931,6 +1001,11 @@ impl Finder {
             MouseEventKind::ScrollUp if in_list => self.move_selection(-3),
             MouseEventKind::ScrollDown if preview => self.preview_wheel(3),
             MouseEventKind::ScrollUp if preview => self.preview_wheel(-3),
+            MouseEventKind::Down(MouseButton::Left) if preview => {
+                if let Some(url) = self.link_at(x, y) {
+                    return self.follow(&url);
+                }
+            }
             MouseEventKind::Down(MouseButton::Left) if in_list => {
                 let rows = self.entries_rect(self.list_rect);
                 if !super::layout::contains(rows, x, y) {
@@ -966,6 +1041,8 @@ impl Finder {
             "pdf · j/k scroll · [ ] page · +/- zoom · t text · h back"
         } else if preview && self.pdf.is_some() {
             "pdf · j/k scroll · [ ] page · t pages · h back"
+        } else if preview && !self.history.is_empty() {
+            "preview · Backspace previous file · j/k scroll · Enter edit · h back"
         } else if preview {
             "preview · j/k scroll · Space/b page · Enter edit · h back"
         } else if self.pdf.is_some() {

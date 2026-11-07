@@ -79,6 +79,8 @@ Unlike zellij, plain `tb` returns to "main" instead of starting a new session wi
 **PDFs** in the finder show their text; `t` shows the pages (`+`/`-` zoom, `0` fit width, `[` `]` page). This
 needs poppler-utils (`sudo apt install poppler-utils`).
 
+**Links** in a Markdown preview can be clicked: the finder shows the linked file, and `Backspace` goes back.
+
 **Extending `tb`** works through the same command line, from any language; there are no plugins. See
 [docs/cli.md](docs/cli.md) for the overview and [docs/cli/](docs/cli/README.md) for a page per command.
 

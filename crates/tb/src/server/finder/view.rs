@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use image::RgbImage;
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, CowStr, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -32,6 +32,23 @@ pub struct View {
     /// Short description for the preview header, for example "markdown · 1.2 KB".
     pub info: String,
     pub body: Body,
+    /// Where the links are in `body`'s lines.
+    pub links: Vec<Link>,
+}
+
+/// A link, or the part of one on one line: columns `start..end` of rendered line `line`, and where it points.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+    pub url: String,
+}
+
+impl View {
+    fn lines(info: String, lines: Vec<Line<'static>>) -> View {
+        View { info, body: Body::Lines(lines), links: Vec::new() }
+    }
 }
 
 fn dim() -> Style {
@@ -46,44 +63,42 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
         [kind.label(), extra, &size_text].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · ")
     };
     match preview {
-        Preview::Dir(entries) => {
-            View { info: format!("folder · {} items", entries.len()), body: Body::Lines(dir_lines(&entries)) }
-        }
+        Preview::Dir(entries) => View::lines(format!("folder · {} items", entries.len()), dir_lines(&entries)),
         Preview::Markdown(src) | Preview::Html(src) => {
-            View { info: info(""), body: Body::Lines(markdown(&src, width)) }
+            let (lines, links) = markdown(&src, width);
+            View { info: info(""), body: Body::Lines(lines), links }
         }
         Preview::Csv { rows, truncated } => {
             let mut lines = table(&rows, width, true);
             if truncated {
                 lines.push(Line::styled(format!("… only the first {} rows are shown", rows.len()), dim()));
             }
-            View { info: info(&format!("{} rows", rows.len())), body: Body::Lines(lines) }
+            View::lines(info(&format!("{} rows", rows.len())), lines)
         }
         Preview::Image { thumbnail, width: w, height: h } => {
-            View { info: info(&format!("{w}×{h}")), body: Body::Image(Arc::new(thumbnail), next_image_id()) }
+            let body = Body::Image(Arc::new(thumbnail), next_image_id());
+            View { info: info(&format!("{w}×{h}")), body, links: Vec::new() }
         }
         Preview::Pdf { info: doc, pages, truncated } => {
             let (mut lines, _) = super::pdf::text_lines(1, &pages, width);
             if truncated {
                 lines.push(Line::styled("… the preview stops here (file too large)", dim()));
             }
-            View { info: info(&format!("{} pages", doc.pages)), body: Body::Lines(lines) }
+            View::lines(info(&format!("{} pages", doc.pages)), lines)
         }
         Preview::Text { text, syntax, truncated } => {
             let mut lines = code_lines(&text, syntax.as_deref());
             if truncated {
                 lines.push(Line::styled("… the preview stops here (file too large)", dim()));
             }
-            View { info: info(""), body: Body::Lines(lines) }
+            View::lines(info(""), lines)
         }
-        Preview::Binary { size } => View {
-            info: info(""),
-            body: Body::Lines(vec![Line::styled(format!("binary file, {}", human_size(size)), dim())]),
-        },
-        Preview::Error(e) => View {
-            info: info(""),
-            body: Body::Lines(vec![Line::styled(format!("can't preview: {e}"), Style::default().fg(Color::Red))]),
-        },
+        Preview::Binary { size } => {
+            View::lines(info(""), vec![Line::styled(format!("binary file, {}", human_size(size)), dim())])
+        }
+        Preview::Error(e) => {
+            View::lines(info(""), vec![Line::styled(format!("can't preview: {e}"), Style::default().fg(Color::Red))])
+        }
     }
 }
 
@@ -144,26 +159,45 @@ fn truncate(s: &str, width: usize) -> String {
     out
 }
 
+/// A cell's text on one line.
+fn clean(s: &str) -> String {
+    s.replace(['\n', '\r', '\t'], " ")
+}
+
+/// Column gap in tables: " │ ".
+const TABLE_SEP: usize = 3;
+
 /// A table: columns sized to their content, shrunk to fit `width`, first row bold if `header`.
 pub fn table(rows: &[Vec<String>], width: usize, header: bool) -> Vec<Line<'static>> {
+    draw_table(rows, &column_widths(rows, width), header)
+}
+
+/// Table columns sized to their content (up to 40 columns each), shrunk to fit `width`.
+fn column_widths(rows: &[Vec<String>], width: usize) -> Vec<usize> {
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
     if cols == 0 {
-        return vec![Line::styled("(empty)", dim())];
+        return Vec::new();
     }
-    let clean = |s: &str| s.replace(['\n', '\r', '\t'], " ");
     let mut widths = vec![1usize; cols];
     for row in rows.iter().take(500) {
         for (c, cell) in row.iter().enumerate() {
             widths[c] = widths[c].max(clean(cell).width().min(40));
         }
     }
-    let sep = 3;
-    while widths.iter().sum::<usize>() + sep * (cols - 1) > width {
+    while widths.iter().sum::<usize>() + TABLE_SEP * (cols - 1) > width {
         let (i, w) = widths.iter().enumerate().max_by_key(|(_, w)| **w).map(|(i, w)| (i, *w)).unwrap();
         if w <= 3 {
             break;
         }
         widths[i] -= 1;
+    }
+    widths
+}
+
+/// Draws a table with columns `widths` wide; a rule follows the first row if it's a `header`.
+fn draw_table(rows: &[Vec<String>], widths: &[usize], header: bool) -> Vec<Line<'static>> {
+    if widths.is_empty() {
+        return vec![Line::styled("(empty)", dim())];
     }
     let mut lines = Vec::new();
     for (r, row) in rows.iter().enumerate() {
@@ -186,8 +220,9 @@ pub fn table(rows: &[Vec<String>], width: usize, header: bool) -> Vec<Line<'stat
     lines
 }
 
-/// Markdown rendered for the terminal: wrapped paragraphs, headings, lists, quotes, code and tables.
-pub fn markdown(src: &str, width: usize) -> Vec<Line<'static>> {
+/// Markdown rendered for the terminal: wrapped paragraphs, headings, lists, quotes, code and tables. Also says
+/// where the links landed.
+pub fn markdown(src: &str, width: usize) -> (Vec<Line<'static>>, Vec<Link>) {
     let mut md = Md::new(width);
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_FOOTNOTES;
@@ -198,7 +233,21 @@ pub fn markdown(src: &str, width: usize) -> Vec<Line<'static>> {
     while md.lines.last().is_some_and(|l| l.width() == 0) {
         md.lines.pop();
     }
-    md.lines
+    (md.lines, md.links)
+}
+
+/// Where a link or image points; email autolinks get their `mailto:`.
+fn link_url(link_type: LinkType, dest: &CowStr) -> String {
+    if link_type == LinkType::Email { format!("mailto:{dest}") } else { dest.to_string() }
+}
+
+/// A link in a table: its row and column, and its byte range in the cell's (trimmed) text.
+struct CellLink {
+    row: usize,
+    col: usize,
+    start: usize,
+    end: usize,
+    url: String,
 }
 
 struct Indent {
@@ -222,6 +271,14 @@ struct Md {
     table: Option<Vec<Vec<String>>>,
     cell: Option<String>,
     row: Vec<String>,
+    /// Links (and images) being placed, outermost first. Text placed meanwhile belongs to the outermost.
+    link_stack: Vec<String>,
+    links: Vec<Link>,
+    /// Links open in the table cell being read: where they start in the cell, and where they point.
+    cell_open: Vec<(usize, String)>,
+    /// Links in the table cell being read: byte range in the cell, and where they point.
+    cell_links: Vec<(usize, usize, String)>,
+    table_links: Vec<CellLink>,
 }
 
 impl Md {
@@ -240,6 +297,11 @@ impl Md {
             table: None,
             cell: None,
             row: Vec::new(),
+            link_stack: Vec::new(),
+            links: Vec::new(),
+            cell_open: Vec::new(),
+            cell_links: Vec::new(),
+            table_links: Vec::new(),
         }
     }
 
@@ -307,14 +369,29 @@ impl Md {
                 w += cw;
             }
             word = word[head.len()..].to_owned();
-            self.cur.push(Span::styled(head, style));
+            self.put(head, style);
             self.flush();
             self.start_line();
         }
         if !word.is_empty() {
-            self.cur_w += word.width();
-            self.cur.push(Span::styled(word, style));
+            self.put(word, style);
         }
+    }
+
+    /// Adds `text` to the line being built, noting it as part of the link being placed, if any.
+    fn put(&mut self, text: String, style: Style) {
+        let width = text.width();
+        if let Some(url) = self.link_stack.first()
+            && width > 0
+        {
+            let (line, start) = (self.lines.len(), self.cur_w);
+            match self.links.last_mut() {
+                Some(l) if l.line == line && l.end == start && l.url == *url => l.end += width,
+                _ => self.links.push(Link { line, start, end: start + width, url: url.clone() }),
+            }
+        }
+        self.cur_w += width;
+        self.cur.push(Span::styled(text, style));
     }
 
     fn push_text(&mut self, text: &str, style: Style) {
@@ -335,14 +412,22 @@ impl Md {
 
     fn event(&mut self, event: Event) {
         if let Some(cell) = &mut self.cell {
-            match &event {
-                Event::Text(t) | Event::Code(t) | Event::Html(t) | Event::InlineHtml(t) => {
-                    cell.push_str(t);
-                    return;
+            match event {
+                Event::Text(t) | Event::Code(t) | Event::Html(t) | Event::InlineHtml(t) => cell.push_str(&t),
+                Event::Start(Tag::Link { link_type, dest_url, .. } | Tag::Image { link_type, dest_url, .. }) => {
+                    self.cell_open.push((cell.len(), link_url(link_type, &dest_url)));
                 }
-                Event::End(TagEnd::TableCell) => {}
-                _ => return,
+                Event::End(TagEnd::Link | TagEnd::Image) => {
+                    if let Some((start, url)) = self.cell_open.pop()
+                        && self.cell_open.is_empty()
+                    {
+                        self.cell_links.push((start, cell.len(), url));
+                    }
+                }
+                Event::End(TagEnd::TableCell) => self.end(TagEnd::TableCell),
+                _ => {}
             }
+            return;
         }
         if let Some((_, buf)) = &mut self.code {
             match event {
@@ -435,8 +520,12 @@ impl Md {
             Tag::Emphasis => self.push_style(Style::default().add_modifier(Modifier::ITALIC)),
             Tag::Strong => self.push_style(Style::default().add_modifier(Modifier::BOLD)),
             Tag::Strikethrough => self.push_style(Style::default().add_modifier(Modifier::CROSSED_OUT)),
-            Tag::Link { .. } => self.push_style(Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED)),
-            Tag::Image { .. } => {
+            Tag::Link { link_type, dest_url, .. } => {
+                self.link_stack.push(link_url(link_type, &dest_url));
+                self.push_style(Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED));
+            }
+            Tag::Image { link_type, dest_url, .. } => {
+                self.link_stack.push(link_url(link_type, &dest_url));
                 let style = self.style().patch(dim());
                 self.push_word("[image: ", style);
                 self.push_style(dim());
@@ -484,15 +573,32 @@ impl Md {
                 self.flush();
                 self.indents.pop();
             }
-            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link => self.pop_style(),
+            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => self.pop_style(),
+            TagEnd::Link => {
+                self.pop_style();
+                self.link_stack.pop();
+            }
             TagEnd::Image => {
                 self.pop_style();
                 let style = self.style().patch(dim());
                 self.push_word("]", style);
+                self.link_stack.pop();
             }
             TagEnd::TableCell => {
                 let cell = self.cell.take().unwrap_or_default();
-                self.row.push(cell.trim().to_owned());
+                let text = cell.trim();
+                let lead = cell.len() - cell.trim_start().len();
+                // The row is added to the table when it ends.
+                let (row, col) = (self.table.as_ref().map_or(0, Vec::len), self.row.len());
+                for (start, end, url) in std::mem::take(&mut self.cell_links) {
+                    let clip = |i: usize| i.saturating_sub(lead).min(text.len());
+                    let (start, end) = (clip(start), clip(end));
+                    if start < end {
+                        self.table_links.push(CellLink { row, col, start, end, url });
+                    }
+                }
+                self.cell_open.clear();
+                self.row.push(text.to_owned());
             }
             TagEnd::TableHead | TagEnd::TableRow => {
                 let row = std::mem::take(&mut self.row);
@@ -503,10 +609,31 @@ impl Md {
             TagEnd::Table => {
                 let rows = self.table.take().unwrap_or_default();
                 let avail = self.width.saturating_sub(self.indent_width());
-                for line in table(&rows, avail, true) {
+                let widths = column_widths(&rows, avail);
+                let first = self.lines.len();
+                // Where each table line starts, after the indents of quotes and lists.
+                let mut starts = Vec::new();
+                for line in draw_table(&rows, &widths, true) {
                     self.start_line();
+                    starts.push(self.cur_w);
                     self.cur.extend(line.spans);
                     self.flush();
+                }
+                for l in std::mem::take(&mut self.table_links) {
+                    // A rule follows the header row.
+                    let index = l.row + usize::from(l.row > 0);
+                    let (Some(x), Some(cell), Some(w)) =
+                        (starts.get(index), rows.get(l.row).and_then(|r| r.get(l.col)), widths.get(l.col))
+                    else {
+                        continue;
+                    };
+                    let x = x + widths[..l.col].iter().sum::<usize>() + TABLE_SEP * l.col;
+                    // A cut cell ends in "…" at its last column.
+                    let start = clean(&cell[..l.start]).width().min(*w);
+                    let end = clean(&cell[..l.end]).width().min(*w);
+                    if start < end {
+                        self.links.push(Link { line: first + index, start: x + start, end: x + end, url: l.url });
+                    }
                 }
                 self.blank();
             }
@@ -567,7 +694,7 @@ mod tests {
     fn markdown_wraps_and_formats() {
         let md =
             "# Title\n\nOne two three four five six.\n\n- alpha\n- beta\n  - nested\n\n> quoted\n\n```\ncode\n```\n";
-        let out = text(&markdown(md, 16));
+        let out = text(&markdown(md, 16).0);
         assert_eq!(
             out,
             [
@@ -590,13 +717,66 @@ mod tests {
     #[test]
     fn markdown_tables() {
         let md = "| a | bb |\n|---|---|\n| 1 | 2 |\n";
-        let out = text(&markdown(md, 40));
+        let out = text(&markdown(md, 40).0);
         assert_eq!(out, ["a │ bb", "──┼───", "1 │ 2"]);
+    }
+
+    /// Each link as (line, the text under it, url).
+    fn links(md: &str, width: usize) -> Vec<(usize, String, String)> {
+        let (lines, links) = markdown(md, width);
+        let text = text(&lines);
+        links
+            .into_iter()
+            .map(|l| {
+                let under: String = text[l.line].chars().skip(l.start).take(l.end - l.start).collect();
+                (l.line, under, l.url)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn links_are_where_they_are_drawn() {
+        let found = links("# T\n\nSee [the bee](b.md) and <https://x.org>.\n\n- [**nested** one](n.md)\n", 80);
+        assert_eq!(
+            found,
+            [
+                (2, "the bee".into(), "b.md".into()),
+                (2, "https://x.org".into(), "https://x.org".into()),
+                (4, "nested one".into(), "n.md".into()),
+            ]
+        );
+        assert_eq!(links("<a@b.c>", 80), [(0, "a@b.c".into(), "mailto:a@b.c".into())]);
+    }
+
+    #[test]
+    fn wrapped_links_have_a_piece_per_line() {
+        let (lines, _) = markdown("one two [three four five](x.md)", 12);
+        assert_eq!(text(&lines), ["one two", "three four", "five"]);
+        let found = links("one two [three four five](x.md)", 12);
+        assert_eq!(found, [(1, "three four".into(), "x.md".into()), (2, "five".into(), "x.md".into())]);
+    }
+
+    #[test]
+    fn images_and_badges() {
+        let found = links("![a cat](cat.png) [![badge](b.svg)](https://ci)", 80);
+        assert_eq!(
+            found,
+            [(0, "[image: a cat]".into(), "cat.png".into()), (0, "[image: badge]".into(), "https://ci".into())]
+        );
+    }
+
+    #[test]
+    fn links_in_tables() {
+        let md = "> | cmd | about |\n> |---|---|\n> | [`tb ls`](ls.md) | lists |\n> | x [a long name](long.md) | y |\n";
+        let found = links(md, 18);
+        // In a quote, after "│ ". The second link is cut with the cell, at its "…".
+        assert_eq!(text(&markdown(md, 18).0)[3], "│ x a lon… │ y");
+        assert_eq!(found, [(2, "tb ls".into(), "ls.md".into()), (3, "a lon…".into(), "long.md".into())]);
     }
 
     #[test]
     fn long_words_are_split() {
-        let out = text(&markdown("abcdefghijklmnop", 10));
+        let out = text(&markdown("abcdefghijklmnop", 10).0);
         assert_eq!(out, ["abcdefghij", "klmnop"]);
     }
 

@@ -454,6 +454,51 @@ fn finder_refreshes_when_the_folder_changes() {
 }
 
 #[test]
+fn finder_follows_markdown_links() {
+    let env = Env::new("e2e-links");
+    let files = env.root.join("l");
+    fs::create_dir_all(files.join("sub")).unwrap();
+    fs::write(files.join("a.md"), "# Page A\n\nSee [the bee](sub/b.md) here, or [gone](nope.md).\n").unwrap();
+    fs::write(files.join("sub/b.md"), "# Bee Title\n\nBack to [a](../a.md).\n").unwrap();
+    env.tb(&["start"]);
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    // Wide enough for the preview's key hints after the mode list.
+    let s = env.attach(160, 30);
+    s.wait_for("sub/");
+    s.send(b"j");
+    let text = s.wait_for("See the bee here");
+    // Where a word is on screen: (column, row).
+    let at = |text: &str, word: &str| {
+        let (row, line) = text.lines().enumerate().find(|(_, l)| l.contains(word)).unwrap();
+        let col = line[..line.find(word).unwrap()].chars().count();
+        (col as u16, row as u16)
+    };
+
+    // A click on the link previews sub/b.md, and the list moves to sub/ with it selected.
+    let (x, y) = at(&text, "the bee");
+    s.send(&click(x + 2, y));
+    let text = s.wait_for("Bee Title");
+    assert!(text.contains("l/sub"), "the list shows sub/:\n{text}");
+    s.wait_for("Backspace previous file");
+
+    // Backspace (the click focused the preview) goes back to a.md.
+    s.send(b"\x7f");
+    let text = s.wait_for("See the bee here");
+    assert!(!text.contains("Bee Title"), "back on a.md:\n{text}");
+
+    // A link to a missing file says so.
+    let (x, y) = at(&text, "gone");
+    s.send(&click(x, y));
+    s.wait_for("no such file: nope.md");
+}
+
+#[test]
 fn zellij_modes() {
     let env = Env::new("e2e-modes");
     let s = env.attach(100, 30);

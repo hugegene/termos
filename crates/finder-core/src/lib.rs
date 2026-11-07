@@ -9,6 +9,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+pub mod link;
 pub mod pdf;
 pub mod tool;
 
