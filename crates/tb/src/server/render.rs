@@ -190,11 +190,9 @@ pub fn draw_frame(buf: &mut Buffer, rect: Rect, title: &str, right: &str, style:
     set(x1, y1, "┘");
     // "┌ title ──── right ┐": both labels sit between the corners with a space either side.
     let room = rect.width.saturating_sub(2);
-    let right = format!(" {right} ");
-    let right_w = right.chars().count() as u16;
-    let right_w = if right.trim().is_empty() || right_w + 8 > room { 0 } else { right_w };
+    let right_w = right_label_width(room, right);
     if right_w > 0 {
-        put_str(buf, x1 - right_w, y0, &right, line, right_w);
+        put_str(buf, x1 - right_w, y0, &format!(" {right} "), line, right_w);
     }
     if !title.is_empty() {
         let max = room.saturating_sub(right_w + 1);
@@ -207,6 +205,20 @@ pub fn draw_frame(buf: &mut Buffer, rect: Rect, title: &str, right: &str, style:
             }
         }
     }
+}
+
+/// The width of a frame's right-hand label with its spaces, in `room` columns between the corners: 0 when it's
+/// empty or would leave the title less than 8 columns.
+fn right_label_width(room: u16, right: &str) -> u16 {
+    let w = right.chars().count() as u16 + 2;
+    if right.trim().is_empty() || w + 8 > room { 0 } else { w }
+}
+
+/// How many columns of title text fit uncut in a frame `width` wide whose right-hand label is `right`.
+pub fn frame_title_room(width: u16, right: &str) -> u16 {
+    let room = width.saturating_sub(2);
+    // The title's two spaces, and one column of line before the right-hand label.
+    room.saturating_sub(right_label_width(room, right) + 3)
 }
 
 /// Writes `s` at (x, y), clipped to `max` columns. Returns the width written.

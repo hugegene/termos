@@ -127,8 +127,8 @@ panes, swap layouts, pane groups and zellij's plugins.
 
 - **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to
   select and copy (OSC 52).
-- **Finder:** `j`/`k` move, `Enter` edits in Neovim (`Alt+s` save, `Alt+q` close), `/` filters, `.` shows
-  hidden files.
+- **Finder:** `j`/`k` move, `Enter` edits in Neovim (`Alt+s` save, `Alt+q` close), `/` filters, `.` hides
+  hidden files (shown by default).
 
 ## Images
 

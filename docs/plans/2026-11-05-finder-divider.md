@@ -237,3 +237,5 @@ tb attach        server loop          files: Finder         preview pane        
     - **Minimum widths:** the old 16- and 20-column minimums for the list and preview are gone. Pane
       splits keep their usual minimum instead.
     - **Events:** the editor's output marks the preview pane as changed, since the editor shows there.
+- **2026-11-07:** the file list shows hidden files by default, and `.` hides them; while they're hidden, the
+  list's title says how many. See [hidden files](2026-11-07-finder-hidden-files.md).

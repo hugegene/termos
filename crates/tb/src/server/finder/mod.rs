@@ -20,7 +20,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use finder_core::link::Target;
 use finder_core::pdf::PdfInfo;
 use finder_core::tool::ToolError;
-use finder_core::{Entry, Kind, Limits, human_size};
+use finder_core::{Entry, Kind, Limits, Preview, human_size};
 use notify::{EventKind, RecursiveMode, Watcher};
 use pdf::{Merge, PageImage, PdfJob, PdfResult, PdfView, Zoom};
 use ratatui::buffer::Buffer;
@@ -30,7 +30,7 @@ use ratatui::style::{Color, Modifier, Style};
 use super::Ev;
 use super::layout::inner;
 use super::pane::TermPane;
-use super::render::{Cursor, TermDecor, draw_frame, draw_term, fill, put_str};
+use super::render::{Cursor, TermDecor, draw_frame, draw_term, fill, frame_title_room, put_str};
 use crate::protocol::PaneId;
 use view::{Body, View};
 
@@ -57,7 +57,10 @@ type Crop = ((u64, (u32, u32, u32, u32)), Arc<image::RgbImage>, u64);
 pub struct FinderState {
     pub dir: PathBuf,
     pub selected: Option<String>,
-    pub show_hidden: bool,
+    /// Hidden files (names starting with `.`) are left out (`.`). Saves from before 2026-11-07 have
+    /// `show_hidden` instead, which is ignored, so those finders come back showing hidden files.
+    #[serde(default)]
+    pub hide_hidden: bool,
     pub scroll: usize,
     /// The file open in the editor.
     pub editing: Option<PathBuf>,
@@ -120,7 +123,10 @@ struct Request {
 }
 
 enum Job {
-    Preview,
+    /// A file's preview, or a folder's listing, with hidden files if the list shows them.
+    Preview {
+        show_hidden: bool,
+    },
     Pdf(PdfJob),
 }
 
@@ -131,6 +137,8 @@ pub struct Finder {
     selected: usize,
     list_top: usize,
     show_hidden: bool,
+    /// How many hidden files the listing left out, for the list's title.
+    hidden: usize,
     filter: String,
     filtering: bool,
     preview_path: Option<PathBuf>,
@@ -191,8 +199,13 @@ fn spawn_worker(id: PaneId, tx: Sender<Ev>, latest: Arc<AtomicU64>) -> Sender<Re
                 req = newer;
             }
             let ev = match req.job {
-                Job::Preview => {
-                    let preview = finder_core::load_preview(&req.path, &req.kind, Limits::default());
+                Job::Preview { show_hidden } => {
+                    let preview = match req.kind {
+                        // A folder's preview lists what the file list would show inside it.
+                        Kind::Dir => finder_core::list_dir(&req.path, show_hidden)
+                            .map_or_else(|e| Preview::Error(e.to_string()), Preview::Dir),
+                        _ => finder_core::load_preview(&req.path, &req.kind, Limits::default()),
+                    };
                     let view = view::build(preview, &req.kind, req.size, req.width);
                     Some(FinderEvent::View { path: req.path, width: req.width, view })
                 }
@@ -326,7 +339,8 @@ impl Finder {
             visible: Vec::new(),
             selected: 0,
             list_top: 0,
-            show_hidden: false,
+            show_hidden: true,
+            hidden: 0,
             filter: String::new(),
             filtering: false,
             preview_path: None,
@@ -363,7 +377,7 @@ impl Finder {
         FinderState {
             dir: self.dir.clone(),
             selected: self.current().map(|e| e.name.clone()),
-            show_hidden: self.show_hidden,
+            hide_hidden: !self.show_hidden,
             scroll: self.scroll,
             editing: self.editing.clone(),
             pdf_pages: self.pdf_pages,
@@ -373,7 +387,7 @@ impl Finder {
 
     /// Puts back a saved state (the folder comes from `new`).
     pub fn restore_state(&mut self, state: &FinderState) {
-        self.show_hidden = state.show_hidden;
+        self.show_hidden = !state.hide_hidden;
         self.pdf_pages = state.pdf_pages;
         self.pdf_zoom = state.pdf_zoom;
         let dir = self.dir.clone();
@@ -452,12 +466,19 @@ impl Finder {
 
     fn reload(&mut self) {
         let keep = self.current().map(|e| e.name.clone());
-        match finder_core::list_dir(&self.dir, self.show_hidden) {
-            Ok(entries) => {
+        // Hidden files are listed and then left out, so the title can say how many there are.
+        match finder_core::list_dir(&self.dir, true) {
+            Ok(mut entries) => {
+                let all = entries.len();
+                if !self.show_hidden {
+                    entries.retain(|e| !e.name.starts_with('.'));
+                }
+                self.hidden = all - entries.len();
                 self.entries = entries;
                 self.message = None;
             }
             Err(e) => {
+                self.hidden = 0;
                 self.entries.clear();
                 self.message = Some(format!("can't read folder: {e}"));
             }
@@ -549,7 +570,8 @@ impl Finder {
         self.pdf = None;
         let size = (!entry.is_dir).then_some(entry.size);
         let seq = self.next_seq();
-        let _ = self.requests.send(Request { path: entry.path, kind, size, width, job: Job::Preview, seq });
+        let job = Job::Preview { show_hidden: self.show_hidden };
+        let _ = self.requests.send(Request { path: entry.path, kind, size, width, job, seq });
     }
 
     fn next_seq(&self) -> u64 {
@@ -952,6 +974,10 @@ impl Finder {
             KeyCode::Char('.') => {
                 self.show_hidden = !self.show_hidden;
                 self.reload();
+                // A folder's preview lists hidden files as the list does, so it's loaded again.
+                if self.current().is_some_and(|e| e.is_dir) {
+                    self.request_preview(true);
+                }
             }
             KeyCode::Char('/') => {
                 self.filtering = true;
@@ -1058,13 +1084,21 @@ impl Finder {
     pub fn render_list(&self, buf: &mut Buffer, list: Rect, focused: bool, accent: Color) {
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let active = focused && self.editor.is_none() && self.grid.is_none();
+        // While hidden files are left out, the title says how many, so a folder doesn't look emptier than it is.
+        let hidden = if self.hidden > 0 { format!("{} hidden", self.hidden) } else { String::new() };
         if self.frames {
-            let title = self.list_title(usize::from(list.width.saturating_sub(4)));
+            // "┌ ~/dir ──── 3 hidden ┐", as the preview's frame shows the file's details.
+            let title = self.list_title(usize::from(frame_title_room(list.width, &hidden)));
             let style = if active { bold.fg(accent) } else { Style::default() };
-            draw_frame(buf, list, &title, "", style);
+            draw_frame(buf, list, &title, &hidden, style);
         } else {
-            let title = format!(" {} ", self.list_title(usize::from(list.width.saturating_sub(2))));
-            put_str(buf, list.x, list.y, &title, bold.fg(Color::Blue), list.width);
+            // " ~/dir · 3 hidden", the count dim. It's dropped if it would leave the folder less than 8 columns.
+            let room = usize::from(list.width.saturating_sub(2));
+            let note = if hidden.is_empty() { String::new() } else { format!("· {hidden}") };
+            let note = if note.chars().count() + 8 > room { String::new() } else { note };
+            let title = format!(" {} ", self.list_title(room - note.chars().count()));
+            let w = put_str(buf, list.x, list.y, &title, bold.fg(Color::Blue), list.width);
+            put_str(buf, list.x + w, list.y, &note, Style::default().fg(Color::DarkGray), list.width - w);
         }
         self.render_entries(buf, self.entries_rect(list), active);
     }
@@ -1301,4 +1335,99 @@ fn buffer_text(buf: &Buffer) -> String {
         out.pop();
     }
     out.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A finder on `dir` whose list is 30 columns wide, and the channel it reports to (kept open).
+    fn finder(dir: &Path, frames: bool) -> (Finder, mpsc::Receiver<Ev>) {
+        let (tx, rx) = mpsc::channel();
+        (Finder::new(1, dir.to_path_buf(), Rect::new(0, 0, 30, 8), frames, tx), rx)
+    }
+
+    fn key(f: &mut Finder, c: char) {
+        f.handle_key(&KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), false);
+    }
+
+    fn folder() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".hidden"), "h").unwrap();
+        std::fs::write(dir.path().join("seen"), "s").unwrap();
+        dir
+    }
+
+    #[test]
+    fn hidden_files_are_shown_until_dot() {
+        let dir = folder();
+        let (mut f, _rx) = finder(dir.path(), true);
+        let text = f.list_text();
+        assert!(text.contains(".hidden") && text.contains("seen"), "{text}");
+        assert!(!text.contains("1 hidden"), "{text}");
+
+        key(&mut f, '.');
+        let text = f.list_text();
+        assert!(!text.contains(".hidden") && text.contains("seen"), "{text}");
+        assert!(text.lines().next().unwrap().ends_with(" 1 hidden ┐"), "{text}");
+
+        key(&mut f, '.');
+        let text = f.list_text();
+        assert!(text.contains(".hidden") && !text.contains("1 hidden"), "{text}");
+    }
+
+    #[test]
+    fn the_count_follows_the_folder_without_frames() {
+        let dir = folder();
+        let (mut f, _rx) = finder(dir.path(), false);
+        key(&mut f, '.');
+        let text = f.list_text();
+        assert!(text.lines().next().unwrap().ends_with(" · 1 hidden"), "{text}");
+        // A folder with nothing hidden says nothing.
+        std::fs::create_dir(dir.path().join("plain")).unwrap();
+        f.cd(dir.path().join("plain"), None);
+        assert!(!f.list_text().contains("hidden"), "{}", f.list_text());
+    }
+
+    #[test]
+    fn long_folder_names_keep_their_end_and_the_count() {
+        let dir = folder();
+        let long = dir.path().join("a-folder-with-a-rather-long-name");
+        std::fs::create_dir(&long).unwrap();
+        std::fs::write(long.join(".hidden"), "h").unwrap();
+        let (mut f, _rx) = finder(&long, true);
+        let title = f.list_text().lines().next().unwrap().to_owned();
+        assert!(title.starts_with("┌ …") && title.ends_with("-long-name ─┐"), "{title}");
+
+        key(&mut f, '.');
+        let title = f.list_text().lines().next().unwrap().to_owned();
+        assert!(title.starts_with("┌ …") && title.ends_with("-name ─ 1 hidden ┐"), "{title}");
+    }
+
+    #[test]
+    fn the_choice_is_saved_and_old_saves_show_hidden_files() {
+        let dir = folder();
+        let (mut f, _rx) = finder(dir.path(), true);
+        assert!(!f.state().hide_hidden);
+        key(&mut f, '.');
+        let state = f.state();
+        assert!(state.hide_hidden);
+
+        let (mut g, _rx2) = finder(dir.path(), true);
+        g.restore_state(&state);
+        assert!(!g.list_text().contains(".hidden"), "{}", g.list_text());
+
+        // Every finder saved before 2026-11-07 says `"show_hidden": false`, whatever the user chose.
+        let old = format!(
+            r#"{{"dir":{:?},"selected":"seen","show_hidden":false,"scroll":0,"editing":null}}"#,
+            dir.path().display().to_string()
+        );
+        let old: FinderState = serde_json::from_str(&old).unwrap();
+        assert!(!old.hide_hidden);
+        let (mut h, _rx3) = finder(dir.path(), true);
+        key(&mut h, '.');
+        h.restore_state(&old);
+        let text = h.list_text();
+        assert!(text.contains(".hidden") && !text.contains("1 hidden"), "{text}");
+    }
 }

@@ -454,6 +454,33 @@ fn finder_refreshes_when_the_folder_changes() {
 }
 
 #[test]
+fn finder_shows_hidden_files_until_dot() {
+    let env = Env::new("e2e-hidden");
+    let files = env.root.join("h");
+    fs::create_dir_all(files.join("sub")).unwrap();
+    fs::write(files.join(".hidden"), "secret\n").unwrap();
+    fs::write(files.join("seen"), "plain\n").unwrap();
+    fs::write(files.join("sub/.inner"), "x\n").unwrap();
+    env.tb(&["start"]);
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let s = env.attach(100, 24);
+    // The folder comes first and is previewed, with its hidden file.
+    let text = s.wait_for(".inner");
+    assert!(text.contains(".hidden") && text.contains("seen") && !text.contains("1 hidden"), "{text}");
+    s.send(b".");
+    let text = s.wait_until("hidden files left out", |t| t.contains("1 hidden") && t.contains("(empty folder)"));
+    assert!(!text.contains(".hidden") && !text.contains(".inner") && text.contains("seen"), "{text}");
+    s.send(b".");
+    s.wait_until("hidden files back", |t| t.contains(".hidden") && t.contains(".inner") && !t.contains("1 hidden"));
+}
+
+#[test]
 fn finder_follows_markdown_links() {
     let env = Env::new("e2e-links");
     let files = env.root.join("l");
