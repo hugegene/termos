@@ -49,6 +49,39 @@ format (kitty, iTerm2, sixel or blocks) and placing it on screen. Each option is
                    a canvas program
 ```
 
+### Where the pane is
+
+**Every option shows the picture in a real `tb` pane:** a rectangle in a tab's layout, with an id, a frame and a
+name. Renaming, focus, splitting, resizing, zooming, closing and saving work on it as on any other pane. The
+server keeps all of them by pane id, whatever the pane draws: names are in `pane_names` (`server/mod.rs`), and
+`list-panes` shows them.
+
+In the diagrams below, the picture is shown in pane 3, which was renamed "viewer". The dashed box is the pane's
+part of the server. The program, and in A and B its PTY, belong to the pane too, but sit outside the server.
+
+```
+ ┌ ~/pics ─────────────────┐┌ viewer ──────────────────────────┐
+ │ $ ls                    ││ $ chafa cat.png                  │
+ │ cat.png  dog.png        ││ ▓▓▓▓▓▓▓▓▓▓▓▓                     │
+ │ $                       ││ ▓▓▓▓▓▓▓▓▓▓▓▓   ← the picture     │
+ │                         ││ ▓▓▓▓▓▓▓▓▓▓▓▓                     │
+ │                         ││ $                                │
+ └─────────────────────────┘└──────────────────────────────────┘
+   pane 2: a shell            pane 3, renamed "viewer": the name
+                              is its frame's title
+```
+
+- **In A,** the picture is part of pane 3's text, as drawn here.
+- **In B,** it's laid over pane 3, where the extension put it.
+- **In C,** pane 3 has no shell: the program draws all of it, text and pictures.
+
+| | The pane | Its name in the frame | Scrollback, copy mode and search |
+|---|---|---|---|
+| Today's finder | two panes: the file list (`Pane::Finder`) and the preview (`Pane::Preview`) | no: they draw their own frames, with the folder and the file. A new name is kept, and `list-panes` shows it | no |
+| A | a terminal pane (`Pane::Term`), as now | yes, as now | yes, for the text; pictures scroll with it |
+| B | a terminal pane (`Pane::Term`), as now. Its overlays are kept by its id, so renaming changes nothing | yes, as now | yes, for the text; overlays stay put |
+| C | a new kind, `Pane::Canvas` | yes, if its frame is drawn the way a terminal pane's is | no, unless built for it |
+
 ### Today: the finder
 
 The picture is made inside the server, so it never touches a terminal pane.
@@ -75,24 +108,29 @@ The picture travels inside the program's normal output. The pane's terminal lear
 dropping it.
 
 ```
- program in a pane: chafa, timg, lsix, yazi in sixel mode, or an extension
+ program running in pane 3: chafa, timg, lsix, yazi in sixel mode, or an
+ extension
    │ writes standard sixel: ESC P q <pixels> ESC \      nothing tb-specific
    ▼
- PTY
+ pane 3's PTY
    ▼
  tb server process
  ┌──────────────────────────────────────────────────────────────────────────┐
- │ vte, vendored like the fork                                        NEW   │
- │   hook / put / unhook hand over the sixel bytes instead of dropping them │
- │       ▼                                                                  │
- │ alacritty_terminal fork                                            NEW   │
- │   decode the sixel → RgbImage                                            │
- │   store it in the grid at the cursor: "picture 12 at line 40, col 0,     │
- │   20×10 cells". It scrolls with the text, goes into the scrollback,      │
- │   and goes away when the screen is cleared                               │
- │       ▼                                                                  │
- │ draw_term(rect) → cells as today + an ImageSlot per visible picture  NEW │
- │       ▼                                                                  │
+ │ ┌╌ pane 3: a terminal pane (Pane::Term), renamed "viewer" ╌╌╌╌╌╌╌╌╌╌╌╌╌┐ │
+ │ ╎ vte, vendored like the fork                                     NEW  ╎ │
+ │ ╎   hook / put / unhook hand over the sixel bytes instead of           ╎ │
+ │ ╎   dropping them                                                      ╎ │
+ │ ╎     ▼                                                                ╎ │
+ │ ╎ alacritty_terminal fork                                         NEW  ╎ │
+ │ ╎   decode the sixel → RgbImage                                        ╎ │
+ │ ╎   store it in the grid at the cursor: "picture 12 at line 40,        ╎ │
+ │ ╎   col 0, 20×10 cells". It scrolls with the text, goes into the       ╎ │
+ │ ╎   scrollback, and goes away when the screen is cleared               ╎ │
+ │ ╎     ▼                                                                ╎ │
+ │ ╎ draw_pane: the frame, titled "viewer", as today                      ╎ │
+ │ ╎   + draw_term(rect): cells as today + an ImageSlot per picture  NEW  ╎ │
+ │ └╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘ │
+ │       ▼   with every other pane on the screen                            │
  │ compose(), for each client: fit → encode kitty | iTerm2 | sixel | blocks │
  └───────┬──────────────────────────────────────────────────────────────────┘
          ▼ ServerMsg::Output
@@ -116,23 +154,25 @@ Text and pictures take separate roads. The pane's terminal stays unchanged, and 
 `tb action` call.
 
 ```
- extension in a pane: a ueberzug-style previewer
+ extension running in pane 3: a ueberzug-style previewer
    │ text, as today                     │ a picture: a separate command
    ▼                                    ▼
- PTY                       tb action show-image --pane 3 --at 40,2 \
+ pane 3's PTY              tb action show-image --pane 3 --at 40,2 \
    │                                        --size 30x15 cat.png
    │                                    │ the session socket, like any tb action
    ▼                                    ▼
  tb server process
  ┌──────────────────────────────────────────────────────────────────────────┐
- │ vte + fork: unchanged            pane 3's overlays:                NEW   │
- │ grid: text cells only              cat.png decoded, col 40, row 2,       │
- │                                    30×15 cells                           │
- │       ▼                                  ▼                               │
- │ draw_term(rect) → cells          an ImageSlot at the pane's        NEW   │
- │       │                          corner + (40, 2)                        │
- │       └──────────────┬───────────────────┘                               │
- │                      ▼                                                   │
+ │ ┌╌ pane 3: a terminal pane (Pane::Term), renamed "viewer" ╌╌╌╌╌╌╌╌╌╌╌╌╌┐ │
+ │ ╎ vte + fork: unchanged             its overlays, by pane id:     NEW  ╎ │
+ │ ╎ grid: text cells only               cat.png decoded, col 40,         ╎ │
+ │ ╎                                     row 2, 30×15 cells               ╎ │
+ │ ╎     ▼                                 ▼                              ╎ │
+ │ ╎ draw_pane: the frame,             an ImageSlot at the pane's    NEW  ╎ │
+ │ ╎ titled "viewer", + cells          corner + (40, 2)                   ╎ │
+ │ ╎     └──────────────┬──────────────────┘                              ╎ │
+ │ └╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘ │
+ │                      ▼   with every other pane on the screen             │
  │ compose(), for each client: fit → encode kitty | iTerm2 | sixel | blocks │
  └──────────────────────┬───────────────────────────────────────────────────┘
                         ▼ ServerMsg::Output
@@ -153,7 +193,7 @@ server keeps the pane's content. This is the closest to "a `tb` pane that doesn'
 `alacritty_terminal`".
 
 ```
- extension, started with: tb canvas -- my-viewer
+ extension running in pane 3, started with: tb canvas -- my-viewer
    │ stdout: messages to the server              ▲ stdin: messages from the server
    │   cells    {"at":[0,0],"text":"…"}          │   key     {"key":"j"}
    │   picture  {"id":1,"png":"<base64>",        │   mouse   {"click":[12,3]}
@@ -161,13 +201,15 @@ server keeps the pane's content. This is the closest to "a `tb` pane that doesn'
    │   remove   {"picture":1}                    │
    ▼ pipes, no PTY                               │
  ┌───────────────────────────────────────────────┴──────────────────────────┐
- │ tb server process                                                        │
- │ no vte, no fork                                                          │
- │ Pane::Canvas: the pane's cells and pictures, kept by the server    NEW   │
- │   updated from each message; kept for redraws and reattaching            │
- │       ▼                                                                  │
- │ draw_pane → copy the cells + an ImageSlot per picture              NEW   │
- │       ▼                                                                  │
+ │ tb server process: no vte, no fork                                       │
+ │ ┌╌ pane 3: a canvas pane (Pane::Canvas), renamed "viewer" ╌╌╌╌╌╌╌╌╌╌╌╌╌┐ │
+ │ ╎ its cells and pictures, kept by the server                      NEW  ╎ │
+ │ ╎   updated from each message; kept for redraws and reattaching        ╎ │
+ │ ╎     ▼                                                                ╎ │
+ │ ╎ draw_pane: the frame, titled "viewer", as a terminal pane's          ╎ │
+ │ ╎   + the cells + an ImageSlot per picture                        NEW  ╎ │
+ │ └╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘ │
+ │       ▼   with every other pane on the screen                            │
  │ compose(), for each client: fit → encode kitty | iTerm2 | sixel | blocks │
  └───────┬──────────────────────────────────────────────────────────────────┘
          ▼ ServerMsg::Output
@@ -180,6 +222,10 @@ The messages above only show the idea; their format isn't designed.
   codes. We would ship a ratatui backend for Rust; other languages would write the messages themselves.
 - **The server keeps the content,** so redraws, reattaching, several clients and each client's picture format
   all work.
+- **It's a pane like any other** in the layout, so it can be renamed, split, zoomed and closed.
+  - **Its frame should show its name,** drawn the way a terminal pane's frame is (`pane_title`). The finder's
+    panes draw their own frames, so a renamed finder pane's frame doesn't show its name today. A canvas pane
+    shouldn't copy that.
 - **No scrollback or copy mode** unless we build them for canvas panes. `dump-screen` could read the cells.
 - **The largest API to keep stable:** under the extension API's rules, messages can be added but never changed.
 - **The finder could move onto it.** See the summary for why it shouldn't, for now.
@@ -283,3 +329,10 @@ No steps unless it's chosen. It would need its message format designed first.
 
 - **2026-11-07:** written. The user asked whether a pane that doesn't go through `alacritty_terminal` could let
   the finder and extensions show pictures.
+- **2026-11-07:** the diagrams now show where the `tb` pane is. The user asked, and asked whether each option
+  still uses a pane that can be renamed.
+  - A new section, "Where the pane is", says that every option shows pictures in a real pane, with a sketch of
+    the screen and a table of what each kind of pane keeps.
+  - In the A, B and C diagrams, a dashed box marks the pane's part of the server, and the program is shown
+    running in pane 3.
+  - Option C notes that a canvas pane's frame should show its name, which the finder's panes don't do today.
