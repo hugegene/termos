@@ -1,6 +1,6 @@
 # Plan: `tb`'s finder shows hidden files by default
 
-**Status:** built (steps 1–4); step 5, the check by hand, is still to do · **Date:** 2026-11-07 · **Related:** [the finder as two panes](2026-11-05-finder-divider.md),
+**Status:** done (built and checked by hand) · **Date:** 2026-11-07 · **Related:** [the finder as two panes](2026-11-05-finder-divider.md),
 [saving sessions](2026-11-04-build-steps-4-5.md) · **Findings:** none needed (see below)
 
 ## Decision
@@ -78,7 +78,7 @@ No measurements were needed: this is a default the user chose, plus a small chan
   - README's finder line: `.` hides hidden files (shown by default).
   - The finder's `?` help, if it lists `.`.
   - A change-log line in the [finder plan](2026-11-05-finder-divider.md).
-- [ ] **5. Check by hand (you):** your home folder in a finder; `.`; detach and attach again.
+- [x] **5. Check by hand (you):** your home folder in a finder; `.`; detach and attach again.
 
 Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspace`, clippy,
 `cargo fmt -p tb -p finder-core`.
@@ -110,3 +110,4 @@ Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspa
     - **Fixed on the way:** in a frame, a folder name too long for the list lost its last letter to a second
       `…` (`┌ …r-with-a-rather-long-nam…─┐`). The room for the title was one column too wide; the new
       `frame_title_room` gets it right, and the long-name unit test failed with the old width.
+- **2026-11-07:** step 5 done: the user checked it by hand.
