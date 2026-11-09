@@ -715,7 +715,8 @@ impl Server {
         lines.push(TextLine::default());
         lines.push(TextLine::styled(
             " Mouse: click to focus, drag the lines between panes to resize, the wheel scrolls back, drag to \
-             select and copy (hold Shift if the program uses the mouse).",
+             select and copy (hold Shift if the program uses the mouse). Right-click a file in a finder to rename, \
+             copy or delete it.",
             Style::default().fg(Color::DarkGray),
         ));
         Clear.render(rect, buf);

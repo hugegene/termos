@@ -239,3 +239,5 @@ tb attach        server loop          files: Finder         preview pane        
     - **Events:** the editor's output marks the preview pane as changed, since the editor shows there.
 - **2026-11-07:** the file list shows hidden files by default, and `.` hides them; while they're hidden, the
   list's title says how many. See [hidden files](2026-11-07-finder-hidden-files.md).
+- **2026-11-07:** right-clicking a file in the list, or `m`, opens a menu: rename, copy name, copy path,
+  delete (to the trash). See [finder menu](2026-11-07-finder-menu.md).

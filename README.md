@@ -128,7 +128,8 @@ panes, swap layouts, pane groups and zellij's plugins.
 - **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to
   select and copy (OSC 52).
 - **Finder:** `j`/`k` move, `Enter` edits in Neovim (`Alt+s` save, `Alt+q` close), `/` filters, `.` hides
-  hidden files (shown by default).
+  hidden files (shown by default). Right-click a file, or press `m`, to rename it, copy its name or path, or
+  delete it (to the trash; where there's no trash it asks first).
 
 ## Images
 

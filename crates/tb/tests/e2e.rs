@@ -481,6 +481,43 @@ fn finder_shows_hidden_files_until_dot() {
 }
 
 #[test]
+fn finder_menu_renames_and_deletes() {
+    let mut env = Env::new("e2e-menu");
+    // A trash that always fails, so Delete asks before deleting for good and the user's trash is never used.
+    env.set("TB_TRASH", "false");
+    let files = env.root.join("m");
+    fs::create_dir_all(&files).unwrap();
+    fs::write(files.join("keep.txt"), "keep\n").unwrap();
+    fs::write(files.join("old.txt"), "old\n").unwrap();
+    env.tb(&["start"]);
+    let out = Command::new(TB)
+        .args(["-s", &env.session, "finder", files.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TB_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let s = env.attach(100, 24);
+    let text = s.wait_for(" old.txt");
+    let (y, line) = text.lines().enumerate().find(|(_, l)| l.contains(" old.txt")).unwrap();
+    let x = line.chars().position(|c| c == 'o').unwrap() + 1;
+    // A right-click on old.txt selects it and opens the menu.
+    s.send(format!("\x1b[<2;{x};{y1}M\x1b[<2;{x};{y1}m", y1 = y + 1).as_bytes());
+    s.wait_for("Copy path");
+    // Rename it: clear the field, type the new name, Enter.
+    s.send(b"r");
+    s.send(b"\x15new.txt\r");
+    s.wait_until("the renamed file", |t| t.contains(" new.txt") && t.contains("renamed 'old.txt' to 'new.txt'"));
+    assert!(files.join("new.txt").exists() && !files.join("old.txt").exists());
+    // Delete it: the trash fails, so it asks; y deletes it for good.
+    s.send(b"md");
+    s.wait_for("Delete it for good? y / n");
+    s.send(b"y");
+    s.wait_for("deleted 'new.txt'");
+    assert!(!files.join("new.txt").exists() && files.join("keep.txt").exists());
+}
+
+#[test]
 fn finder_follows_markdown_links() {
     let env = Env::new("e2e-links");
     let files = env.root.join("l");

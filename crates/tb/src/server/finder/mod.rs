@@ -4,6 +4,7 @@
 
 mod grid;
 mod highlight;
+mod menu;
 mod pdf;
 pub mod view;
 
@@ -21,6 +22,7 @@ use finder_core::link::Target;
 use finder_core::pdf::PdfInfo;
 use finder_core::tool::ToolError;
 use finder_core::{Entry, Kind, Limits, Preview, human_size};
+use menu::Popup;
 use notify::{EventKind, RecursiveMode, Watcher};
 use pdf::{Merge, PageImage, PdfJob, PdfResult, PdfView, Zoom};
 use ratatui::buffer::Buffer;
@@ -110,6 +112,8 @@ pub enum Action {
     FocusPreview,
     /// Move focus to the finder's file list.
     FocusFiles,
+    /// Copy this text to the clipboard (the menu's Copy name and Copy path).
+    Copy(String),
 }
 
 struct Request {
@@ -179,6 +183,10 @@ pub struct Finder {
     message: Option<String>,
     /// The files links were followed from, and their scroll positions, for Backspace in the preview.
     history: Vec<(PathBuf, usize)>,
+    /// The menu, a rename, or the "delete for good?" question, over the file list.
+    popup: Option<Popup>,
+    /// The command that moves a file to the trash; the path is added at the end.
+    trash: Vec<String>,
 }
 
 /// What the worker remembers about a PDF: when the file last changed, what `pdfinfo` said, and whether its
@@ -368,6 +376,8 @@ impl Finder {
             last_click: None,
             message: None,
             history: Vec::new(),
+            popup: None,
+            trash: menu::trash_command(),
         };
         f.cd(dir, None);
         f
@@ -502,6 +512,7 @@ impl Finder {
             let _ = w.watch(&dir, RecursiveMode::NonRecursive);
         }
         self.dir = dir;
+        self.popup = None;
         self.filter.clear();
         self.filtering = false;
         self.list_top = 0;
@@ -889,6 +900,9 @@ impl Finder {
             }
             return Action::None;
         }
+        if let Some(action) = self.popup_key(key) {
+            return action;
+        }
         // E edits any text file in Neovim, CSV included.
         if key.code == KeyCode::Char('E')
             && let Some(p) = self.editable()
@@ -970,6 +984,7 @@ impl Finder {
                 return Action::FocusPreview;
             }
             KeyCode::Char('e') => return self.edit_current(true),
+            KeyCode::Char('m') => self.open_menu_at_selection(),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.up(),
             KeyCode::Char('.') => {
                 self.show_hidden = !self.show_hidden;
@@ -1020,6 +1035,9 @@ impl Finder {
             }
             return Action::None;
         }
+        if let Some(action) = self.popup_mouse(ev) {
+            return action;
+        }
         let (x, y) = (ev.column, ev.row);
         let in_list = !preview && super::layout::contains(self.list_rect, x, y);
         match ev.kind {
@@ -1032,15 +1050,14 @@ impl Finder {
                     return self.follow(&url);
                 }
             }
+            MouseEventKind::Down(MouseButton::Right) if in_list => {
+                if let Some(index) = self.entry_at(x, y) {
+                    self.last_click = None;
+                    self.open_menu(index, x);
+                }
+            }
             MouseEventKind::Down(MouseButton::Left) if in_list => {
-                let rows = self.entries_rect(self.list_rect);
-                if !super::layout::contains(rows, x, y) {
-                    return Action::None;
-                }
-                let index = self.list_top + usize::from(y - rows.y);
-                if index >= self.visible.len() {
-                    return Action::None;
-                }
+                let Some(index) = self.entry_at(x, y) else { return Action::None };
                 let double =
                     self.last_click.is_some_and(|(t, i)| i == index && t.elapsed() < Duration::from_millis(400));
                 self.select(index);
@@ -1057,7 +1074,9 @@ impl Finder {
 
     /// One line of key hints for the status bar, for the file list or (with `preview`) the preview pane.
     pub fn hint(&self, preview: bool) -> &'static str {
-        if let Some(g) = &self.grid {
+        if let Some(h) = self.popup_hint() {
+            h
+        } else if let Some(g) = &self.grid {
             g.hint()
         } else if self.editor.is_some() {
             "editing · Alt+s save · Alt+q close"
@@ -1072,9 +1091,9 @@ impl Finder {
         } else if preview {
             "preview · j/k scroll · Space/b page · Enter edit · h back"
         } else if self.pdf.is_some() {
-            "j/k move · l preview · t text/pages · h up · / filter · . hidden"
+            "j/k move · l preview · t text/pages · h up · / filter · . hidden · m menu"
         } else {
-            "j/k move · Enter open/edit · l preview · h up · / filter · . hidden"
+            "j/k move · Enter open/edit · l preview · h up · / filter · . hidden · m menu"
         }
     }
 
@@ -1296,9 +1315,23 @@ impl Finder {
                 style = if active { style.add_modifier(Modifier::REVERSED) } else { style.bg(Color::DarkGray) };
                 fill(buf, Rect::new(area.x, y, area.width, 1), " ", style);
             }
-            let name = if e.is_dir { format!(" {}/", e.name) } else { format!(" {}", e.name) };
             // Inside a box, keep a column free before the right edge.
             let max = if self.frames { area.width.saturating_sub(1) } else { area.width };
+            if let Some(edit) = self.renaming(&e.name) {
+                // The row is the rename field.
+                let field = Style::default().fg(Color::Black).bg(Color::Yellow);
+                fill(buf, Rect::new(area.x, y, max, 1), " ", field);
+                put_str(
+                    buf,
+                    area.x + 1,
+                    y,
+                    &edit.shown(usize::from(max.saturating_sub(2))),
+                    field,
+                    max.saturating_sub(1),
+                );
+                continue;
+            }
+            let name = if e.is_dir { format!(" {}/", e.name) } else { format!(" {}", e.name) };
             put_str(buf, area.x, y, &name, style, max);
         }
     }

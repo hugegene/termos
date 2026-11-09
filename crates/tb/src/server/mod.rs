@@ -650,6 +650,14 @@ impl Server {
                 && tab.root.panes().iter().any(|id| matches!(self.panes.get(id), Some(Pane::Preview { .. }))))
     }
 
+    /// The finder whose file list has focus in the active tab.
+    fn focused_finder_list(&self) -> Option<&Finder> {
+        match self.panes.get(&self.focused_pane()?)? {
+            Pane::Finder(f) => Some(f),
+            _ => None,
+        }
+    }
+
     /// The finder behind a finder pane, and whether the pane is its preview (rather than its file list).
     fn finder_of(&self, id: PaneId) -> Option<(PaneId, bool)> {
         match self.panes.get(&id)? {
@@ -1042,6 +1050,10 @@ impl Server {
         if old == new {
             return;
         }
+        // A finder's menu closes when its file list loses focus.
+        if let Some(Pane::Finder(f)) = old.and_then(|id| self.panes.get_mut(&id)) {
+            f.close_popup();
+        }
         for (id, gained) in [(old, false), (new, true)] {
             let target = id.and_then(|id| match self.panes.get(&id)? {
                 Pane::Term(_) => Some(id),
@@ -1353,6 +1365,10 @@ impl Server {
                 }
             }
             Action::FocusFiles => self.focus_unzoomed(finder_id),
+            Action::Copy(text) => {
+                self.copy_to_clipboard(None, &text);
+                self.flash(format!("copied '{text}'"));
+            }
         }
     }
 
@@ -1841,8 +1857,10 @@ impl Server {
         };
         // Real images need a protocol, no overlay on top, and for sixel the cell size in pixels.
         let protocol = graphics.protocol;
+        let popup = self.focused_finder_list();
         let real = protocol != ImageProtocol::Blocks
             && !matches!(self.mode, Mode::Help)
+            && !popup.is_some_and(Finder::popup_covers_preview)
             && (protocol != ImageProtocol::Sixel || graphics.cell_px.is_some());
         let mut slots = Vec::new();
         if let Some(tab) = self.tabs.get(self.active) {
@@ -1882,6 +1900,10 @@ impl Server {
                     }
                 }
             }
+        }
+        // A finder's menu, or its "delete for good?" question, goes over the panes.
+        if let Some(f) = popup {
+            f.render_popup(&mut buf);
         }
         let mut status_zones = Vec::new();
         if rows >= 2 {
