@@ -193,7 +193,7 @@ pub enum ActionCmd {
     },
     /// Close the tab with this id
     CloseTabById { id: u32 },
-    /// Go to tab N (counting from 1)
+    /// Go to the tab numbered N on the tab bar (finder tabs have no number)
     GoToTab { index: usize },
     /// Go to the tab with this id
     GoToTabById { id: u32 },

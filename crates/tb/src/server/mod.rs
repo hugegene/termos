@@ -84,6 +84,8 @@ const REFRESH: Duration = Duration::from_millis(500);
 const EVENTS_EVERY: Duration = Duration::from_millis(100);
 /// How often the session is saved for restoring, if it changed.
 const SAVE_EVERY: Duration = Duration::from_secs(2);
+/// The automatic name of a tab holding a finder.
+const FINDER_TAB: &str = "finder";
 
 struct Client {
     tx: SyncSender<ServerMsg>,
@@ -428,6 +430,8 @@ impl Server {
                 self.dirty = true;
             }
         }
+        // Whatever changed the tabs, finder tabs stay on the left before the next key reads an index.
+        self.keep_finders_left();
     }
 
     // ----- clients -----
@@ -796,12 +800,13 @@ impl Server {
         Ok(id)
     }
 
+    /// A new tab holding pane `id`. Without a name, the tab is named automatically (see `tab_label`).
     fn make_tab(&mut self, name: Option<String>, id: PaneId) -> Tab {
         self.next_tab_id += 1;
         Tab {
             id: self.next_tab_id,
             auto_name: name.is_none(),
-            name: name.unwrap_or_else(|| "shell".into()),
+            name: name.unwrap_or_else(|| self.default_tab_name(id)),
             root: Node::Leaf(id),
             focus: id,
             zoomed: false,
@@ -809,9 +814,65 @@ impl Server {
         }
     }
 
-    /// A finder's pane keeps the name "finder" when it moves to a tab of its own.
-    fn tab_name_for(&self, id: PaneId) -> Option<String> {
-        self.finder_of(id).map(|_| "finder".to_owned())
+    /// The stored name of an automatically named tab focused on pane `id`. Only `go-to-tab-name` reads it;
+    /// the tab bar shows `tab_label`.
+    fn default_tab_name(&self, id: PaneId) -> String {
+        if self.finder_of(id).is_some() { FINDER_TAB } else { "shell" }.to_owned()
+    }
+
+    /// The finder in a tab, as its file list's pane: the focused one, else the first. `None` if there's none.
+    fn tab_finder(&self, tab: &Tab) -> Option<PaneId> {
+        let finder = self.finder_of(tab.focus).or_else(|| tab.root.panes().into_iter().find_map(|p| self.finder_of(p)));
+        finder.map(|(files, _)| files)
+    }
+
+    /// A finder tab holds a finder's file list or preview. Finder tabs stay on the left, without numbers.
+    fn is_finder_tab(&self, tab: &Tab) -> bool {
+        self.tab_finder(tab).is_some()
+    }
+
+    /// Moves finder tabs before all others, keeping the order within each group and the same tab active.
+    fn keep_finders_left(&mut self) {
+        let finder: Vec<bool> = self.tabs.iter().map(|t| self.is_finder_tab(t)).collect();
+        if finder.windows(2).all(|w| w[0] || !w[1]) {
+            return;
+        }
+        let active = self.tabs.get(self.active).map(|t| t.id);
+        let mut tabs: Vec<(bool, Tab)> = finder.into_iter().zip(std::mem::take(&mut self.tabs)).collect();
+        // Stable: tabs within each group keep their order.
+        tabs.sort_by_key(|(f, _)| !f);
+        self.tabs = tabs.into_iter().map(|(_, t)| t).collect();
+        self.active = self.tabs.iter().position(|t| Some(t.id) == active).unwrap_or(0);
+        self.dirty = true;
+    }
+
+    /// The indices of the tabs in the same group as tab `i`: the finder tabs, or the numbered ones.
+    fn tab_group(&self, i: usize) -> std::ops::Range<usize> {
+        let finders = self.tabs.iter().take_while(|t| self.is_finder_tab(t)).count();
+        if i < finders { 0..finders } else { finders..self.tabs.len() }
+    }
+
+    /// The index of the tab numbered `n` on the tab bar (from 1). Finder tabs have no number.
+    fn numbered_tab(&self, n: usize) -> Option<usize> {
+        let numbered = self.tabs.iter().enumerate().filter(|(_, t)| !self.is_finder_tab(t));
+        numbered.map(|(i, _)| i).nth(n.checked_sub(1)?)
+    }
+
+    /// How many tabs have a number on the tab bar.
+    fn numbered_tabs(&self) -> usize {
+        self.tabs.iter().filter(|t| !self.is_finder_tab(t)).count()
+    }
+
+    fn go_to_numbered_tab(&mut self, n: usize) {
+        if let Some(i) = self.numbered_tab(n) {
+            self.go_to_tab(i);
+        }
+    }
+
+    fn go_to_first_finder(&mut self) {
+        if let Some(i) = self.tabs.iter().position(|t| self.is_finder_tab(t)) {
+            self.go_to_tab(i);
+        }
     }
 
     fn remember_tab(&mut self) {
@@ -840,7 +901,7 @@ impl Server {
     /// A tab with a finder: its file list (focused) and its preview, side by side. Returns the list's pane.
     fn new_finder_tab(&mut self, dir: PathBuf) -> PaneId {
         let (files, preview) = self.add_finder(dir);
-        self.push_tab(Some("finder".into()), files);
+        self.push_tab(None, files);
         self.tabs[self.active].root.split_with(files, preview, SplitDir::Right, finder::LIST_SHARE);
         self.apply_layout();
         files
@@ -1152,27 +1213,28 @@ impl Server {
         }
     }
 
-    /// Moves the active tab one place left or right, wrapping around the ends.
+    /// Moves the active tab one place left or right within its group (finder tabs, or the numbered ones),
+    /// wrapping around that group's ends.
     fn move_tab(&mut self, right: bool) {
-        let n = self.tabs.len();
-        if n < 2 {
+        let group = self.tab_group(self.active);
+        if group.len() < 2 {
             return;
         }
-        let i = self.active;
-        if right && i + 1 < n {
+        let (first, last, i) = (group.start, group.end - 1, self.active);
+        if right && i < last {
             self.tabs.swap(i, i + 1);
             self.active = i + 1;
         } else if right {
             let t = self.tabs.remove(i);
-            self.tabs.insert(0, t);
-            self.active = 0;
-        } else if i > 0 {
+            self.tabs.insert(first, t);
+            self.active = first;
+        } else if i > first {
             self.tabs.swap(i, i - 1);
             self.active = i - 1;
         } else {
-            let t = self.tabs.remove(0);
-            self.tabs.push(t);
-            self.active = n - 1;
+            let t = self.tabs.remove(i);
+            self.tabs.insert(last, t);
+            self.active = last;
         }
         self.dirty = true;
     }
@@ -1271,8 +1333,7 @@ impl Server {
     /// Moves the focused pane to a new tab of its own.
     fn break_pane(&mut self) {
         if let Some(id) = self.take_focused() {
-            let name = self.tab_name_for(id);
-            self.push_tab(name, id);
+            self.push_tab(None, id);
         }
     }
 
@@ -1303,8 +1364,7 @@ impl Server {
             self.active = target;
         } else {
             // No tab on that side, or no room in it: a new tab on that side.
-            let name = self.tab_name_for(id);
-            let tab = self.make_tab(name, id);
+            let tab = self.make_tab(None, id);
             let at = match (right, exists) {
                 (true, true) => target,
                 (true, false) => self.tabs.len(),
@@ -1761,9 +1821,18 @@ impl Server {
 
     // ----- drawing -----
 
+    /// A tab's name on the tab bar. A renamed tab shows its name. Otherwise a finder tab is "finder", or
+    /// "finder: <folder>" when there are several, and other tabs show their focused pane's folder.
     fn tab_label(&self, tab: &Tab) -> String {
         if !tab.auto_name {
             return tab.name.clone();
+        }
+        if let Some(files) = self.tab_finder(tab) {
+            let several = self.tabs.iter().filter(|t| self.is_finder_tab(t)).nth(1).is_some();
+            return match self.pane_cwd(files) {
+                Some(dir) if several => format!("{FINDER_TAB}: {}", folder_label(&dir)),
+                _ => FINDER_TAB.to_owned(),
+            };
         }
         self.pane_cwd(tab.focus).map(|dir| folder_label(&dir)).unwrap_or_else(|| tab.name.clone())
     }
@@ -2001,11 +2070,18 @@ impl Server {
         let session = format!(" {} ", self.name);
         let right = width.saturating_sub(session.len() as u16);
         let renaming = matches!(self.mode, Mode::RenameTab { .. });
+        let mut number = 0;
         for (i, tab) in self.tabs.iter().enumerate() {
             let zoom = if tab.zoomed { " (FULLSCREEN)" } else { "" };
             let sync = if tab.sync { " (SYNC)" } else { "" };
             let name = if renaming && i == self.active { format!("{}▏", tab.name) } else { self.tab_label(tab) };
-            let label = format!(" {} {name}{zoom}{sync} ", i + 1);
+            // Finder tabs, always first, have no number; the others count from 1.
+            let label = if self.is_finder_tab(tab) {
+                format!(" {name}{zoom}{sync} ")
+            } else {
+                number += 1;
+                format!(" {number} {name}{zoom}{sync} ")
+            };
             let style = if i == self.active { active } else { normal };
             let w = put_str(buf, x, 0, &label, style, right.saturating_sub(x));
             zones.push((x, x + w, Some(i)));
@@ -2076,5 +2152,96 @@ mod tests {
             assert_eq!(folder_label(Path::new(&home)), "~");
             assert_eq!(folder_label(&Path::new(&home).join("notes")), "notes");
         }
+    }
+
+    /// A server with two named tabs, `a` and `b`, standing in for shells (their panes don't exist), and a folder
+    /// holding `alpha` and `beta` for finders.
+    fn two_tabs() -> (Server, tempfile::TempDir) {
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new("t", tx);
+        for name in ["a", "b"] {
+            let id = s.alloc_pane();
+            let tab = s.make_tab(Some(name.into()), id);
+            s.tabs.push(tab);
+        }
+        s.active = 1;
+        let dir = tempfile::tempdir().unwrap();
+        for d in ["alpha", "beta"] {
+            fs::create_dir(dir.path().join(d)).unwrap();
+        }
+        (s, dir)
+    }
+
+    fn labels(s: &Server) -> Vec<String> {
+        s.tabs.iter().map(|t| s.tab_label(t)).collect()
+    }
+
+    fn tab_bar(s: &Server) -> String {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
+        s.draw_tab_bar(&mut buf);
+        (0..80).map(|x| buf[(x, 0)].symbol()).collect::<String>().trim_end().to_owned()
+    }
+
+    #[test]
+    fn finder_tabs_go_left_after_other_finders() {
+        let (mut s, dir) = two_tabs();
+        s.new_finder_tab(dir.path().join("alpha"));
+        s.keep_finders_left();
+        assert_eq!(labels(&s), ["finder", "a", "b"]);
+        assert_eq!(s.active, 0, "the new finder is active");
+        // A second finder goes after the first; now each shows its folder.
+        s.new_finder_tab(dir.path().join("beta"));
+        s.keep_finders_left();
+        assert_eq!(labels(&s), ["finder: alpha", "finder: beta", "a", "b"]);
+        assert_eq!(s.active, 1);
+        assert!(tab_bar(&s).starts_with(" finder: alpha   finder: beta   1 a   2 b   + "), "{}", tab_bar(&s));
+        // Numbers skip the finders.
+        assert_eq!(s.numbered_tab(1), Some(2));
+        assert_eq!(s.numbered_tab(2), Some(3));
+        assert_eq!(s.numbered_tab(3), None);
+        assert_eq!(s.numbered_tab(0), None);
+        // With one finder left it's plain "finder" again.
+        s.close_tab_at(0);
+        s.keep_finders_left();
+        assert_eq!(labels(&s), ["finder", "a", "b"]);
+    }
+
+    #[test]
+    fn tabs_move_within_their_group() {
+        let (mut s, dir) = two_tabs();
+        s.new_finder_tab(dir.path().join("alpha"));
+        s.new_finder_tab(dir.path().join("beta"));
+        s.keep_finders_left();
+        // `a` can't pass the finders: moving it left wraps to the end of the numbered tabs, and back.
+        s.active = 2;
+        s.move_tab(false);
+        assert_eq!(labels(&s), ["finder: alpha", "finder: beta", "b", "a"]);
+        assert_eq!(s.active, 3);
+        s.move_tab(true);
+        assert_eq!(labels(&s), ["finder: alpha", "finder: beta", "a", "b"]);
+        assert_eq!(s.active, 2);
+        // A finder moves only among finders.
+        s.active = 1;
+        s.move_tab(true);
+        assert_eq!(labels(&s), ["finder: beta", "finder: alpha", "a", "b"]);
+        assert_eq!(s.active, 0);
+    }
+
+    #[test]
+    fn a_tab_that_gets_a_finder_goes_left() {
+        let (mut s, dir) = two_tabs();
+        s.new_finder_tab(dir.path().join("alpha"));
+        s.keep_finders_left();
+        // The finder's file list moves into `b`, which becomes a finder tab; its name stays.
+        let files = s.tabs[0].focus;
+        s.tabs[0].root.remove(files);
+        s.tabs[0].focus = s.tabs[0].root.panes()[0];
+        let b = s.tabs[2].focus;
+        s.tabs[2].root.split(b, files, SplitDir::Right);
+        s.active = 2;
+        s.keep_finders_left();
+        assert_eq!(labels(&s), ["finder: alpha", "b", "a"]);
+        assert_eq!(s.active, 1, "b is still active");
+        assert_eq!(s.numbered_tab(1), Some(2));
     }
 }

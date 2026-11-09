@@ -30,8 +30,11 @@ meaning. Failures exit non-zero with the message on stderr.
 
 ## Ids
 
-- **Tabs and panes have ids that never change while they exist.** Tab positions (`go-to-tab N`, counting
-  from 1) change as tabs open, close and move; ids don't.
+- **Tabs and panes have ids that never change while they exist.** Tab numbers and positions change as tabs
+  open, close and move; ids don't.
+- **Finder tabs come first and have no number.** A tab that holds a finder always sits left of the other tabs.
+  The tab bar numbers the other tabs from 1, and `go-to-tab N` (and `GoToTab N` in `config.kdl`) uses those
+  numbers. `position` in JSON and events counts every tab from 0, finders included.
 - **Creating prints the new id:** `new-tab` prints a tab id (`3`), and `new-pane`, `run` and `edit` print a
   pane id (`terminal_7`).
 - **Pane ids are accepted as `7`, `terminal_7`, `finder_7` or `preview_8`.** zellij has neither of the last
@@ -140,8 +143,9 @@ Fields for features `tb` lacks have fixed values: `panes_to_hide` (0), `are_floa
 `other_focused_clients` ([]), `active_swap_layout_name` (null), `is_swap_layout_dirty` (false),
 `selectable_floating_panes_count` (0), `has_bell_notification` and `is_flashing_bell` (false).
 
-`tb` adds `auto_name`: true while the name follows the tab's folder (the last part of the focused pane's
-working folder, or `~` for home).
+`tb` adds `auto_name`: true while the name is automatic. A finder tab is then `finder`, or `finder: <folder>`
+when there are several; another tab follows its folder (the last part of the focused pane's working folder,
+or `~` for home).
 
 **`list-panes -j`**: an array. Each pane has zellij's fields:
 - `id`, `is_plugin` (false), `is_focused`, `is_fullscreen`, `title`

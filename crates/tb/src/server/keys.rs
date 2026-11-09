@@ -255,7 +255,9 @@ impl Server {
                 self.toggle_last_tab();
                 return None;
             }
-            KeyCode::Char(d @ '1'..='9') => self.go_to_tab(usize::from(d as u8 - b'1')),
+            // The numbers on the tab bar; finder tabs have none, and 0 goes to the first.
+            KeyCode::Char('0') => self.go_to_first_finder(),
+            KeyCode::Char(d @ '1'..='9') => self.go_to_numbered_tab(usize::from(d as u8 - b'0')),
             KeyCode::Char('n') => self.new_tab_here(),
             KeyCode::Char('x') => self.close_tab(),
             KeyCode::Char('r') => {
@@ -413,11 +415,12 @@ impl Server {
     }
 
     fn rename_tab_key(&mut self, old: String, old_auto: bool, key: &KeyEvent) {
+        let Some(default) = self.tabs.get(self.active).map(|t| self.default_tab_name(t.focus)) else { return };
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         if key.code == KeyCode::Enter || ctrl(key, 'c') {
             tab.name = tab.name.trim().to_owned();
             if tab.name.is_empty() {
-                tab.name = "shell".into();
+                tab.name = default;
                 tab.auto_name = true;
             }
             return;
@@ -663,7 +666,7 @@ impl Server {
         match m {
             Modal::Locked => "Ctrl+g unlock · all other keys go to the program".into(),
             Modal::Pane => "←↓↑→ focus · n new · d down · r right · x close · f fullscreen · z frames · c rename · p next · Esc back".into(),
-            Modal::Tab => "←→ switch · n new · x close · r rename · 1-9 go to · Tab last · s sync · b break out · [ ] move pane to tab · f finder · Esc back".into(),
+            Modal::Tab => "←→ switch · n new · x close · r rename · 1-9 go to · 0 finder · Tab last · s sync · b break out · [ ] move pane to tab · f new finder · Esc back".into(),
             Modal::Resize => "←↓↑→ grow · H J K L shrink · + - all sides · Esc back".into(),
             Modal::Move => "←↓↑→ swap with neighbour · n next · p previous · Esc back".into(),
             Modal::Scroll => "↓↑ line · d u half page · PgDn PgUp page · s search · e edit · v select · Ctrl+c bottom · Esc back".into(),
@@ -688,7 +691,7 @@ impl Server {
             ("Ctrl+p", "pane: ←↓↑→ focus · n new · d down · r right · x close · f fullscreen · z frames · c rename"),
             (
                 "Ctrl+t",
-                "tab: ←→ switch · n new · x close · r rename · 1-9 · Tab last · s sync · b break out · f finder",
+                "tab: ←→ switch · n new · x close · r rename · 1-9 · 0 finder · Tab last · s sync · b break out · f new finder",
             ),
             ("Ctrl+n", "resize: ←↓↑→ grow that side · H J K L shrink it · + - all sides"),
             ("Ctrl+h", "move: ←↓↑→ swap with the neighbour · n p next / previous"),

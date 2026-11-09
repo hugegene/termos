@@ -759,18 +759,18 @@ fn sessions_come_back_after_kill() {
     assert!(ls.contains("e2e-persist (EXITED - attach to restore)"), "{ls}");
 
     // Attaching brings it back: tabs, names, folders, the finder's selection, and the command at the prompt.
+    // The finder tab stays first, without a number.
     let s = env.attach(100, 30);
-    s.wait_for(" 1 work ");
-    s.wait_for(" 2 finder ");
+    s.wait_for(" finder   1 work ");
     s.wait_for("┌ b.txt ");
     let panes = env.panes();
     // The finder is two panes, its file list and its preview, linked again.
     let kinds: Vec<_> = panes.iter().map(|p| p["kind"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["terminal", "terminal", "finder", "preview"], "{panes:?}");
-    assert_eq!(panes[0]["cwd"].as_str(), Some(proj.to_str().unwrap()));
-    let second = panes[1]["id"].as_u64().unwrap().to_string();
+    assert_eq!(kinds, ["finder", "preview", "terminal", "terminal"], "{panes:?}");
+    assert_eq!(panes[2]["cwd"].as_str(), Some(proj.to_str().unwrap()));
+    let second = panes[3]["id"].as_u64().unwrap().to_string();
     wait("sleep typed, not run", || env.tb(&["dump-screen", "-p", &second]).contains("$ sleep 300").then_some(()));
-    assert_eq!(panes[1]["title"].as_str(), Some("sh"), "the shell, not sleep, is running");
+    assert_eq!(panes[3]["title"].as_str(), Some("sh"), "the shell, not sleep, is running");
 
     // `tb delete` refuses a running session without --force, then forgets it.
     let out = Command::new(TB)
@@ -782,6 +782,58 @@ fn sessions_come_back_after_kill() {
     env.tb(&["delete", "--force"]);
     s.wait_exit();
     wait("forgotten", || env.tb(&["ls"]).contains("no sessions").then_some(()));
+}
+
+/// Finder tabs stay on the left without numbers, a new one after those already there; other tabs count from 1.
+#[test]
+fn finder_tabs_stay_left() {
+    let env = Env::new("e2e-finder-tabs");
+    for d in ["one", "two"] {
+        fs::create_dir(env.root.join(d)).unwrap();
+    }
+    let s = env.attach(120, 30);
+    s.wait_for("$");
+    let bar = |want: &str| s.wait_until(want, |t| t.lines().next().is_some_and(|l| l.starts_with(want)));
+    let active = || {
+        let tabs = json(&env.tb(&["action", "list-tabs", "-j"]));
+        let tab = tabs.as_array().unwrap().iter().find(|t| t["active"] == true).cloned().unwrap();
+        (tab["position"].as_u64().unwrap(), tab["name"].as_str().unwrap().to_owned())
+    };
+
+    // Two shell tabs, in one and two.
+    s.send(format!("cd {}\r", env.root.join("one").display()).as_bytes());
+    bar(" 1 one ");
+    s.send(b"\x14n");
+    s.send(format!("cd {}\r", env.root.join("two").display()).as_bytes());
+    bar(" 1 one   2 two ");
+
+    // Ctrl+T f opens a finder on two at the far left; the numbers start after it.
+    s.send(b"\x14f");
+    bar(" finder   1 one   2 two ");
+    // Ctrl+T 1 goes to the tab numbered 1. A second finder from there goes after the first, and both show
+    // their folder.
+    s.send(b"\x141");
+    wait("on one", || (active() == (1, "one".to_owned())).then_some(()));
+    s.send(b"\x14f");
+    bar(" finder: two   finder: one   1 one   2 two ");
+    assert_eq!(active(), (1, "finder: one".to_owned()), "positions count the finders");
+
+    // go-to-tab N uses the numbers on the bar.
+    env.tb(&["action", "go-to-tab", "2"]);
+    wait("on two", || (active() == (3, "two".to_owned())).then_some(()));
+    let out = env.run(&["-s", &env.session, "action", "go-to-tab", "3"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("no tab 3 (there are 2 numbered tabs"), "{err}");
+
+    // Alt+I moves two left, then wraps to the end of the numbered tabs rather than passing the finders.
+    s.send(b"\x1bi");
+    bar(" finder: two   finder: one   1 two   2 one ");
+    s.send(b"\x1bi");
+    bar(" finder: two   finder: one   1 one   2 two ");
+
+    // Ctrl+T 0 goes to the first finder.
+    s.send(b"\x140");
+    wait("on the first finder", || (active() == (0, "finder: two".to_owned())).then_some(()));
 }
 
 /// Programs in a pane see the real terminal's cell size, so tools like chafa keep images in shape.

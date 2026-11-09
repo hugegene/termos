@@ -3,7 +3,7 @@
 
 # `tb action go-to-tab`
 
-Go to tab N (counting from 1)
+Go to the tab numbered N on the tab bar (finder tabs have no number)
 
 ```
 tb action go-to-tab <INDEX>

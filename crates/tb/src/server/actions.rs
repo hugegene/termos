@@ -124,10 +124,11 @@ impl Server {
                 done(self)
             }
             CliAction::GoToTab(n) => {
-                if n == 0 || n > self.tabs.len() {
-                    bail!("no tab {n} (there are {})", self.tabs.len());
-                }
-                self.go_to_tab(n - 1);
+                // The number on the tab bar: finder tabs have none.
+                let Some(i) = self.numbered_tab(n) else {
+                    bail!("no tab {n} (there are {} numbered tabs; finder tabs have no number)", self.numbered_tabs());
+                };
+                self.go_to_tab(i);
                 done(self)
             }
             CliAction::GoToTabId(id) => {
@@ -158,18 +159,9 @@ impl Server {
             }
             CliAction::UndoRenameTab { tab } => {
                 let i = self.tab_index(tab)?;
-                let focus = self.tabs[i].focus;
-                // Back to the default: finders are "finder", other tabs follow their folder.
-                match self.tab_name_for(focus) {
-                    Some(name) => {
-                        self.tabs[i].name = name;
-                        self.tabs[i].auto_name = false;
-                    }
-                    None => {
-                        self.tabs[i].name = "shell".into();
-                        self.tabs[i].auto_name = true;
-                    }
-                }
+                // Back to the automatic name: "finder" for finder tabs; other tabs follow their folder.
+                self.tabs[i].name = self.default_tab_name(self.tabs[i].focus);
+                self.tabs[i].auto_name = true;
                 done(self)
             }
             CliAction::MoveTab { tab, right } => {

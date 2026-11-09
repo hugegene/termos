@@ -46,7 +46,7 @@ zellij's actions, with zellij's names and flags, and `tb`'s own.
 | [`new-tab`](action/new-tab.md) | Open a new tab running a shell, or COMMAND; prints the tab's id |
 | [`close-tab`](action/close-tab.md) | Close a tab and everything in it |
 | [`close-tab-by-id`](action/close-tab-by-id.md) | Close the tab with this id |
-| [`go-to-tab`](action/go-to-tab.md) | Go to tab N (counting from 1) |
+| [`go-to-tab`](action/go-to-tab.md) | Go to the tab numbered N on the tab bar (finder tabs have no number) |
 | [`go-to-tab-by-id`](action/go-to-tab-by-id.md) | Go to the tab with this id |
 | [`go-to-tab-name`](action/go-to-tab-name.md) | Go to the tab with this name |
 | [`go-to-next-tab`](action/go-to-next-tab.md) | Go to the next tab (wrapping around) |

@@ -232,12 +232,20 @@ impl Server {
             });
         }
         self.link_finders(links);
+        // Finder tabs used to be named "finder" for good; now that's their automatic name.
+        for i in 0..self.tabs.len() {
+            if !self.tabs[i].auto_name && self.tabs[i].name == super::FINDER_TAB && self.is_finder_tab(&self.tabs[i]) {
+                self.tabs[i].auto_name = true;
+            }
+        }
         if run_commands {
             for input in self.pending_input.values_mut() {
                 input.text.push('\r');
             }
         }
         self.active = saved.active.min(self.tabs.len().saturating_sub(1));
+        // Sessions saved before finder tabs were kept on the left.
+        self.keep_finders_left();
         self.had_tabs = !self.tabs.is_empty();
         self.apply_layout();
         log::info!("restored {} tabs", self.tabs.len());
