@@ -31,7 +31,7 @@ Also: `ac`.
 | [`go-to-previous-tab`](action/go-to-previous-tab.md) | Go to the previous tab (wrapping around) |
 | [`rename-tab`](action/rename-tab.md) | Rename a tab |
 | [`rename-tab-by-id`](action/rename-tab-by-id.md) | Rename the tab with this id |
-| [`undo-rename-tab`](action/undo-rename-tab.md) | Remove a tab's name, so it follows its program again |
+| [`undo-rename-tab`](action/undo-rename-tab.md) | Remove a tab's name, so it follows its folder again |
 | [`move-tab`](action/move-tab.md) | Move a tab one place left or right |
 | [`toggle-active-sync-tab`](action/toggle-active-sync-tab.md) | Type into every pane of a tab at once, or stop |
 | [`list-tabs`](action/list-tabs.md) | List tabs |

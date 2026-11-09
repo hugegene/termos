@@ -77,7 +77,7 @@ struct StatusSegment {
 /// Shortest time between two frames sent to a client.
 const FRAME: Duration = Duration::from_millis(8);
 const MESSAGE_TIME: Duration = Duration::from_secs(3);
-/// How often to redraw anyway, so names that follow the running program stay current. Starting a program
+/// How often to redraw anyway, so titles that follow the running program stay current. Starting a program
 /// prints nothing, and a redraw that changes nothing sends nothing.
 const REFRESH: Duration = Duration::from_millis(500);
 /// How often subscribers hear about changes, at most.
@@ -773,7 +773,11 @@ impl Server {
     }
 
     fn focused_cwd(&self) -> Option<PathBuf> {
-        let id = self.focused_pane()?;
+        self.pane_cwd(self.focused_pane()?)
+    }
+
+    /// A pane's folder: a terminal's working folder, or the folder a finder shows.
+    fn pane_cwd(&self, id: PaneId) -> Option<PathBuf> {
         match self.panes.get(&id)? {
             Pane::Term(p) => p.cwd(),
             Pane::Finder(f) => Some(f.dir.clone()),
@@ -1761,10 +1765,7 @@ impl Server {
         if !tab.auto_name {
             return tab.name.clone();
         }
-        match self.panes.get(&tab.focus) {
-            Some(Pane::Term(p)) => p.foreground_name().unwrap_or_else(|| tab.name.clone()),
-            _ => tab.name.clone(),
-        }
+        self.pane_cwd(tab.focus).map(|dir| folder_label(&dir)).unwrap_or_else(|| tab.name.clone())
     }
 
     fn render_all(&mut self) {
@@ -2030,6 +2031,17 @@ struct PaneLook {
     accent: Color,
 }
 
+/// What a tab without a name shows: the last part of its folder, "~" for home and "/" for the root.
+fn folder_label(dir: &std::path::Path) -> String {
+    if std::env::var_os("HOME").is_some_and(|home| std::path::Path::new(&home) == dir) {
+        return "~".into();
+    }
+    match dir.file_name() {
+        Some(name) => name.to_string_lossy().into_owned(),
+        None => dir.display().to_string(),
+    }
+}
+
 /// Makes the cells in `rect` look changed, so the next frame draws them again (erasing a picture there).
 fn invalidate(buf: &mut Buffer, rect: Rect) {
     let rect = rect.intersection(buf.area);
@@ -2049,4 +2061,20 @@ fn viewport_point<T>(term: &alacritty_terminal::Term<T>, rect: Rect, x: u16, y: 
     let offset = term.grid().display_offset() as i32;
     let col = col.min(term.columns().saturating_sub(1));
     Point::new(Line(row - offset), Column(col))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn unnamed_tabs_show_their_folder() {
+        assert_eq!(folder_label(Path::new("/home/u/terminal-browser/crates")), "crates");
+        assert_eq!(folder_label(Path::new("/")), "/");
+        if let Some(home) = std::env::var_os("HOME") {
+            assert_eq!(folder_label(Path::new(&home)), "~");
+            assert_eq!(folder_label(&Path::new(&home).join("notes")), "notes");
+        }
+    }
 }

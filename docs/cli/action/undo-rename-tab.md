@@ -3,7 +3,7 @@
 
 # `tb action undo-rename-tab`
 
-Remove a tab's name, so it follows its program again
+Remove a tab's name, so it follows its folder again
 
 ```
 tb action undo-rename-tab [OPTIONS]

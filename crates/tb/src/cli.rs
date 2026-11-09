@@ -219,7 +219,7 @@ pub enum ActionCmd {
     },
     /// Rename the tab with this id
     RenameTabById { id: u32, name: String },
-    /// Remove a tab's name, so it follows its program again
+    /// Remove a tab's name, so it follows its folder again
     UndoRenameTab {
         #[command(flatten)]
         t: TabOpt,

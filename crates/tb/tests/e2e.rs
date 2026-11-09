@@ -693,18 +693,34 @@ fn sync_move_tab_and_edit_scrollback() {
 }
 
 #[test]
-fn tabs_are_named_after_the_running_program() {
-    let env = Env::new("e2e-names");
+fn tabs_are_named_after_the_working_folder() {
+    let mut env = Env::new("e2e-names");
+    let home = env.root.join("home");
+    let proj = home.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    env.set("HOME", home.to_str().unwrap());
     let s = env.attach(100, 30);
-    s.wait_for(" 1 sh ");
-    // `cat` starts half a second after the last output and prints nothing, so the tab bar must update
-    // without any output to trigger it.
+    s.wait_for("$");
+    s.send(format!("cd {}\r", proj.display()).as_bytes());
+    s.wait_for(" 1 proj ");
+    // The frame follows the running program. `cat` starts half a second after the last output and prints
+    // nothing, so the frame must update without any output to trigger it. The tab keeps the folder.
     s.send(b"sleep 0.5; cat\r");
-    s.wait_for(" 1 sleep ");
-    s.wait_for(" 1 cat ");
+    s.wait_for("┌ sleep ");
     s.wait_for("┌ cat ");
+    s.wait_for(" 1 proj ");
     s.send(b"\x04");
-    s.wait_for(" 1 sh ");
+    s.wait_for("┌ sh ");
+    s.send(b"cd\r");
+    s.wait_for(" 1 ~ ");
+    // A named tab keeps its name when the folder changes; removing the name follows the folder again.
+    s.send(b"\x14rwork\r");
+    s.wait_for(" 1 work ");
+    s.send(format!("cd {}; echo mo''ved\r", proj.display()).as_bytes());
+    s.wait_for("moved");
+    s.wait_for(" 1 work ");
+    env.tb(&["action", "undo-rename-tab"]);
+    s.wait_for(" 1 proj ");
 }
 
 #[test]

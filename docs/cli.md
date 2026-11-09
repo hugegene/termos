@@ -70,7 +70,7 @@ active tab).
 | `close-tab [-t ID]`, `close-tab-by-id ID` | Close a tab and everything in it |
 | `go-to-tab N`, `go-to-tab-by-id ID`, `go-to-tab-name NAME [-c]` | Go to a tab; `-c` creates it if there's none |
 | `go-to-next-tab`, `go-to-previous-tab` | Wrapping around |
-| `rename-tab NAME [-t ID]`, `rename-tab-by-id ID NAME`, `undo-rename-tab [-t ID]` | Name a tab, or let it follow its program again |
+| `rename-tab NAME [-t ID]`, `rename-tab-by-id ID NAME`, `undo-rename-tab [-t ID]` | Name a tab, or let it follow its folder again |
 | `move-tab left\|right [-t ID]` | Move a tab one place |
 | `toggle-active-sync-tab [-t ID]` | Type into every pane of a tab at once |
 | `list-tabs [-j] [-s] [-p] [-d] [-l] [-a]` | zellij's columns, or JSON |
@@ -140,7 +140,8 @@ Fields for features `tb` lacks have fixed values: `panes_to_hide` (0), `are_floa
 `other_focused_clients` ([]), `active_swap_layout_name` (null), `is_swap_layout_dirty` (false),
 `selectable_floating_panes_count` (0), `has_bell_notification` and `is_flashing_bell` (false).
 
-`tb` adds `auto_name`: true while the name follows the running program.
+`tb` adds `auto_name`: true while the name follows the tab's folder (the last part of the focused pane's
+working folder, or `~` for home).
 
 **`list-panes -j`**: an array. Each pane has zellij's fields:
 - `id`, `is_plugin` (false), `is_focused`, `is_fullscreen`, `title`

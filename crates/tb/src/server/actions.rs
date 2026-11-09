@@ -159,7 +159,7 @@ impl Server {
             CliAction::UndoRenameTab { tab } => {
                 let i = self.tab_index(tab)?;
                 let focus = self.tabs[i].focus;
-                // Back to the default: finders are "finder", other tabs follow their program.
+                // Back to the default: finders are "finder", other tabs follow their folder.
                 match self.tab_name_for(focus) {
                     Some(name) => {
                         self.tabs[i].name = name;
@@ -601,7 +601,7 @@ impl Server {
             "tab_id": tab.id,
             "has_bell_notification": false,
             "is_flashing_bell": false,
-            // tb: true while the name follows the running program (no name was given).
+            // tb: true while the name follows the tab's folder (no name was given).
             "auto_name": tab.auto_name,
         })
     }
