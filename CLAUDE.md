@@ -42,6 +42,18 @@ Write each plan to **`docs/plans/YYYY-MM-DD-<topic>.md`** before implementing it
 - **Sources:** link the findings it relies on (`../findings/...`). Label anything not measured as an **estimate**.
 - **Keep it current:** when the plan changes, update the same file and note what changed and when. Don't start a duplicate.
 
+## Explaining (always follow)
+
+This applies to answers in chat and to everything in `docs/`.
+
+- **Walk through an example.** Whenever possible, explain by following one concrete case step by step, such as
+  a real file, key press, command or request, rather than describing only the general rule.
+- **Draw a diagram in a code block.** Whenever parts are separated or a request travels between them, draw a
+  plain-text diagram in a fenced code block.
+  - **Logical or physical separation:** boxes for each part, such as processes, threads, crates, sockets or machines.
+  - **Request or network flow:** numbered arrows for each hop, labelled with what travels, such as keys, IPC
+    messages, HTTP calls or webhooks.
+
 ## Rust workspace (`tb`, a working name)
 
 - **Layout:**
