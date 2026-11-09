@@ -1,6 +1,6 @@
 # Plan: a right-click menu in `tb`'s finder (rename, copy name, copy path, delete)
 
-**Status:** built; the check by hand (step 6) is still to do · **Date:** 2026-11-07 · **Related:** [the finder as two panes](2026-11-05-finder-divider.md),
+**Status:** done (built and checked by hand) · **Date:** 2026-11-07 · **Related:** [the finder as two panes](2026-11-05-finder-divider.md),
 [hidden files](2026-11-07-finder-hidden-files.md) · **Findings:** [`gio trash`](../findings/2026-11-07-gio-trash.md)
 
 ## Decision
@@ -112,7 +112,7 @@ right-clicks for themselves and for phones. The user asked for this on 2026-11-0
     `TB_TRASH=false` makes Delete ask; `y` removes the file.
 - [x] **5. Docs:** the README's finder line, the `?` help, and a change-log line in the
   [finder plan](2026-11-05-finder-divider.md).
-- [ ] **6. Check by hand (you):** right-click in your terminal. Does it reach tb, or does the terminal open its
+- [x] **6. Check by hand (you):** right-click in your terminal. Does it reach tb, or does the terminal open its
   own menu? Rename a file, copy a path and paste it, delete a file in your home folder and find it in the trash.
 
 Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspace`, clippy,
@@ -147,3 +147,4 @@ Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspa
       preview on a 100-column screen, where the list is 35 wide.
     - **Wording:** the box says "Can't move 'x' to the trash: <reason>. Delete it for good? y / n", and names
       the file once.
+- **2026-11-09:** step 6 done: the user checked it by hand.
