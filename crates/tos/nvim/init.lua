@@ -1,5 +1,6 @@
--- Neovim config used only by the terminal finder:
---   NVIM_APPNAME=tfinder-nvim nvim -u ~/termos/nvim/init.lua <file>
+-- Neovim config for files opened from tos's finder. tos builds it in (crates/tos/src/server/editor.rs),
+-- writes it to its data folder and runs: NVIM_APPNAME=tfinder-nvim nvim -u <that copy> <file>
+-- It began as the zellij prototype's config (now ~/tfinder/nvim/init.lua); the two can change separately.
 -- Goal: notepad-like. Opens ready to type; markdown stays rendered while you edit.
 -- zellij owns Ctrl+S (scroll) and Ctrl+Q (quit zellij!), so saving/closing use Alt.
 

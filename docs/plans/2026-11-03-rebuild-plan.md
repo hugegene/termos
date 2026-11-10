@@ -402,6 +402,9 @@ Sizes are rough estimates.
 The prototype in `~/terminal-browser` stays in use until step 3. Its preview logic (file-type detection, the
 CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim config carry over as reference.
 
+*Changed 2026-11-10:* the prototype moved out of this repo to `~/tfinder`, which has its own git repo
+([move plan](2026-11-10-move-prototype-out.md)). `tos` keeps its Neovim config in `crates/tos/nvim/init.lua`.
+
 ## 12. Open questions
 
 1. **Product name and repo location.** The name must avoid "zellij", "Alacritty" and "tmux".

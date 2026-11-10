@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use super::pane::SpawnOptions;
 use crate::paths;
 
-/// The prototype's Neovim config (Alt+s save, Alt+q close, opens ready to type).
-const NVIM_INIT: &str = include_str!("../../../../nvim/init.lua");
+/// Our Neovim config (Alt+s save, Alt+q close, opens ready to type), which began as the zellij prototype's.
+const NVIM_INIT: &str = include_str!("../../nvim/init.lua");
 
 fn find_in_path(name: &str) -> Option<PathBuf> {
     env::split_paths(&env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file())
@@ -46,7 +46,7 @@ pub fn command(file: &Path) -> SpawnOptions {
     }
     if let (Some(nvim), Some(init)) = (find_nvim(), nvim_init()) {
         let mut env = HashMap::new();
-        // Same plugin folder the prototype's install.sh fills (render-markdown.nvim).
+        // Same plugin folder the zellij prototype's install.sh fills (render-markdown.nvim, see ~/tfinder).
         env.insert("NVIM_APPNAME".into(), "tfinder-nvim".into());
         return SpawnOptions {
             cwd,

@@ -2,12 +2,13 @@
 
 ## Project
 
-This repo holds a terminal workspace in two stages:
+This repo is **termos**, a terminal workspace in Rust. The command is `tos`; it was `tb` until 2026-11-10,
+and older docs say `tb`. It has our own multiplexer, finder and poller/webhook daemon, built around a fork of
+`alacritty_terminal`. See [docs/plans/2026-11-03-rebuild-plan.md](docs/plans/2026-11-03-rebuild-plan.md).
 
-- **The prototype (current code):** a two-pane file finder built from zellij, yazi and our own `preview.py`.
-- **The planned rebuild:** a Rust product called **termos** (the command is `tos`; it was `tb` until
-  2026-11-10, and older docs say `tb`). It has our own multiplexer, finder and poller/webhook daemon, built
-  around a fork of `alacritty_terminal`. See [docs/plans/2026-11-03-rebuild-plan.md](docs/plans/2026-11-03-rebuild-plan.md).
+The zellij prototype it grew from (`finder`, yazi and `preview.py`) moved to **`~/tfinder`** on 2026-11-10.
+That folder has its own git repo and `CLAUDE.md`. `tos` keeps its own copy of the prototype's Neovim config
+in `crates/tos/nvim/init.lua`. See [docs/plans/2026-11-10-move-prototype-out.md](docs/plans/2026-11-10-move-prototype-out.md).
 
 ## Docs workflow (always follow)
 
@@ -80,15 +81,3 @@ This applies to answers in chat and to everything in `docs/`.
 - **End-to-end tests:** `crates/tos/tests/e2e.rs` runs `tos attach` in a pseudo-terminal and reads the screen back.
   - Tests use their own socket and state folders (`TOS_SOCKET_DIR`, `TOS_STATE_DIR`), never the user's sessions.
   - Socket paths must stay under about 100 bytes, so don't put sockets in the scratchpad.
-
-## Prototype
-
-- **Files:**
-  - `finder`: the launcher; it writes a zellij layout.
-  - `bin/files`: runs yazi in the left pane.
-  - `bin/send`: sends commands to the right pane through a fifo.
-  - `preview.py`: the preview and edit pane.
-  - `yazi/`, `nvim/`, `visidata/`: configs.
-  - `install.sh`: one-time setup.
-- **Testing:** test in throwaway zellij sessions (`tftest-*`), never in the user's own session. The user's
-  zellij config binds **Ctrl+Q to quit all of zellij**.

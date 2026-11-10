@@ -1,59 +1,22 @@
-# Terminal Finder
+# termos
 
-A two-pane file finder in one zellij tab: **yazi** on the left for moving around, a
-**preview/edit pane** on the right. Built for markdown, text, CSV and images.
+termos is a terminal workspace: our own multiplexer with a file finder built in. It has persistent sessions,
+tabs, split panes, scrolling and search, and mouse support, all in one program, run as `tos`. It works on
+Linux and on Macs with Apple Silicon.
 
 ```
-┌ files (yazi) ──────┬ preview ─────────────────────────────────┐
-│ ↑↓ move            │ follows the cursor: glow / bat / table /  │
-│ Enter / e  edit ───┼→ editor opens here; quit → back to files  │
-└────────────────────┴───────────────────────────────────────────┘
+ your terminal window              background (keeps running)
+┌───────────────────┐  1 keys    ┌───────────────────────────────┐
+│ tos (client)      │──────────▶ │ tos server, session "main"     │
+│                   │ ◀──────────│  tab 1: shell │ shell          │
+└───────────────────┘  2 screen  │  tab 2: finder                 │
+                                 └───────────────────────────────┘
+ close the window or detach: the server keeps your shells running; `tos` reconnects
 ```
 
-## Install & run
+The zellij prototype that termos grew from now lives in its own folder, `~/tfinder`.
 
-```bash
-~/termos/install.sh               # once: chafa, bat, visidata, html2text, w3m, Neovim + render-markdown, `finder` command
-finder [folder]                   # inside zellij → new tab; outside → new zellij session
-```
-
-## Keys
-
-| Where | Key | Does |
-|---|---|---|
-| files | `↑↓` `j k` | move — preview follows |
-| files | `→ ←` `l h` | open folder / go up |
-| files | `Enter` `e` | edit file in the right pane (on a folder: open it) |
-| files | `o` | open with desktop app (html → your browser) |
-| files / preview | `i` (preview also `s`) | rendered ⇄ source view (markdown, html, csv) — sticks while you browse |
-| files | `q` | close the finder |
-| preview | `↑↓` `j k`, `space` `b`, `g` `G` | scroll, page, top/bottom |
-| preview | `e` / `o` / `h` `Esc` | edit / open / back to files |
-| anywhere | `Alt+h` `Alt+l` | switch panes (zellij) |
-| mouse | click folder / file | open folder / preview file |
-| mouse | double-click or right-click file | edit in the right pane |
-| mouse | click empty space in the parent column | go up |
-| mouse | wheel | move cursor (files) / scroll (preview) |
-
-| File | Preview | Edit |
-|---|---|---|
-| `.md` | glow | Neovim + render-markdown — stays rendered while you type, cursor line shows raw markdown |
-| text / code | bat | Neovim |
-| `.html` `.htm` | converted to markdown (html2text) and rendered with glow — same look as `.md`; w3m as fallback | Neovim (source) |
-| `.csv` `.tsv` | table (numbers right-aligned) | VisiData — `e` edit cell, `Alt+s` save, `q` close |
-| images | chafa | desktop app (Pinta/GIMP/Krita if installed, else default viewer) |
-
-**Neovim here is set up like a notepad:** opens ready to type, `Alt+s` save, `Alt+q` close,
-`Ctrl+z` undo. (`Ctrl+S`/`Ctrl+Q` are taken by zellij — and **Ctrl+Q quits all of zellij** in this setup.)
-
-
-## termos (`tos`): the Rust rebuild (work in progress)
-
-termos, run as `tos`, is our own multiplexer with the finder built in: persistent sessions, tabs, split
-panes, scrolling and search, and mouse support, all in one binary. See `docs/plans/2026-11-03-build-steps-0-3.md`
-and `docs/plans/2026-11-04-zellij-keys-and-frames.md`.
-
-### Install
+## Install
 
 ```bash
 curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
@@ -79,12 +42,7 @@ tos finder ~/docs # open a finder tab
 tos ls            # list sessions;  tos kill  ends one (attach again to restore it)
 ```
 
-### Development
-
-- **Build:** `cargo build --release` gives `target/release/tos`. `CLAUDE.md` lists the tests and checks.
-- **Release:** set `version` in `Cargo.toml`, commit, then push a tag `v<version>`.
-  `.github/workflows/release.yml` builds each target with `scripts/package.sh` and publishes the release
-  with `scripts/install.sh`. See `docs/plans/2026-11-09-distribution.md`.
+## Sessions
 
 Session commands are **zellij's**, with the same names, aliases and flags:
 
@@ -102,25 +60,11 @@ tos delete-all-sessions   # or: tos da; -y skips the question, -f also ends and 
 
 Unlike zellij, plain `tos` returns to "main" instead of starting a new session with a random name.
 
-**PDFs** in the finder show their text; `t` shows the pages (`+`/`-` zoom, `0` fit width, `[` `]` page). This
-needs poppler-utils (`sudo apt install poppler-utils`).
+**Sessions come back.** `tos kill`, Ctrl+q, a crash or a reboot keeps the session's layout: tabs, splits, names,
+folders and finder state. Attaching again restores it. A command that was running is typed at the prompt
+without Enter. `tos ls` shows saved sessions, and `tos delete NAME` forgets one.
 
-**Links** in a Markdown preview can be clicked: the finder shows the linked file, and `Backspace` goes back.
-
-**Extending `tos`** works through the same command line, from any language; there are no plugins. See
-[docs/cli.md](docs/cli.md) for the overview and [docs/cli/](docs/cli/README.md) for a page per command.
-
-```bash
-tos action new-pane -d right -- make test    # zellij's actions, names and flags; prints terminal_7
-tos action list-tabs -j                      # JSON with zellij's fields
-tos subscribe -f json                        # events: tabs and panes opening, closing, exiting, …
-tos action set-status --id ci "build ✓"      # text in the status bar; clicks arrive as events
-tos run -- htop                              # also: tos edit FILE, tos watch NAME
-```
-
-Keys can run commands. Add zellij-style `bind` blocks to `~/.config/termos/config.kdl`, for example
-`tab { bind "p" { Run "prbot" "ls"; SwitchToMode "Normal"; } }`. A zellij script such as `prbot` ports by
-changing `zellij` to `tos` and `ZELLIJ_*` to `TOS_*`.
+## Keys and mouse
 
 Inside a session the keys are **zellij's** (your `~/.config/zellij/config.kdl` bindings), and each pane has a
 frame like zellij's:
@@ -138,46 +82,52 @@ frame like zellij's:
 | `Ctrl+q` | quit: ends the session (asks first) |
 | `Alt+n`, `Alt+arrows`, `Alt+=`/`Alt+-`, `Alt+i`/`Alt+o` | new pane, focus, resize, move the tab |
 
-**Sessions come back.** `tos kill`, Ctrl+q, a crash or a reboot keeps the session's layout: tabs, splits, names,
-folders and finder state. Attaching again restores it. A command that was running is typed at the prompt
-without Enter. `tos ls` shows saved sessions, and `tos delete NAME` forgets one.
-
-**Finder:** images show for real in terminals that support kitty, iTerm2 or sixel images (Ghostty, kitty,
-WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one with
-`TOS_IMAGES=kitty|iterm2|sixel|blocks`. Enter on a `.csv`/`.tsv` opens a **grid editor**: arrows move, `e`
-edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Alt+s` saves and `q` closes. `E`
-opens any text file in Neovim.
-
 `Esc` or `Enter` leaves a mode; `?` in any mode shows all keys. Not in `tos` yet: floating, stacked and pinned
 panes, swap layouts, pane groups and zellij's plugins.
 
 - **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to
   select and copy (OSC 52).
-- **Finder:** `j`/`k` move, `Enter` edits in Neovim (`Alt+s` save, `Alt+q` close), `/` filters, `.` hides
+
+## Finder
+
+- **Moving and editing:** `j`/`k` move, `Enter` edits in Neovim (`Alt+s` save, `Alt+q` close), `/` filters, `.` hides
   hidden files (shown by default). Right-click a file, or press `m`, to rename it, copy its name or path, or
   delete it (to the trash; where there's no trash it asks first).
 
-## Images
+**Images** show for real in terminals that support kitty, iTerm2 or sixel images (Ghostty, kitty,
+WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one with
+`TOS_IMAGES=kitty|iterm2|sixel|blocks`. Enter on a `.csv`/`.tsv` opens a **grid editor**: arrows move, `e`
+edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Alt+s` saves and `q` closes. `E`
+opens any text file in Neovim.
 
-zellij only passes through **sixel** images. Ghostty and Terminator don't do sixel, so images are
-drawn with colored blocks (recognisable, not sharp); press `o` for the real thing. In a sixel
-terminal (WezTerm, Konsole, xterm -ti vt340) it switches to real images automatically when zellij
-was started from it, or force it:
+**PDFs** in the finder show their text; `t` shows the pages (`+`/`-` zoom, `0` fit width, `[` `]` page). This
+needs poppler (`sudo apt install poppler-utils`, or `brew install poppler` on macOS).
+
+**Links** in a Markdown preview can be clicked: the finder shows the linked file, and `Backspace` goes back.
+
+## Extending
+
+**Extending `tos`** works through the same command line, from any language; there are no plugins. See
+[docs/cli.md](docs/cli.md) for the overview and [docs/cli/](docs/cli/README.md) for a page per command.
 
 ```bash
-TFINDER_IMAGES=sixel finder     # or =symbols
+tos action new-pane -d right -- make test    # zellij's actions, names and flags; prints terminal_7
+tos action list-tabs -j                      # JSON with zellij's fields
+tos subscribe -f json                        # events: tabs and panes opening, closing, exiting, …
+tos action set-status --id ci "build ✓"      # text in the status bar; clicks arrive as events
+tos run -- htop                              # also: tos edit FILE, tos watch NAME
 ```
 
-## How it works
+Keys can run commands. Add zellij-style `bind` blocks to `~/.config/termos/config.kdl`, for example
+`tab { bind "p" { Run "prbot" "ls"; SwitchToMode "Normal"; } }`. A zellij script such as `prbot` ports by
+changing `zellij` to `tos` and `ZELLIJ_*` to `TOS_*`.
 
-- `finder` writes a one-off zellij layout + a run dir (`$XDG_RUNTIME_DIR/tfinder/<id>/`) holding a fifo.
-- Left pane `bin/files` runs yazi with this repo's `yazi/` config (your `~/.config/yazi` is untouched)
-  and a fixed `--client-id`. `yazi/init.lua` replaces yazi's click handler with the mouse behaviour above.
-- Right pane `preview.py` listens to `ya sub hover,cd` (filtered to that client id) and renders.
-- `Enter`/`e`/`o` in yazi → `yazi/plugins/tfinder.yazi` → `bin/send` → fifo → `preview.py` runs the
-  editor in its own pane, then focuses yazi again via `zellij action focus-pane-id`.
+## Development
 
-Files: `finder` · `bin/files` · `bin/send` · `preview.py` · `yazi/` · `nvim/init.lua` · `visidata/visidatarc` · `install.sh`
+- **Build:** `cargo build --release` gives `target/release/tos`. `CLAUDE.md` lists the tests and checks.
+- **Release:** set `version` in `Cargo.toml`, commit, then push a tag `v<version>`.
+  `.github/workflows/release.yml` builds each target with `scripts/package.sh` and publishes the release
+  with `scripts/install.sh`. See `docs/plans/2026-11-09-distribution.md`.
 
 ## License
 

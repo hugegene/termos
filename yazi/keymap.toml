@@ -1,8 +1,0 @@
-# Finder keys, on top of yazi's defaults.
-[mgr]
-prepend_keymap = [
-	{ on = "<Enter>", run = "plugin tfinder edit", desc = "Enter folder / edit file in the right pane" },
-	{ on = "e",       run = "plugin tfinder edit", desc = "Edit file in the right pane" },
-	{ on = "o",       run = "plugin tfinder open", desc = "Open with desktop app" },
-	{ on = "i",       run = "plugin tfinder toggle", desc = "Preview: rendered ⇄ source" },
-]
