@@ -64,26 +64,33 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
 
 - [x] Survey the code and type-check it for macOS
   ([finding](../findings/2026-11-09-macos-port-survey.md)).
-- [ ] **`os` module.**
-  - Move the Linux code from `pane.rs:143-174`, `client.rs:234` and `server/mod.rs:246` into `os/linux.rs`
-    unchanged. Then write `os/macos.rs`.
-  - Add `libc` as a direct dependency.
-  - The same-user check in `server/mod.rs` must still refuse other users on macOS. Don't drop it.
-- [ ] **Unit tests that run on both systems:** for the test process itself, check that
+- [x] **`os` module** (2026-11-10): `crates/tb/src/os/{mod,linux,macos}.rs`.
+  - The Linux code from `pane.rs`, `client.rs` and `server/mod.rs` moved to `os/linux.rs` unchanged.
+    `os/macos.rs` uses `libc`, a dependency only when building for macOS.
+  - The same-user check in `server/mod.rs` still refuses other users, through `os::peer_cred` on both
+    systems.
+  - Any other system fails to compile with "tb runs on Linux and macOS only".
+- [x] **Unit tests that run on both systems** (in `os/mod.rs`): for the test process itself,
   - `process_cwd` equals `env::current_dir()`
-  - `process_name` is the test binary's name
-  - `process_args` starts with its path
-  - `peer_cred` on a `UnixStream::pair()` gives our own uid and pid
-- [ ] **Trash on macOS:** default to `trash` and check it exists on macOS 15+ (**estimate**, not verified).
-  Fall back to telling the user to set `$TB_TRASH`. Its error text differs from gio's, so check the message
-  we show.
-- [ ] **Install hints:** the PDF message names `brew install poppler` on macOS instead of `poppler-utils`
-  (`finder-core/src/pdf.rs:43`).
-- [ ] **CI:**
-  - On Linux (cheap), add `cargo check --target aarch64-apple-darwin` and the same clippy run, so Linux-only
-    calls are caught on every push.
-  - On a `macos-14` runner, run `cargo test --workspace` with `brew install poppler` first. That runs the e2e
-    tests for real. macOS minutes cost more on private repos.
+  - `process_name` is a prefix of the test binary's name, because Linux cuts it to 15 bytes
+  - `process_args` equals `env::args()`
+  - a pid that doesn't exist gives `None` for all three
+  - `peer_cred` gives our own uid and pid on both ends of a socket.
+    - *Changed:* the plan said `UnixStream::pair()`. The test binds, connects and accepts instead, as the
+      server does, because it's unverified whether macOS gives peer credentials for a socket pair.
+  - The `KERN_PROCARGS2` parser lives in `os/mod.rs`, so its test runs on Linux too: the environment stays
+    out, and empty arguments still count.
+- [x] **Trash on macOS:** the default is `trash` (macOS 15+, an **estimate**, still not verified). When the
+  default program is missing, the message adds "$TB_TRASH can name another trash command".
+  - Still to do on the Mac: does `trash` exist, and does its error text read well after we cut it at the last
+    `: `?
+- [x] **Install hints:** the PDF message names `brew install poppler` on macOS
+  (`finder-core/src/pdf.rs`).
+- [x] **CI** (`.github/workflows/ci.yml`), added but not run yet, because it runs on the next push:
+  - On Linux (cheap), clippy also runs with `--target aarch64-apple-darwin`, so Linux-only calls are caught
+    on every push. Clippy includes `cargo check`.
+  - A `macos-14` runner runs `cargo test --workspace` after `brew install poppler`, which runs the e2e tests
+    for real. macOS minutes cost more on private repos.
 - [ ] **On the user's Mac, by hand:**
   - Images in iTerm2 and Ghostty: does `poll()` on stdin work for the terminal query (`client.rs:425`)? If not,
     use `select()`.
@@ -111,3 +118,11 @@ None at the moment. All three were answered on 2026-11-10; see the change log.
     version for Intel, so that audience is shrinking.
   - **Launch:** Linux and macOS both ship at launch. This answers open question 4 in the
     [rebuild plan](2026-11-03-rebuild-plan.md).
+- **2026-11-10:** the `os` module, its tests, the trash and PDF hints and CI are done.
+  - **Checked on Linux:** the whole workspace builds and its tests pass, the 7 new tests included. Clippy is
+    clean, and the licenses pass.
+  - **Checked for macOS, without running it:** `cargo clippy --target aarch64-apple-darwin --all-targets` is
+    clean.
+  - **Not yet run on macOS:** the macOS CI job runs on the next push. Then come the by-hand checks on the
+    user's Mac.
+  - One change from the plan: the peer test uses a real socket instead of a socket pair (see Steps).

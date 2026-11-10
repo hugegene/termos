@@ -243,7 +243,7 @@ pub struct Server {
 }
 
 fn peer_is_us(stream: &UnixStream) -> bool {
-    rustix::net::sockopt::socket_peercred(stream).is_ok_and(|c| c.uid == rustix::process::getuid())
+    crate::os::peer_cred(stream).is_ok_and(|p| p.uid == rustix::process::getuid())
 }
 
 /// Runs the server for session `name` until the session ends.

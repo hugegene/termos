@@ -16,6 +16,7 @@ use alacritty_terminal::term::{Config, Term};
 use alacritty_terminal::tty;
 
 use super::Ev;
+use crate::os;
 use crate::protocol::PaneId;
 
 /// Forwards events from a pane's terminal and I/O thread to the server's main loop.
@@ -140,36 +141,34 @@ impl TermPane {
 
     /// The shell's working folder (follows `cd`).
     pub fn cwd(&self) -> Option<PathBuf> {
-        std::fs::read_link(format!("/proc/{}/cwd", self.pid)).ok()
+        os::process_cwd(self.pid)
+    }
+
+    /// The process group in the foreground of the pane's terminal.
+    fn foreground_pgid(&self) -> Option<u32> {
+        let pgid = self.master.as_ref().and_then(|f| rustix::termios::tcgetpgrp(f).ok())?;
+        u32::try_from(pgid.as_raw_nonzero().get()).ok()
     }
 
     /// Name of the program in the foreground, for example "nvim" or "bash".
     pub fn foreground_name(&self) -> Option<String> {
-        let pgid = self.master.as_ref().and_then(|f| rustix::termios::tcgetpgrp(f).ok())?;
-        let comm = std::fs::read_to_string(format!("/proc/{}/comm", pgid.as_raw_nonzero())).ok()?;
-        Some(comm.trim().to_owned())
+        os::process_name(self.foreground_pgid()?)
     }
 
     /// The command running in the foreground, unless it's the pane's shell: what to offer again after a
     /// restore. A pipeline gives only its first command.
     pub fn running_command(&self) -> Option<Vec<String>> {
-        let pgid = self.master.as_ref().and_then(|f| rustix::termios::tcgetpgrp(f).ok())?;
-        if pgid.as_raw_nonzero().get() as u32 == self.pid {
+        let pgid = self.foreground_pgid()?;
+        if pgid == self.pid {
             // The pane's own program has the foreground: a shell, or a command it was started with.
             return (!self.command.is_empty()).then(|| self.command.clone());
         }
-        let raw = std::fs::read(format!("/proc/{}/cmdline", pgid.as_raw_nonzero())).ok()?;
-        let args: Vec<String> =
-            raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
-        (!args.is_empty()).then_some(args)
+        os::process_args(pgid)
     }
 
     /// The pane's own program and its arguments (its shell, or the command it was started with).
     pub fn program(&self) -> Option<String> {
-        let raw = std::fs::read(format!("/proc/{}/cmdline", self.pid)).ok()?;
-        let args: Vec<String> =
-            raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
-        (!args.is_empty()).then(|| args.join(" "))
+        os::process_args(self.pid).map(|args| args.join(" "))
     }
 
     /// What to call this pane: the program's title, else the foreground program's name.

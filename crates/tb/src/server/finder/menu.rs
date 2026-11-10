@@ -121,11 +121,21 @@ fn place(x: u16, row: u16, size: (u16, u16), list: Rect) -> Rect {
     Rect::new(x, y, w, h)
 }
 
-/// The command that moves a file to the trash: `$TB_TRASH` (the path is added at the end), or `gio trash --`.
+/// The command that moves a file to the trash: `$TB_TRASH` (the path is added at the end), or the system's
+/// (`gio trash --` on Linux, `trash` on macOS).
 pub fn trash_command() -> Vec<String> {
     match std::env::var("TB_TRASH") {
         Ok(c) if !c.trim().is_empty() => c.split_whitespace().map(str::to_owned).collect(),
-        _ => vec!["gio".into(), "trash".into(), "--".into()],
+        _ => crate::os::default_trash_command(),
+    }
+}
+
+/// Why the trash program can't run because it's missing. A missing default also says how to pick another.
+fn not_installed(program: &str, is_default: bool) -> String {
+    if is_default {
+        format!("'{program}' isn't installed; $TB_TRASH can name another trash command")
+    } else {
+        format!("'{program}' isn't installed")
     }
 }
 
@@ -149,7 +159,9 @@ fn trash(command: &[String], path: &Path) -> Result<(), String> {
             let reason = line.rsplit(": ").next().unwrap_or("").trim();
             Err(if reason.is_empty() { format!("'{}' failed ({})", program, out.status) } else { reason.to_owned() })
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Err(format!("'{}' isn't installed", program)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            Err(not_installed(program, command == crate::os::default_trash_command().as_slice()))
+        }
         Err(e) => Err(format!("can't run '{}': {e}", program)),
     }
 }
@@ -656,6 +668,12 @@ mod tests {
         assert_eq!(flash(press(&mut f, KeyCode::Char('y'))), "deleted 'a'");
         assert!(!dir.path().join("a").exists());
         assert_eq!(selected(&f), "b");
+    }
+
+    #[test]
+    fn a_missing_default_trash_says_how_to_pick_another() {
+        assert_eq!(not_installed("my-trash", false), "'my-trash' isn't installed");
+        assert_eq!(not_installed("trash", true), "'trash' isn't installed; $TB_TRASH can name another trash command");
     }
 
     #[test]

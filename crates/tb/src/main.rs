@@ -8,6 +8,7 @@ mod docs;
 mod kdl;
 mod keyspec;
 mod logger;
+mod os;
 mod paths;
 mod protocol;
 mod server;

@@ -39,8 +39,14 @@ pub struct Rendered {
 /// pages of text).
 const TOOL_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// How to install poppler's tools, for the message when one is missing.
+#[cfg(target_os = "macos")]
+const INSTALL_POPPLER: &str = "brew install poppler";
+#[cfg(not(target_os = "macos"))]
+const INSTALL_POPPLER: &str = "package poppler-utils";
+
 fn missing(tool: &str) -> String {
-    format!("PDF preview needs {tool} (package poppler-utils)")
+    format!("PDF preview needs {tool} ({INSTALL_POPPLER})")
 }
 
 /// poppler's message for a password-protected file is "Command Line Error: Incorrect password".

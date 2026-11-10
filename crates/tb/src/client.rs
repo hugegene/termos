@@ -231,7 +231,7 @@ pub fn kill_session(session: &str, forget: bool) -> anyhow::Result<()> {
         Ok(_) => Ok(()),
         Err(e) if e.to_string().contains("uses protocol") => {
             let stream = connect(session)?;
-            let peer = rustix::net::sockopt::socket_peercred(&stream)?;
+            let peer = crate::os::peer_cred(&stream)?;
             if peer.uid != rustix::process::getuid() {
                 bail!("session '{session}' belongs to another user");
             }

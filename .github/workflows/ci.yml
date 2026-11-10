@@ -12,11 +12,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: aarch64-apple-darwin
       # The vendored alacritty_terminal fork keeps upstream formatting and lints, so only our crates are checked.
       - run: cargo fmt -p tb -p finder-core --check
       - run: cargo clippy --no-deps -p tb -p finder-core --all-targets -- -D warnings
+      # Type-checks the macOS build here, where minutes are cheap, so a Linux-only call fails on every push.
+      - run: cargo clippy --target aarch64-apple-darwin --no-deps -p tb -p finder-core --all-targets -- -D warnings
       # The PDF preview's tests run poppler's tools (they skip, saying so, without them).
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: cargo test --workspace
+
+  # Runs every test on an Apple Silicon Mac, the end-to-end ones included.
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: brew install poppler
       - run: cargo test --workspace
 
   licenses:
