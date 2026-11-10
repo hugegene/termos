@@ -86,11 +86,12 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
     `: `?
 - [x] **Install hints:** the PDF message names `brew install poppler` on macOS
   (`finder-core/src/pdf.rs`).
-- [x] **CI** (`.github/workflows/ci.yml`), added but not run yet, because it runs on the next push:
+- [x] **CI** (`.github/workflows/ci.yml`). *First run 2026-11-10:* `check` passed. The `macos` job never
+  started, because GitHub has retired `macos-14`, so it now runs on `macos-latest`. CI runs:
   - On Linux (cheap), clippy also runs with `--target aarch64-apple-darwin`, so Linux-only calls are caught
     on every push. Clippy includes `cargo check`.
-  - A `macos-14` runner runs `cargo test --workspace` after `brew install poppler`, which runs the e2e tests
-    for real. macOS minutes cost more on private repos.
+  - A `macos-latest` runner runs `cargo test --workspace` after `brew install poppler`, which runs the e2e
+    tests for real. The repo is public, so macOS minutes are free.
 - [ ] **On the user's Mac, by hand:**
   - Images in iTerm2 and Ghostty: does `poll()` on stdin work for the terminal query (`client.rs:425`)? If not,
     use `select()`.

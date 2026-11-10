@@ -22,9 +22,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: cargo test --workspace
 
-  # Runs every test on an Apple Silicon Mac, the end-to-end ones included.
+  # Runs every test on an Apple Silicon Mac, the end-to-end ones included. `macos-latest` because GitHub
+  # retires old images: `macos-14` was gone by 2026-11-10 and the job never started.
   macos:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -35,4 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Advisories are left out: they fail on "unmaintained" notices for indirect dependencies, which isn't a
+      # license problem. Run `cargo deny check advisories` by hand to review them.
       - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses sources
