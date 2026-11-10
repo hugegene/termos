@@ -29,6 +29,18 @@ fn home() -> PathBuf {
     env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
+/// `$HOME`, then its real path if that's different, for showing a folder as `~`. A shell's folder comes from the
+/// kernel, which gives the real path: on macOS a `$HOME` under `/var` is really under `/private/var`, and a home
+/// can also sit behind a symlink on Linux. Read once.
+pub fn home_dirs() -> &'static [PathBuf] {
+    static HOMES: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    HOMES.get_or_init(|| {
+        let Some(home) = env::var_os("HOME").map(PathBuf::from) else { return Vec::new() };
+        let real = home.canonicalize().ok().filter(|real| *real != home);
+        std::iter::once(home).chain(real).collect()
+    })
+}
+
 /// Folder for logs. `TB_STATE_DIR` overrides it.
 pub fn state_dir() -> PathBuf {
     if let Some(dir) = env::var_os("TB_STATE_DIR") {

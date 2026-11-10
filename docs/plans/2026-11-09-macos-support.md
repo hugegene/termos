@@ -118,6 +118,10 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
     appears.
   - **The tests:** the e2e tests use `SHELL=/bin/dash` instead of `/bin/sh`. On macOS `/bin/sh` is bash, and
     bash as a login shell reads `/etc/bashrc`, which replaces the tests' `PS1="$ "`.
+- [x] **`~` for a home folder reached through a symlink** (2026-11-10, found by the same CI runs): the kernel
+  reports a shell's folder by its real path. On macOS, `/var/…` is really `/private/var/…`, so a tab whose
+  shell was in `$HOME` didn't show `~`. `paths::home_dirs()` now gives `$HOME` and its real path, and tab
+  labels and the finder's `~/…` use both. This also helps Linux homes that sit behind a symlink.
 
 ## Open questions
 

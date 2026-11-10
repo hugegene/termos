@@ -330,9 +330,7 @@ pub fn draw_blocks(buf: &mut Buffer, cells: &[Vec<(Color, Color)>], area: Rect) 
 }
 
 pub fn home_relative(p: &Path) -> String {
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
-        && let Ok(rest) = p.strip_prefix(&home)
-    {
+    if let Some(rest) = crate::paths::home_dirs().iter().find_map(|home| p.strip_prefix(home).ok()) {
         return if rest.as_os_str().is_empty() { "~".into() } else { format!("~/{}", rest.display()) };
     }
     p.display().to_string()

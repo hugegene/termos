@@ -2109,7 +2109,7 @@ struct PaneLook {
 
 /// What a tab without a name shows: the last part of its folder, "~" for home and "/" for the root.
 fn folder_label(dir: &std::path::Path) -> String {
-    if std::env::var_os("HOME").is_some_and(|home| std::path::Path::new(&home) == dir) {
+    if crate::paths::home_dirs().iter().any(|home| home == dir) {
         return "~".into();
     }
     match dir.file_name() {
@@ -2151,6 +2151,8 @@ mod tests {
         if let Some(home) = std::env::var_os("HOME") {
             assert_eq!(folder_label(Path::new(&home)), "~");
             assert_eq!(folder_label(&Path::new(&home).join("notes")), "notes");
+            // The kernel reports a shell's folder by its real path, which can differ from $HOME.
+            assert_eq!(folder_label(&Path::new(&home).canonicalize().unwrap()), "~");
         }
     }
 

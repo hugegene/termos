@@ -769,7 +769,8 @@ fn sessions_come_back_after_kill() {
     // The finder is two panes, its file list and its preview, linked again.
     let kinds: Vec<_> = panes.iter().map(|p| p["kind"].as_str().unwrap()).collect();
     assert_eq!(kinds, ["finder", "preview", "terminal", "terminal"], "{panes:?}");
-    assert_eq!(panes[2]["cwd"].as_str(), Some(proj.to_str().unwrap()));
+    // The kernel gives the real path: on macOS the temp folder's /var is /private/var.
+    assert_eq!(panes[2]["cwd"].as_str(), Some(proj.canonicalize().unwrap().to_str().unwrap()));
     let second = panes[3]["id"].as_u64().unwrap().to_string();
     wait("sleep typed, not run", || env.tb(&["dump-screen", "-p", &second]).contains("$ sleep 300").then_some(()));
     assert_eq!(panes[3]["title"].as_str(), Some("dash"), "the shell, not sleep, is running");
