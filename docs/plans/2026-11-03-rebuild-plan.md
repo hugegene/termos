@@ -409,6 +409,10 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
 
 1. **Product name and repo location.** The name must avoid "zellij", "Alacritty" and "tmux".
 2. **Poller and webhook server:** where is the code, what does it poll, and what events should reach the finder?
+   **Answered 2026-11-10 for the poller:** it's prbot, a Python script that searches GitHub every 60 s and opens
+   a Claude tab for each PR that needs you. It becomes its own repo (`hugegene/prbot`), runs on `tos` or zellij,
+   and drives them through the CLI as an extension ([prbot plan](2026-11-10-prbot-extension.md)). It needs none
+   of the daemon's crates. The webhook listener, the phone API and events into the finder stay open.
 3. **Neovim:** bundle it or require it?
 4. ~~**Platforms:** Linux only at launch, or macOS too?~~ **Answered 2026-11-10:** Linux and macOS on Apple
    Silicon both ship at launch, and Intel Macs are not supported ([macOS plan](2026-11-09-macos-support.md)).
@@ -477,6 +481,9 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
   and Intel Macs are not supported.
   - Step 9 tests the terminals on both systems, and iTerm2 is no longer conditional.
   - Details are in the [macOS plan](2026-11-09-macos-support.md).
+- **2026-11-10:** **the poller is prbot, an extension in its own repo** (open question 2, for the poller). It
+  drives `tos` or zellij through the CLI, so it doesn't go into the daemon. Details are in the
+  [prbot plan](2026-11-10-prbot-extension.md).
 
 ---
 

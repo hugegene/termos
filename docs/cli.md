@@ -294,3 +294,8 @@ It subscribes with `tos subscribe --format json`, remembers pane titles from `pa
 `pane_retitled`, and on a `pane_closed` with a non-zero `exit_status` runs
 `tos action set-status --id exit-watcher --ttl 30 "✗ make exited 2"`. On a `status_clicked` with that id, it
 clears the warning and runs `tos action go-to-tab-by-id`.
+
+For a full-size extension, see [prbot](https://github.com/hugegene/prbot). It watches GitHub for PRs that need
+you and opens a tab with Claude for each, in a background session it starts with `tos attach --create-background`.
+It finds its own tab through `TOS_PANE_ID` and `list-panes -j`. Because `tos` copied zellij's commands, the same
+script drives zellij too: only the program name and the pane variables change.

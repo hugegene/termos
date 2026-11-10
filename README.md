@@ -109,6 +109,8 @@ needs poppler (`sudo apt install poppler-utils`, or `brew install poppler` on ma
 
 **Extending `tos`** works through the same command line, from any language; there are no plugins. See
 [docs/cli.md](docs/cli.md) for the overview and [docs/cli/](docs/cli/README.md) for a page per command.
+[prbot](https://github.com/hugegene/prbot) is a full-size example: it opens a Claude tab for each GitHub PR that
+needs you.
 
 ```bash
 tos action new-pane -d right -- make test    # zellij's actions, names and flags; prints terminal_7
