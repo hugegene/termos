@@ -192,7 +192,8 @@ mod tests {
             let res = run(sh("exec sleep 5"), 100, None, &|| flag.load(Ordering::Relaxed), "");
             assert!(matches!(res, Err(ToolError::Cancelled)), "{res:?}");
         });
-        assert!(start.elapsed() < Duration::from_millis(130), "{:?}", start.elapsed());
+        // Far less than `sleep`'s 5 s. Loose, because shared CI runners are slow: macOS took 170 ms once.
+        assert!(start.elapsed() < Duration::from_secs(1), "{:?}", start.elapsed());
     }
 
     #[test]
@@ -200,6 +201,7 @@ mod tests {
         let start = Instant::now();
         let res = run(sh("exec sleep 5"), 100, Some(Duration::from_millis(50)), &|| false, "");
         assert!(matches!(res, Err(ToolError::TimedOut)), "{res:?}");
-        assert!(start.elapsed() < Duration::from_millis(150), "{:?}", start.elapsed());
+        // Far less than `sleep`'s 5 s. Loose, because shared CI runners are slow: macOS took 170 ms once.
+        assert!(start.elapsed() < Duration::from_secs(1), "{:?}", start.elapsed());
     }
 }
