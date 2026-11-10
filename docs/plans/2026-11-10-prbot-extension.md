@@ -1,9 +1,10 @@
 # Plan: prbot, the GitHub poller, as its own repo that runs on `tos` or zellij
 
-**Status:** built and published (https://github.com/hugegene/prbot); the check on your Mac (Y3) is next · **Date:** 2026-11-10 · **Answers:** the [rebuild plan](2026-11-03-rebuild-plan.md)'s open
+**Status:** built and published (https://github.com/hugegene/prbot), with `MUX=auto` (P8); the check on your Mac (Y3) is next · **Date:** 2026-11-10 · **Answers:** the [rebuild plan](2026-11-03-rebuild-plan.md)'s open
 question 2, for the poller · **Builds on:** [the CLI as the extension API](2026-11-05-cli-extensions.md) (step 6) ·
 **Findings:** [prbot on `tb`](../findings/2026-11-05-prbot-on-tb.md),
-[prbot on `tos` and zellij](../findings/2026-11-10-prbot-on-tos-and-zellij.md)
+[prbot on `tos` and zellij](../findings/2026-11-10-prbot-on-tos-and-zellij.md),
+[starting it from inside a pane](../findings/2026-11-11-prbot-mux-auto.md)
 
 ## Decision
 
@@ -97,6 +98,8 @@ With `MUX=zellij`, every arrow is the same command with `zellij` in place of `to
 
 ## How the switch works in prbot
 
+*Added 2026-11-10:* `MUX=auto` picks the multiplexer you run `./bin/start` in (P8, below).
+
 - **One place:** `prbot.py` gets one constant for the program and a two-row table of variable names. `zj()`,
   `session_running()`, `ensure_session()`, `own_tab_id()` and the close-later path use them.
 - **Settings:**
@@ -120,6 +123,39 @@ With `MUX=zellij`, every arrow is the same command with `zellij` in place of `to
   - **Why in `config.env`:** git ignores it, so a user's own prompts never conflict when they pull updates.
 - **Version check:** with `MUX=tos`, `prbot.py start` reads `tos --version`. If the extension API is older than
   2, it stops and says to run `tos update`. There's no check for zellij.
+
+## `MUX=auto`: the multiplexer you start it in (added 2026-11-10)
+
+- **`MUX=auto`** becomes the default in `config.example.env`. `MUX=tos` and `MUX=zellij` work as before and
+  always win. Your own config says `MUX=zellij`, so nothing changes for you unless you set it to `auto`.
+- **`./bin/start` looks at your pane's variables:**
+
+  | You run it in | Your pane has | It uses |
+  |---|---|---|
+  | a `tos` pane | `TOS_SESSION` and `TOS_PANE_ID` | `tos` |
+  | a zellij pane | `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID` | `zellij` |
+  | a plain terminal | neither | the only one installed; with both installed, it asks you to set `MUX` |
+  | one inside the other | both | it can't tell which is the inner one, so it asks you to set `MUX` |
+
+  Either way, prbot opens its own background session (`SESSION`). It doesn't put tabs into the session you're
+  typing in.
+- **The choice is remembered.** `start` writes it to the file `mux` next to `state.json`, which git ignores.
+  Every other command (`ls`, `new-job`, `cleanup`, `done`, Claude's hooks) uses that file, wherever you type
+  it. Without the file, they use your pane's variables, then the only one installed.
+
+  ```
+   1. in a zellij pane:  ./bin/start        → zellij; writes "zellij" to mux; session "prbot" in zellij
+   2. later, in a tos pane:  ./bin/prbot ls → reads mux → lists the zellij session's tabs
+   3. in that tos pane:  ./bin/start        → the poller is running in zellij → says so, starts nothing
+  ```
+- **Switching:** run `./bin/stop`, then `./bin/start` in the other multiplexer. Job tabs still open in the old
+  one keep running there, but prbot no longer sees them.
+- **prbot leaves every pane variable out when it runs `tos` or zellij.** Both start a session fine from inside a
+  pane, but zellij passes the caller's environment on to its tabs. Without this, a zellij session started from a
+  `tos` pane would give its tabs `TOS_*` variables, so they'd look like they're inside both
+  ([finding](../findings/2026-11-11-prbot-mux-auto.md)).
+- **`./bin/prbot check`** says which one is in use and why ("you're in a zellij pane", "remembered from
+  `./bin/start`", "the only one installed").
 
 ## macOS
 
@@ -164,8 +200,9 @@ up two things that only work on Linux:
 | | `terminal-notifier` | ❌ Another install, from Homebrew |
 | Process check on macOS | **`lsof`** | ✅ Comes with macOS, and also works on Linux, so the Linux side can test it |
 | | `ps` | ❌ It can't show a process's working folder |
-| Choosing it | **A setting** | ✅ Predictable |
-| | Whichever one is installed | ❌ Ambiguous when both are, as on your machine |
+| Choosing it | **A setting, with `auto`** (added 2026-11-10) | ✅ `auto` uses the one you start it in; `tos` and `zellij` still pin it |
+| | Whichever one is installed | ❌ Ambiguous when both are, as on your machine. `auto` uses it only as the last resort |
+| | Detect on every command | ❌ `./bin/prbot ls` typed in the other one would look in the wrong place. `start` remembers instead |
 
 ## Steps
 
@@ -219,6 +256,11 @@ and lands in one step.
      with today's review message, so nothing about your tabs changes. Then `cd ~/prbot && ./bin/start`.
   5. Remove the `~/claudehook` link once the old tabs have closed.
 
+- [x] **P8. `MUX=auto`** (added 2026-11-10): detection and the `mux` file, `start` refusing to start a second
+  poller in the other multiplexer, `check` saying how it chose, and the README and example config. Tests run
+  with the pane variables cleared, because they may themselves run inside zellij or `tos`. Built in a separate
+  copy, then merged, like P2–P6.
+
 ### In termos
 
 - [x] **T1.** `docs/cli.md`, under "Example extension": a paragraph linking prbot as the full-size example.
@@ -269,3 +311,9 @@ and lands in one step.
 - **2026-11-10:** published at your request: https://github.com/hugegene/prbot (public, MIT), pushed as
   `hugegene` through the same credential helper termos uses. The termos changes (T1, T2, this plan and the
   finding) were committed and pushed with it.
+- **2026-11-10:** `MUX=auto` added at your request: `start` uses the multiplexer it's run in and remembers it
+  (P8).
+- **2026-11-11:** P8 built and merged into prbot's `main` (`3ad5662`, not pushed yet), with 26 tests on Python
+  3.12 and 3.9. One addition to the plan: prbot leaves the pane variables out when it runs either program,
+  because zellij passed them on to its tabs ([finding](../findings/2026-11-11-prbot-mux-auto.md)). Your poller
+  is unaffected: your config says `MUX=zellij`.
