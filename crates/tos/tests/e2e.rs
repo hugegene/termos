@@ -707,9 +707,10 @@ fn tabs_are_named_after_the_working_folder() {
     s.wait_for("$");
     s.send(format!("cd {}\r", proj.display()).as_bytes());
     s.wait_for(" 1 proj ");
-    // The frame follows the running program. `cat` starts half a second after the last output and prints
+    // The frame follows the running program. `cat` starts two seconds after the last output and prints
     // nothing, so the frame must update without any output to trigger it. The tab keeps the folder.
-    s.send(b"sleep 0.5; cat\r");
+    // Two seconds, not less: a slow CI runner once missed the "sleep" frame in half a second.
+    s.send(b"sleep 2; cat\r");
     s.wait_for("┌ sleep ");
     s.wait_for("┌ cat ");
     s.wait_for(" 1 proj ");
