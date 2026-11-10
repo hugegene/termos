@@ -228,7 +228,10 @@ pub fn forget_saved(session: &str) -> anyhow::Result<()> {
 /// directly (it's ours: the socket only accepts our user).
 pub fn kill_session(session: &str, forget: bool) -> anyhow::Result<()> {
     match command(session, Command::Kill { forget }) {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            wait_until_ended(session);
+            Ok(())
+        }
         Err(e) if e.to_string().contains("uses protocol") => {
             let stream = connect(session)?;
             let peer = crate::os::peer_cred(&stream)?;
@@ -241,6 +244,17 @@ pub fn kill_session(session: &str, forget: bool) -> anyhow::Result<()> {
             Ok(())
         }
         Err(e) => Err(e),
+    }
+}
+
+/// The server answers `Kill` before it shuts down: it then saves the session and removes its socket. Waits for
+/// that (up to 5 s), so a `tb ls` or `tb attach` straight after sees the session ended and saved, not a server on
+/// its way out.
+fn wait_until_ended(session: &str) {
+    let sock = paths::socket_path(session);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while sock.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
     }
 }
 

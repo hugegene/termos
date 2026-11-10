@@ -290,8 +290,9 @@ pub fn run(name: &str, run_commands: bool) -> anyhow::Result<()> {
         server.restore(saved, run_commands);
     }
     server.main_loop(rx);
-    let _ = fs::remove_file(&sock);
-    log::info!("session {name} ended");
+    // By its current name: `rename-session` moves the socket.
+    let _ = fs::remove_file(paths::socket_path(&server.name));
+    log::info!("session {} ended", server.name);
     Ok(())
 }
 
