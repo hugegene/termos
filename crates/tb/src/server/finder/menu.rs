@@ -640,7 +640,8 @@ mod tests {
     fn delete_moves_to_the_trash() {
         let (dir, mut f, _rx) = setup();
         let trash = tempfile::tempdir().unwrap();
-        f.trash = vec!["mv".into(), "-t".into(), trash.path().display().to_string(), "--".into()];
+        // The path is added last, so in the script $0 is the trash folder and $1 the file. (macOS's mv has no -t.)
+        f.trash = vec!["sh".into(), "-c".into(), r#"mv -- "$1" "$0""#.into(), trash.path().display().to_string()];
         press(&mut f, KeyCode::Char('j'));
         press(&mut f, KeyCode::Char('m'));
         assert_eq!(flash(press(&mut f, KeyCode::Char('d'))), "moved 'b' to the trash");
