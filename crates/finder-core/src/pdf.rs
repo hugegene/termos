@@ -308,8 +308,10 @@ mod tests {
         if !have_poppler() {
             return;
         }
+        // The wording is poppler's and changes between versions: 24.02 (Ubuntu) says "Couldn't find trailer
+        // dictionary", Homebrew's newer poppler says "Invalid XRef entry 0". Only check that a reason came back.
         match info(&data("truncated.pdf"), NEVER) {
-            Err(ToolError::Failed(msg)) => assert!(msg.contains("trailer"), "{msg}"),
+            Err(ToolError::Failed(msg)) => assert!(msg.starts_with("Syntax Error"), "{msg}"),
             other => panic!("{other:?}"),
         }
         match info(&data("locked.pdf"), NEVER) {
