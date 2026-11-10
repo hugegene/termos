@@ -52,7 +52,7 @@ meaning. Failures exit non-zero with the message on stderr.
 | `tos attach [NAME]` (`a`), `tos -s NAME` | Attach, starting the session if needed. `-b` starts it without attaching, `--forget` drops its saved layout first, `-f` runs restored commands, `-c` is accepted |
 | `tos start [NAME]` | Start without attaching |
 | `tos list-sessions` (`ls`) | zellij's shape: `NAME [2 tabs, 1 attached] (current)`, `NAME (EXITED - attach to restore)`. `-s` names only, `-r` reversed, `-n` accepted |
-| `tos kill-session [NAME]` (`k`), `tos kill-all-sessions` (`ka`) | End sessions; layouts are kept for next time. `-y` skips the question |
+| `tos kill-session [NAME]` (`k`), `tos kill-all-sessions` (`ka`) | End sessions; layouts are kept for next time. `kill-all-sessions` asks first, unless `-y` |
 | `tos delete-session [NAME]` (`d`), `tos delete-all-sessions` (`da`) | Forget saved layouts. `-f` also ends running sessions |
 | `tos watch [NAME]` (`w`) | Show a session read-only; `q` or Ctrl+C stops |
 | `tos run [-d right\|down] [-n NAME] [--cwd DIR] [-s] [--] COMMAND…` (`r`) | A new pane running COMMAND; prints its id. `-s` types it at a shell's prompt without running it |

@@ -1,6 +1,6 @@
 # Plan: prbot, the GitHub poller, as its own repo that runs on `tos` or zellij
 
-**Status:** built and published (https://github.com/hugegene/prbot), with `MUX=auto` (P8); the check on your Mac (Y3) is next · **Date:** 2026-11-10 · **Answers:** the [rebuild plan](2026-11-03-rebuild-plan.md)'s open
+**Status:** built and published (https://github.com/hugegene/prbot), with `MUX=auto` (P8) and `SESSION=auto` (P9); the check on your Mac (Y3) is next · **Date:** 2026-11-10 · **Answers:** the [rebuild plan](2026-11-03-rebuild-plan.md)'s open
 question 2, for the poller · **Builds on:** [the CLI as the extension API](2026-11-05-cli-extensions.md) (step 6) ·
 **Findings:** [prbot on `tb`](../findings/2026-11-05-prbot-on-tb.md),
 [prbot on `tos` and zellij](../findings/2026-11-10-prbot-on-tos-and-zellij.md),
@@ -157,6 +157,40 @@ With `MUX=zellij`, every arrow is the same command with `zellij` in place of `to
 - **`./bin/prbot check`** says which one is in use and why ("you're in a zellij pane", "remembered from
   `./bin/start`", "the only one installed").
 
+## `SESSION=auto`: the session you start it in (added 2026-11-11)
+
+Your choices: `MUX` and `SESSION` both default to `auto`. Outside any session, prbot uses its own session,
+`prbot`, and creates it if it isn't running.
+
+- **`./bin/start` typed in a tab of a session joins that session.** The poller's tab, and every job tab after
+  it, open beside your own tabs. Each job tab opens without taking focus from yours.
+
+  ```
+   SESSION=prbot (before):                  SESSION=auto, ./bin/start typed in a tab of "main":
+   tos session "main"   tos session "prbot" tos session "main"
+    ├─ your tabs         ├─ home             ├─ your tabs
+    └─ ...               ├─ poller           ├─ poller        ← ./bin/start put it here
+                         └─ rev-487          └─ rev-487       ← jobs open beside your tabs
+  ```
+- **Typed outside any session** (a plain terminal), it uses prbot's own session, `prbot`:
+  - if one is running, in `tos` or zellij, it uses that one, and with `MUX=auto` that also picks the
+    multiplexer;
+  - if none is running, it creates it in the background, as before. With `MUX=auto`, that's in the only
+    multiplexer installed, or it asks you to set `MUX` when both are.
+- **Ending your session ends prbot too.** `Ctrl+q` in `tos` ends the session with the poller and its job tabs;
+  detaching doesn't. When you attach to an ended `tos` session again, the `poller` tab comes back with its
+  command typed at the prompt but not run (`tos attach -f` runs it).
+- **prbot never creates, deletes or renames a session it took from your pane.** Before, when its session wasn't
+  running, it deleted the saved layout and started a fresh one. That's still what happens to `prbot` and to a
+  session named in `SESSION`. A session of yours that isn't running makes the command stop with a message
+  instead.
+- **Remembered:** `start` writes the multiplexer and the session to the file `started` (git ignores it), which
+  replaces `mux`. Every other command uses it. A poller already running somewhere else makes `start` say where,
+  and how to move it, instead of starting a second one.
+- **`stop`** no longer suggests `kill-session` when the session is yours.
+- **Settings:** `SESSION=prbot` (or any name) pins the session, as before, and `ZELLIJ_SESSION` is still read.
+  Your own `config.env` says `SESSION=prbot` (from P7), so landing P9 changes it to `auto`, as you asked.
+
 ## macOS
 
 `tos` runs on macOS ([macOS plan](2026-11-09-macos-support.md)), so prbot should too. Reading `prbot.py` turned
@@ -261,6 +295,18 @@ and lands in one step.
   with the pane variables cleared, because they may themselves run inside zellij or `tos`. Built in a separate
   copy, then merged, like P2–P6.
 
+- [x] **P9. `SESSION=auto`** (added 2026-11-11): as above. Tests:
+  - joining a session the test creates first, with its first tab left as it was and no `prbot` session made;
+  - stopping from outside it, without a `kill-session` hint;
+  - after that session ends, prbot refuses to start it, and its saved layout is still listed;
+  - outside any session: the `prbot` session is created, and with stand-in programs, the multiplexer whose
+    `prbot` session runs is the one chosen.
+
+  All tests point both multiplexers at a throwaway socket folder and `HOME`, so none of them can see your
+  sessions. The new code looks for a running `prbot` session in both, so that matters now. Each test also
+  checks that the session servers it started are gone, after a `tos` server from a by-hand experiment on
+  2026-11-11 was left running.
+
 ### In termos
 
 - [x] **T1.** `docs/cli.md`, under "Example extension": a paragraph linking prbot as the full-size example.
@@ -313,7 +359,16 @@ and lands in one step.
   finding) were committed and pushed with it.
 - **2026-11-10:** `MUX=auto` added at your request: `start` uses the multiplexer it's run in and remembers it
   (P8).
-- **2026-11-11:** P8 built and merged into prbot's `main` (`3ad5662`, not pushed yet), with 26 tests on Python
+- **2026-11-11:** P8 built and merged into prbot's `main` (`3ad5662`, pushed), with 26 tests on Python
   3.12 and 3.9. One addition to the plan: prbot leaves the pane variables out when it runs either program,
   because zellij passed them on to its tabs ([finding](../findings/2026-11-11-prbot-mux-auto.md)). Your poller
   is unaffected: your config says `MUX=zellij`.
+- **2026-11-11:** `SESSION=auto` added at your request (P9), with both settings defaulting to `auto`, and the
+  `prbot` session used, or created, when `./bin/start` is typed outside any session.
+- **2026-11-11:** P9 built and merged into prbot's `main` (`0c8b43c`), with 32 tests on Python 3.12 and 3.9. Your
+  `config.env` now says `SESSION=auto`, and the old `mux` file is gone (`started` replaces it). Found on the way:
+  - `tos kill` takes no `-y`; only `kill-all-sessions` does. `docs/cli.md` read as if both did, so it's fixed. The
+    `tos` server from the by-hand experiment was left running because of it, and has been stopped.
+  - Your zellij workspace session is named `prbot`, so outside any session prbot now joins it, as the rule says.
+  - Your `tos` sessions `main` and `prbot` ended at 00:22:36 and 00:22:42, taking the poller with them. Nothing
+    of Claude's ran `tos` then; the tests first ran after 00:24.
