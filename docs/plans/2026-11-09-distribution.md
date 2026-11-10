@@ -6,7 +6,7 @@ People install `tos` with one line, without Rust and without sudo:
 
 *Changed 2026-11-10:* the product is called **termos** and the command **`tos`**; it was `tb`
 ([rename plan](2026-11-10-rename-to-termos.md)). This plan now uses the new names, except where it describes
-release v0.1.1, which was still `tb`. Until `v0.2.0` is released, the one-liner installs `tb 0.1.1`.
+release v0.1.1, which was still `tb`. Since v0.2.0 (released the same day), the one-liner installs `tos`.
 
 ```sh
 curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
@@ -196,6 +196,9 @@ change, nothing is needed until the next restart.
     runners, and two real bugs. On macOS, shells now start without `/usr/bin/login`, and `~` is recognised by
     its real path ([macOS plan](2026-11-09-macos-support.md)). `tb kill` now waits until the session has ended,
     and a renamed session removes its socket.
+- [x] **Release `v0.2.0`, the first as termos / `tos`** (2026-11-10): built in 2 minutes. The one-liner
+  upgrades a `tb 0.1.1` install, with the note about the old `tb`, and installs fresh on Ubuntu 22.04
+  ([finding](../findings/2026-11-10-release-v0.2.0.md)).
 - [x] **README** (2026-11-10): the tos section has an Install part with the one-liner, then a Development part
   with `cargo build --release` and how to release.
 - [ ] **Later:**

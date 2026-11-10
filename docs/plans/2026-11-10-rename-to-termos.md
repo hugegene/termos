@@ -27,6 +27,7 @@ The user picked the names on 2026-11-10: the product is **termos** (as the repo 
   `CLAUDE.md`, `docs/cli.md`, `docs/cli/` (regenerated), and the open parts of the
   [distribution](2026-11-09-distribution.md) and [macOS](2026-11-09-macos-support.md) plans.
 - **No release in this change.** Until `v0.2.0` is tagged, the one-liner still installs `tb 0.1.1`.
+  - *2026-11-10:* `v0.2.0` was released after this change ([finding](../findings/2026-11-10-release-v0.2.0.md)).
 
 *Done 2026-11-10.* Checked:
 - `tos --version` prints `tos 0.2.0 (extension API 2)`.
