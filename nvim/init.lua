@@ -1,5 +1,5 @@
 -- Neovim config used only by the terminal finder:
---   NVIM_APPNAME=tfinder-nvim nvim -u ~/terminal-browser/nvim/init.lua <file>
+--   NVIM_APPNAME=tfinder-nvim nvim -u ~/termos/nvim/init.lua <file>
 -- Goal: notepad-like. Opens ready to type; markdown stays rendered while you edit.
 -- zellij owns Ctrl+S (scroll) and Ctrl+Q (quit zellij!), so saving/closing use Alt.
 

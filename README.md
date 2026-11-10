@@ -13,7 +13,7 @@ A two-pane file finder in one zellij tab: **yazi** on the left for moving around
 ## Install & run
 
 ```bash
-~/terminal-browser/install.sh     # once: chafa, bat, visidata, html2text, w3m, Neovim + render-markdown, `finder` command
+~/termos/install.sh               # once: chafa, bat, visidata, html2text, w3m, Neovim + render-markdown, `finder` command
 finder [folder]                   # inside zellij → new tab; outside → new zellij session
 ```
 
