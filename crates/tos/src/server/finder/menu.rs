@@ -121,10 +121,10 @@ fn place(x: u16, row: u16, size: (u16, u16), list: Rect) -> Rect {
     Rect::new(x, y, w, h)
 }
 
-/// The command that moves a file to the trash: `$TB_TRASH` (the path is added at the end), or the system's
+/// The command that moves a file to the trash: `$TOS_TRASH` (the path is added at the end), or the system's
 /// (`gio trash --` on Linux, `trash` on macOS).
 pub fn trash_command() -> Vec<String> {
-    match std::env::var("TB_TRASH") {
+    match std::env::var("TOS_TRASH") {
         Ok(c) if !c.trim().is_empty() => c.split_whitespace().map(str::to_owned).collect(),
         _ => crate::os::default_trash_command(),
     }
@@ -133,7 +133,7 @@ pub fn trash_command() -> Vec<String> {
 /// Why the trash program can't run because it's missing. A missing default also says how to pick another.
 fn not_installed(program: &str, is_default: bool) -> String {
     if is_default {
-        format!("'{program}' isn't installed; $TB_TRASH can name another trash command")
+        format!("'{program}' isn't installed; $TOS_TRASH can name another trash command")
     } else {
         format!("'{program}' isn't installed")
     }
@@ -674,13 +674,13 @@ mod tests {
     #[test]
     fn a_missing_default_trash_says_how_to_pick_another() {
         assert_eq!(not_installed("my-trash", false), "'my-trash' isn't installed");
-        assert_eq!(not_installed("trash", true), "'trash' isn't installed; $TB_TRASH can name another trash command");
+        assert_eq!(not_installed("trash", true), "'trash' isn't installed; $TOS_TRASH can name another trash command");
     }
 
     #[test]
     fn folders_go_with_their_contents_and_links_without_their_targets() {
         let (dir, mut f, _rx) = setup();
-        f.trash = vec!["/nonexistent/tb-trash".into()];
+        f.trash = vec!["/nonexistent/tos-trash".into()];
         let outside = tempfile::tempdir().unwrap();
         std::fs::write(outside.path().join("keep"), "k").unwrap();
         std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
@@ -692,7 +692,7 @@ mod tests {
         press(&mut f, KeyCode::Char('m'));
         press(&mut f, KeyCode::Char('d'));
         let text = words(&f);
-        assert!(text.contains("'/nonexistent/tb-trash' isn't installed."), "{text}");
+        assert!(text.contains("'/nonexistent/tos-trash' isn't installed."), "{text}");
         assert!(text.contains("Delete the folder and everything in it for good? y / n"), "{text}");
         press(&mut f, KeyCode::Char('y'));
         assert!(!dir.path().join("dir").exists());

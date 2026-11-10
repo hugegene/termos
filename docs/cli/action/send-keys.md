@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb action send-keys`
+# `tos action send-keys`
 
 Send keys, e.g. "Ctrl a" "F1" "Alt Shift b" Enter
 
 ```
-tb action send-keys [OPTIONS] <KEYS>...
+tos action send-keys [OPTIONS] <KEYS>...
 ```
 
 ## Arguments
@@ -24,8 +24,8 @@ tb action send-keys [OPTIONS] <KEYS>...
 ## Examples
 
 ```sh
-tb action send-keys "Ctrl c"
-tb action send-keys -p 3 Up Enter
+tos action send-keys "Ctrl c"
+tos action send-keys -p 3 Up Enter
 ```
 
 See also: [all commands](../README.md) · [the overview](../../cli.md)

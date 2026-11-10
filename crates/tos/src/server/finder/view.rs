@@ -767,11 +767,12 @@ mod tests {
 
     #[test]
     fn links_in_tables() {
-        let md = "> | cmd | about |\n> |---|---|\n> | [`tb ls`](ls.md) | lists |\n> | x [a long name](long.md) | y |\n";
+        let md =
+            "> | cmd | about |\n> |---|---|\n> | [`tos ls`](ls.md) | lists |\n> | x [a long name](long.md) | y |\n";
         let found = links(md, 18);
         // In a quote, after "│ ". The second link is cut with the cell, at its "…".
         assert_eq!(text(&markdown(md, 18).0)[3], "│ x a lon… │ y");
-        assert_eq!(found, [(2, "tb ls".into(), "ls.md".into()), (3, "a lon…".into(), "long.md".into())]);
+        assert_eq!(found, [(2, "tos ls".into(), "ls.md".into()), (3, "a lon…".into(), "long.md".into())]);
     }
 
     #[test]

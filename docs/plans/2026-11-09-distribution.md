@@ -2,7 +2,11 @@
 
 ## Decision
 
-People install `tb` with one line, without Rust and without sudo:
+People install `tos` with one line, without Rust and without sudo:
+
+*Changed 2026-11-10:* the product is called **termos** and the command **`tos`**; it was `tb`
+([rename plan](2026-11-10-rename-to-termos.md)). This plan now uses the new names, except where it describes
+release v0.1.1, which was still `tb`. Until `v0.2.0` is released, the one-liner installs `tb 0.1.1`.
 
 ```sh
 curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
@@ -24,15 +28,15 @@ curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.s
     must include it.
   - *Changed 2026-11-10:* no Intel Mac build (`x86_64-apple-darwin`). `install.sh` tells Intel Mac users
     it isn't supported.
-- **What's in each download:** the stripped `tb` binary, `THIRD_PARTY_NOTICES.md` (from `cargo-about`), our
-  license text and a short README, packed as `tb-<target>.tar.gz` plus a `.sha256` file. Inside is one folder,
-  `tb-<version>-<target>/`.
+- **What's in each download:** the stripped `tos` binary, `THIRD_PARTY_NOTICES.md` (from `cargo-about`), our
+  license text and a short README, packed as `tos-<target>.tar.gz` plus a `.sha256` file. Inside is one folder,
+  `tos-<version>-<target>/`.
   - *Changed 2026-11-10:* the file name has no version (it was `tb-<version>-<target>.tar.gz`). That way
-    `install.sh` can fetch `/releases/latest/download/tb-<target>.tar.gz` without first asking GitHub's API
+    `install.sh` can fetch `/releases/latest/download/tos-<target>.tar.gz` without first asking GitHub's API
     which version is the latest. The release's tag carries the version.
 - **Optional tools stay separate.** Neovim, poppler (PDF), ffmpeg (video) and gio (trash) are installed by
-  the user. `tb` already says which package is missing. Running them as separate programs also keeps their
-  GPL/LGPL off `tb` ([video plan](2026-11-07-video-and-office-previews.md)).
+  the user. `tos` already says which package is missing. Running them as separate programs also keeps their
+  GPL/LGPL off `tos` ([video plan](2026-11-07-video-and-office-previews.md)).
 
 ### Example: releasing 0.2.0 and a friend installing it
 
@@ -46,8 +50,8 @@ the same day for one public repo.
                       │ ┌──────────────────────────┐     ┌──────────────────────────────────┐ │
 ┌──────────────┐      │ │ Actions runner, one per  │ 2   │ Release v0.2.0, files stored:    │ │
 │ bump version │  1   │ │ target: a throwaway VM   │────▶│   install.sh                     │ │
-│ git tag      │─────▶│ │ cargo build --release,   │ gh  │   tb-<target>.tar.gz             │ │
-│ git push     │ tag  │ │ strip, notices, tar,     │     │   tb-<target>.tar.gz.sha256      │ │
+│ git tag      │─────▶│ │ cargo build --release,   │ gh  │   tos-<target>.tar.gz            │ │
+│ git push     │ tag  │ │ strip, notices, tar,     │     │   tos-<target>.tar.gz.sha256     │ │
 └──────────────┘      │ │ sha256. VM wiped after.  │     │                                  │ │
                       │ └──────────────────────────┘     └─────────────────┬────────────────┘ │
                       │    served from GitHub's download CDN               │                  │
@@ -56,37 +60,37 @@ the same day for one public repo.
                                                              4 tarball and ▼ .sha256
                                                         ┌────────────────────────────────────┐
                                                         │ friend's Ubuntu 22.04: curl … | sh │
-                                                        │ 5 check sha256, put tb in          │
-                                                        │   ~/.local/bin/tb                  │
+                                                        │ 5 check sha256, put tos in         │
+                                                        │   ~/.local/bin/tos                 │
                                                         └────────────────────────────────────┘
 ```
 
 1. On the dev box: set `version = "0.2.0"` in `Cargo.toml`, commit, `git tag v0.2.0`, push the tag to
    `termos`.
-2. The release workflow starts one throwaway runner per target. Each checks that the tag matches `tb --version`
-   (`tb 0.2.0 (extension API 1)`), builds and packs. Then `gh release create` uploads the files to release
+2. The release workflow starts one throwaway runner per target. Each checks that the tag matches `tos --version`
+   (`tos 0.2.0 (extension API 2)`), builds and packs. Then `gh release create` uploads the files to release
    `v0.2.0` in `termos`, using the workflow's built-in `GITHUB_TOKEN`. The runner is deleted after the job. From
    then on, the binaries are stored only as files on that release.
 3. The friend runs the one-liner, which downloads `install.sh` from the release. It runs `uname -sm` and gets
    `Linux x86_64`, so it picks `x86_64-unknown-linux-gnu`.
-4. It downloads `tb-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`. It uses GitHub's
+4. It downloads `tos-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`. It uses GitHub's
    `/releases/latest/download/…` link, which redirects to GitHub's download CDN.
-5. It checks the checksum, unpacks, and runs the new `tb --version`. That catches a glibc that's too old before
-   anything is replaced. It then puts `tb` in `~/.local/bin`, warning if that folder isn't on `PATH`, and prints
-   `installed tb 0.2.0 (extension API 1)`.
+5. It checks the checksum, unpacks, and runs the new `tos --version`. That catches a glibc that's too old before
+   anything is replaced. It then puts `tos` in `~/.local/bin`, warning if that folder isn't on `PATH`, and prints
+   `installed tos 0.2.0 (extension API 2)`.
 
 **Where the binary is at each point:**
 
 - **During the build:** on the runner, a throwaway VM that's deleted when the job ends.
 - **After the release:** as a file attached to the release in `termos`, not in its git history.
-- **On the user's machine:** in `~/.local/bin/tb`.
+- **On the user's machine:** in `~/.local/bin/tos`.
 
 **Who pays:** nobody. Standard GitHub-hosted runners are free in public repos, macOS included, and release
 downloads have no bandwidth limit ([finding](../findings/2026-11-10-github-actions-cost.md)).
 
 **Upgrading with a session running:** the old server keeps running the old binary. If the protocol changed
-(`PROTOCOL_VERSION`, now 3), `tb` refuses to attach and says to run `tb kill`. `tb kill` can end servers
-started by an older `tb` (`client.rs:229`), and attaching again restores the session. If the protocol didn't
+(`PROTOCOL_VERSION`, now 3), `tos` refuses to attach and says to run `tos kill`. `tos kill` can end servers
+started by an older `tos` (`client.rs:229`), and attaching again restores the session. If the protocol didn't
 change, nothing is needed until the next restart.
 
 ## Options considered
@@ -148,27 +152,27 @@ change, nothing is needed until the next restart.
     systems stop with a reason.
   - **Downloads** with `curl`, falling back to `wget`, and checks the SHA-256 with `sha256sum` (or
     `shasum -a 256` on macOS).
-  - **Runs the new `tb --version` before installing.** If it won't run (for example, glibc older than 2.34), it
-    stops with the supported distros and leaves the old `tb` alone.
-  - **Installs** to `~/.local/bin` by copying next to the old file and renaming over it, so a running `tb`
-    keeps its file. `TB_INSTALL_DIR`, `TB_VERSION` and `TB_DOWNLOAD_URL` (for testing) override the defaults.
+  - **Runs the new `tos --version` before installing.** If it won't run (for example, glibc older than 2.34), it
+    stops with the supported distros and leaves the old `tos` alone.
+  - **Installs** to `~/.local/bin` by copying next to the old file and renaming over it, so a running `tos`
+    keeps its file. `TOS_INSTALL_DIR`, `TOS_VERSION` and `TOS_DOWNLOAD_URL` (for testing) override the defaults.
   - **Prints** the installed version, a `PATH` line if the folder isn't on `PATH`, and, on an upgrade with a
-    `tb` server running, the `tb kill` hint.
+    `tos` server running, the `tos kill` hint.
   - **Tested locally** against `python3 -m http.server` with a locally packed tarball:
     - a fresh install through `curl … | sh` (`dash`)
     - an upgrade
     - `wget` only
     - a wrong checksum (stops, installs nothing)
     - a 404
-    - a `tb` that won't run (stops, keeps the old one)
+    - a `tos` that won't run (stops, keeps the old one)
     - a fake `uname` for riscv64, FreeBSD, an Intel Mac, Rosetta (picks `aarch64-apple-darwin`) and Linux
       aarch64
 - [x] **`.github/workflows/release.yml`** (2026-11-10):
   - Runs on `v*` tags. A `build` matrix runs on `ubuntu-22.04` (x86_64), `ubuntu-22.04-arm` and
     `macos-latest`.
-  - Each build job runs `cargo build --release --locked -p tb --target <target>`. It installs `cargo-about`
+  - Each build job runs `cargo build --release --locked -p tos --target <target>`. It installs `cargo-about`
     with `taiki-e/install-action`, runs `cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md` and then
-    **`scripts/package.sh`**. That script refuses to pack unless the binary's `tb --version` matches the tag,
+    **`scripts/package.sh`**. That script refuses to pack unless the binary's `tos --version` matches the tag,
     which also proves the binary runs on its runner.
   - A `licenses` job runs `cargo deny check licenses`.
   - The `release` job collects the tarballs (upload and download artifacts) and runs `gh release create` with
@@ -192,10 +196,10 @@ change, nothing is needed until the next restart.
     runners, and two real bugs. On macOS, shells now start without `/usr/bin/login`, and `~` is recognised by
     its real path ([macOS plan](2026-11-09-macos-support.md)). `tb kill` now waits until the session has ended,
     and a renamed session removes its socket.
-- [x] **README** (2026-11-10): the tb section has an Install part with the one-liner, then a Development part
+- [x] **README** (2026-11-10): the tos section has an Install part with the one-liner, then a Development part
   with `cargo build --release` and how to release.
 - [ ] **Later:**
-  - `tb update` (download, check, replace the binary atomically)
+  - `tos update` (download, check, replace the binary atomically)
   - our own domain and bucket
   - a Homebrew tap
   - a musl build
@@ -207,6 +211,8 @@ change, nothing is needed until the next restart.
   updated for it.
 - **Product name:** `tb` is a working name, and the repo is now called `termos`. Pick the real name before the
   first release, because the one-liner contains the repo name and the binary is still called `tb`.
+  - *Answered 2026-11-10:* the product is **termos** and the command **`tos`**
+    ([rename plan](2026-11-10-rename-to-termos.md)).
 - **Who it's for at first:** a few friends (the GitHub URL is enough), or a public launch (worth the domain
   and bucket first)?
 - **arm64 Linux runners:** check they're available on the account's plan. If not, cross-compile from x86_64.

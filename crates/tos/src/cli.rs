@@ -1,4 +1,4 @@
-//! `tb action …`: zellij's actions with zellij's names, flags and output, plus `tb`'s own (rebuild step 6).
+//! `tos action …`: zellij's actions with zellij's names, flags and output, plus `tos`'s own (rebuild step 6).
 //!
 //! The server answers queries with JSON (zellij's field names); this module prints zellij's text columns
 //! unless `--json` is given. Formats: `docs/findings/2026-11-05-zellij-action-formats.md`.
@@ -53,16 +53,16 @@ pub enum LeftRight {
     Right,
 }
 
-/// A pane id as zellij takes it: `3`, `terminal_3` (or `finder_3` in `tb`).
+/// A pane id as zellij takes it: `3`, `terminal_3` (or `finder_3` in `tos`).
 pub fn pane_id(s: &str) -> Result<PaneId, String> {
     if s.starts_with("plugin_") {
-        return Err(format!("'{s}': tb has no plugin panes"));
+        return Err(format!("'{s}': tos has no plugin panes"));
     }
     let n = ["terminal_", "finder_", "preview_"].iter().find_map(|k| s.strip_prefix(k)).unwrap_or(s);
     n.parse().map_err(|_| format!("not a pane id: '{s}' (use 3 or terminal_3)"))
 }
 
-// `-p/--pane-id`, as zellij's pane actions take it. `--pane` is `tb`'s older name. (Plain comments on these
+// `-p/--pane-id`, as zellij's pane actions take it. `--pane` is `tos`'s older name. (Plain comments on these
 // option structs: a doc comment would become the help text of every command that has no text of its own.)
 #[derive(Args, Default, Clone)]
 pub struct PaneOpt {
@@ -94,7 +94,7 @@ pub struct PaneArgs {
     /// Type COMMAND at a shell's prompt without running it
     #[arg(short, long)]
     pub start_suspended: bool,
-    /// Accepted for zellij: tb closes a pane when its command exits
+    /// Accepted for zellij: tos closes a pane when its command exits
     #[arg(short, long)]
     #[allow(dead_code)]
     pub close_on_exit: bool,
@@ -162,14 +162,14 @@ pub struct DumpScreenArgs {
     pub path: Option<PathBuf>,
 }
 
-/// `tb action`: zellij's actions (same names and flags), and `tb`'s own. Commands that create a tab or a
+/// `tos action`: zellij's actions (same names and flags), and `tos`'s own. Commands that create a tab or a
 /// pane print its id.
 #[derive(Subcommand)]
 pub enum ActionCmd {
     // ----- tabs -----
     /// Open a new tab running a shell, or COMMAND; prints the tab's id
     #[command(
-        after_long_help = "Examples:\n  tb action new-tab -n build -c ~/project -- make watch\n  tb action new-tab --start-suspended -- make deploy   # typed, not run"
+        after_long_help = "Examples:\n  tos action new-tab -n build -c ~/project -- make watch\n  tos action new-tab --start-suspended -- make deploy   # typed, not run"
     )]
     NewTab {
         #[arg(short, long)]
@@ -179,7 +179,7 @@ pub enum ActionCmd {
         /// Type COMMAND at a shell's prompt without running it
         #[arg(long)]
         start_suspended: bool,
-        /// Accepted for zellij: tb closes a pane when its command exits
+        /// Accepted for zellij: tos closes a pane when its command exits
         #[arg(long)]
         #[allow(dead_code)]
         close_on_exit: bool,
@@ -199,7 +199,7 @@ pub enum ActionCmd {
     GoToTabById { id: u32 },
     /// Go to the tab with this name
     #[command(
-        after_long_help = "Examples:\n  tb action go-to-tab-name logs\n  tb action go-to-tab-name -c scratch   # create it if it's missing"
+        after_long_help = "Examples:\n  tos action go-to-tab-name logs\n  tos action go-to-tab-name -c scratch   # create it if it's missing"
     )]
     GoToTabName {
         name: String,
@@ -238,7 +238,7 @@ pub enum ActionCmd {
     },
     /// List tabs
     #[command(
-        after_long_help = "Examples:\n  tb action list-tabs -s\n  tb action list-tabs -j | jq '.[] | select(.active) | .tab_id'"
+        after_long_help = "Examples:\n  tos action list-tabs -s\n  tos action list-tabs -j | jq '.[] | select(.active) | .tab_id'"
     )]
     ListTabs(ListTabsArgs),
     /// Print each tab's name
@@ -252,10 +252,10 @@ pub enum ActionCmd {
     // ----- panes -----
     /// Open a pane running a shell, or COMMAND; prints the pane's id
     #[command(
-        after_long_help = "Examples:\n  tb action new-pane -d right -- htop\n  tb action new-pane -n logs -- tail -f /var/log/syslog"
+        after_long_help = "Examples:\n  tos action new-pane -d right -- htop\n  tos action new-pane -n logs -- tail -f /var/log/syslog"
     )]
     NewPane(PaneArgs),
-    /// Split the focused pane (tb's form of new-pane)
+    /// Split the focused pane (termos's form of new-pane)
     Split {
         #[arg(value_enum)]
         dir: SplitArg,
@@ -291,7 +291,7 @@ pub enum ActionCmd {
         #[arg(value_enum)]
         direction: DirArg,
     },
-    /// Focus a pane: left, right, up, down, next, prev, or an id (tb's form)
+    /// Focus a pane: left, right, up, down, next, prev, or an id (termos's form)
     Focus { target: String },
     /// Swap a pane with its neighbour in a direction, or with the next pane
     MovePane {
@@ -324,9 +324,9 @@ pub enum ActionCmd {
     },
     /// Turn pane frames on or off
     TogglePaneFrames,
-    /// Resize a pane: `increase|decrease [left|right|up|down]` (zellij), or `DIRECTION [CELLS]` (tb)
+    /// Resize a pane: `increase|decrease [left|right|up|down]` (zellij), or `DIRECTION [CELLS]` (tos)
     #[command(
-        after_long_help = "Examples:\n  tb action resize increase left\n  tb action resize decrease          # every side\n  tb action resize down 5            # tb's form: move the border 5 cells"
+        after_long_help = "Examples:\n  tos action resize increase left\n  tos action resize decrease          # every side\n  tos action resize down 5            # termos's form: move the border 5 cells"
     )]
     Resize {
         how: String,
@@ -350,7 +350,7 @@ pub enum ActionCmd {
     },
     /// Set a pane's default colours ("#00e000" or "rgb:00/e0/00"); default: the pane this runs in
     #[command(
-        after_long_help = "Examples:\n  tb action set-pane-color --bg \"#3a0000\"   # tint the pane this runs in\n  tb action set-pane-color -p 3 --reset"
+        after_long_help = "Examples:\n  tos action set-pane-color --bg \"#3a0000\"   # tint the pane this runs in\n  tos action set-pane-color -p 3 --reset"
     )]
     SetPaneColor {
         #[command(flatten)]
@@ -405,15 +405,15 @@ pub enum ActionCmd {
     },
     /// List panes
     #[command(
-        after_long_help = "Examples:\n  tb action list-panes -t -c\n  tb action list-panes -j | jq '.[] | select(.is_focused) | .id'"
+        after_long_help = "Examples:\n  tos action list-panes -t -c\n  tos action list-panes -j | jq '.[] | select(.is_focused) | .id'"
     )]
     ListPanes(ListPanesArgs),
     /// Print a pane's text
     #[command(
-        after_long_help = "Examples:\n  tb action dump-screen -f > scrollback.txt\n  tb action dump-screen -p 3 --ansi --path pane3.txt"
+        after_long_help = "Examples:\n  tos action dump-screen -f > scrollback.txt\n  tos action dump-screen -p 3 --ansi --path pane3.txt"
     )]
     DumpScreen(DumpScreenArgs),
-    /// Print the session's layout (tb's saved-session JSON)
+    /// Print the session's layout (termos's saved-session JSON)
     DumpLayout,
     /// List attached clients
     ListClients,
@@ -428,13 +428,13 @@ pub enum ActionCmd {
     },
     /// Type text into a pane
     #[command(
-        after_long_help = "Examples:\n  tb action write-chars --enter \"make test\"\n  tb action write-chars -p terminal_3 q"
+        after_long_help = "Examples:\n  tos action write-chars --enter \"make test\"\n  tos action write-chars -p terminal_3 q"
     )]
     WriteChars {
         chars: String,
         #[command(flatten)]
         p: PaneOpt,
-        /// Press Enter after the text (tb)
+        /// Press Enter after the text (tos)
         #[arg(long)]
         enter: bool,
     },
@@ -445,7 +445,7 @@ pub enum ActionCmd {
         p: PaneOpt,
     },
     /// Send keys, e.g. "Ctrl a" "F1" "Alt Shift b" Enter
-    #[command(after_long_help = "Examples:\n  tb action send-keys \"Ctrl c\"\n  tb action send-keys -p 3 Up Enter")]
+    #[command(after_long_help = "Examples:\n  tos action send-keys \"Ctrl c\"\n  tos action send-keys -p 3 Up Enter")]
     SendKeys {
         #[arg(required = true)]
         keys: Vec<String>,
@@ -464,9 +464,9 @@ pub enum ActionCmd {
     Detach,
     /// Move your client to another session, starting it if needed
     SwitchSession { name: String },
-    /// Show TEXT in the status bar (tb). Each --id is its own segment; clicks reach `tb subscribe`
+    /// Show TEXT in the status bar (tos). Each --id is its own segment; clicks reach `tos subscribe`
     #[command(
-        after_long_help = "Examples:\n  tb action set-status --id ci \"build ✓\"\n  tb action set-status --id prbot --ttl 60 \"PR #487 needs review\"\n  tb action clear-status --id ci"
+        after_long_help = "Examples:\n  tos action set-status --id ci \"build ✓\"\n  tos action set-status --id prbot --ttl 60 \"PR #487 needs review\"\n  tos action clear-status --id ci"
     )]
     SetStatus {
         text: String,
@@ -477,12 +477,12 @@ pub enum ActionCmd {
         #[arg(long)]
         ttl: Option<u64>,
     },
-    /// Remove a status segment, or all of them (tb)
+    /// Remove a status segment, or all of them (tos)
     ClearStatus {
         #[arg(long)]
         id: Option<String>,
     },
-    /// Read ~/.config/tb/config.kdl again and print what it skipped (tb)
+    /// Read ~/.config/termos/config.kdl again and print what it skipped (tos)
     ReloadConfig,
 }
 
@@ -516,9 +516,9 @@ enum Output {
     Screen(Option<PathBuf>),
 }
 
-/// The pane `tb` runs in, if it runs in this session: zellij's `set-pane-color` defaults to it.
+/// The pane `tos` runs in, if it runs in this session: zellij's `set-pane-color` defaults to it.
 fn own_pane(session: &str) -> Option<PaneId> {
-    (std::env::var("TB_SESSION").ok()? == session).then(|| std::env::var("TB_PANE_ID").ok()?.parse().ok())?
+    (std::env::var("TOS_SESSION").ok()? == session).then(|| std::env::var("TOS_PANE_ID").ok()?.parse().ok())?
 }
 
 fn resize(how: &str, side: Option<&str>, pane: Option<PaneId>) -> anyhow::Result<CliAction> {
@@ -552,7 +552,7 @@ fn scroll(p: PaneOpt, how: ScrollHow) -> CliAction {
     CliAction::Scroll { pane: p.pane_id, how }
 }
 
-/// Turns a `tb action` command into the request for the server and how to print the answer.
+/// Turns a `tos action` command into the request for the server and how to print the answer.
 fn request(session: &str, cmd: ActionCmd) -> anyhow::Result<(CliAction, Output)> {
     use CliAction as A;
     let plain = |a| Ok((a, Output::Plain));
@@ -675,7 +675,7 @@ pub fn edit(a: EditArgs) -> anyhow::Result<CliAction> {
     })
 }
 
-/// Runs a `tb action` command against `session` and prints the answer.
+/// Runs a `tos action` command against `session` and prints the answer.
 pub fn run(session: &str, cmd: ActionCmd) -> anyhow::Result<()> {
     let (action, output) = request(session, cmd)?;
     send(session, action, output)
@@ -714,17 +714,17 @@ fn send(session: &str, action: CliAction, output: Output) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Runs a pane-opening command (`tb run`, `tb edit`) and prints the new pane's id.
+/// Runs a pane-opening command (`tos run`, `tos edit`) and prints the new pane's id.
 pub fn send_plain(session: &str, action: CliAction) -> anyhow::Result<()> {
     send(session, action, Output::Plain)
 }
 
-/// Prints `tb list-panes` (the top-level command): zellij's columns, or JSON.
+/// Prints `tos list-panes` (the top-level command): zellij's columns, or JSON.
 pub fn list_panes(session: &str, args: ListPanesArgs) -> anyhow::Result<()> {
     send(session, CliAction::ListPanes, Output::Panes(args))
 }
 
-/// Prints `tb dump-screen` (the top-level command).
+/// Prints `tos dump-screen` (the top-level command).
 pub fn dump_screen(session: &str, args: DumpScreenArgs) -> anyhow::Result<()> {
     let path = args.path.map(absolute).transpose()?;
     send(

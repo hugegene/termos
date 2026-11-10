@@ -30,10 +30,10 @@ pub enum ClientKind {
     Attach { cols: u16, rows: u16, graphics: Graphics },
     /// A one-shot CLI command; the server replies once.
     Command(Command),
-    /// `tb subscribe`: events as JSON lines until the session ends. `panes` also send their text when it
+    /// `tos subscribe`: events as JSON lines until the session ends. `panes` also send their text when it
     /// changes; `scrollback` adds history to the first delivery (`Some(None)`: all of it).
     Subscribe { panes: Vec<PaneId>, scrollback: Option<Option<usize>>, ansi: bool },
-    /// `tb watch`: like `Attach`, but read-only. Its keys are ignored and its size never changes the layout.
+    /// `tos watch`: like `Attach`, but read-only. Its keys are ignored and its size never changes the layout.
     Watch { cols: u16, rows: u16, graphics: Graphics },
 }
 
@@ -102,7 +102,7 @@ pub enum FocusTarget {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Command {
-    /// Session summary for `tb ls`.
+    /// Session summary for `tos ls`.
     Info,
     /// End the session. `forget` also deletes its saved layout; otherwise it can be restored.
     Kill {
@@ -113,11 +113,11 @@ pub enum Command {
     Finder {
         dir: Option<PathBuf>,
     },
-    /// `tb action …`: zellij's actions and `tb`'s own (step 6, the extension API).
+    /// `tos action …`: zellij's actions and `tos`'s own (step 6, the extension API).
     Action(CliAction),
 }
 
-/// What `tb action` asks the server to do. Queries answer with JSON; the CLI formats it as text unless
+/// What `tos action` asks the server to do. Queries answer with JSON; the CLI formats it as text unless
 /// asked for JSON. `pane: None` means the focused pane, `tab: None` the active tab.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum CliAction {
@@ -209,7 +209,7 @@ pub enum CliAction {
         side: Option<Direction>,
         grow: bool,
     },
-    /// `tb`'s resize: move the nearest border in `dir` by `amount` cells.
+    /// `tos`'s resize: move the nearest border in `dir` by `amount` cells.
     MoveBorder {
         pane: Option<PaneId>,
         dir: Direction,

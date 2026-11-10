@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb action edit-scrollback`
+# `tos action edit-scrollback`
 
 Open a pane's scrollback in the editor
 
 ```
-tb action edit-scrollback [OPTIONS]
+tos action edit-scrollback [OPTIONS]
 ```
 
 ## Options

@@ -47,7 +47,7 @@ impl Server {
         if key.kind == KeyEventKind::Release {
             return;
         }
-        // A key bound in config.kdl replaces tb's own key in that mode.
+        // A key bound in config.kdl replaces termos's own key in that mode.
         if let Mode::Modal(m) = self.mode
             && let Some(actions) = self.bindings.find(m, &key)
         {
@@ -168,7 +168,7 @@ impl Server {
             KeyCode::Char('-') => self.resize_focused(None, false),
             KeyCode::Char('i') => self.move_tab(false),
             KeyCode::Char('o') => self.move_tab(true),
-            // Alt+F (floating), Alt+[ ] (swap layouts) and Alt+P (groups) aren't in tb, so programs get them.
+            // Alt+F (floating), Alt+[ ] (swap layouts) and Alt+P (groups) aren't in tos, so programs get them.
             _ => return false,
         }
         self.set_modal(next);
@@ -232,7 +232,7 @@ impl Server {
                 self.start_rename_pane();
                 return None;
             }
-            KeyCode::Char('s' | 'w' | 'e' | 'i') => self.flash("stacked, floating and pinned panes aren't in tb yet"),
+            KeyCode::Char('s' | 'w' | 'e' | 'i') => self.flash("stacked, floating and pinned panes aren't in tos yet"),
             _ => return None,
         }
         Some(Modal::Normal)
@@ -359,8 +359,10 @@ impl Server {
         }
         match key.code {
             KeyCode::Char('d') => self.detach(client),
-            KeyCode::Char('w') => self.flash("no session manager yet: `tb ls` lists sessions, `tb -s NAME` opens one"),
-            KeyCode::Char('c' | 'p' | 'a' | 's' | 'l') => self.flash("zellij's plugins aren't in tb"),
+            KeyCode::Char('w') => {
+                self.flash("no session manager yet: `tos ls` lists sessions, `tos -s NAME` opens one")
+            }
+            KeyCode::Char('c' | 'p' | 'a' | 's' | 'l') => self.flash("zellij's plugins aren't in tos"),
             _ => return None,
         }
         Some(Modal::Normal)
@@ -399,7 +401,7 @@ impl Server {
             KeyCode::Char('d') => self.detach(client),
             KeyCode::Char('x') => self.close_focused(),
             KeyCode::Char('f') => self.open_finder_tab(),
-            KeyCode::Char(' ') => self.flash("swap layouts aren't in tb yet"),
+            KeyCode::Char(' ') => self.flash("swap layouts aren't in tos yet"),
             _ => return None,
         }
         Some(Modal::Normal)

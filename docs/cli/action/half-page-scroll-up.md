@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb action half-page-scroll-up`
+# `tos action half-page-scroll-up`
 
 Scroll a pane up half a page
 
 ```
-tb action half-page-scroll-up [OPTIONS]
+tos action half-page-scroll-up [OPTIONS]
 ```
 
 ## Options

@@ -382,13 +382,13 @@ mod tests {
 
     /// Times one scroll step of a PDF page at fit width: cutting a 1000×900 piece out of the page and encoding
     /// it for each protocol (step 7 of docs/plans/2026-11-05-pdf-preview.md). Needs poppler. Run with:
-    /// `TB_BENCH_PDF=file.pdf cargo test --release -p tb --bin tb scroll_step_cost -- --ignored --nocapture`
+    /// `TOS_BENCH_PDF=file.pdf cargo test --release -p tos --bin tos scroll_step_cost -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn scroll_step_cost() {
         use std::time::{Duration, Instant};
         let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../finder-core/tests/data/two-pages.pdf");
-        let path = std::env::var("TB_BENCH_PDF").unwrap_or_else(|_| fixture.into());
+        let path = std::env::var("TOS_BENCH_PDF").unwrap_or_else(|_| fixture.into());
         let limits = finder_core::Limits::default();
         let page = finder_core::pdf::page(path.as_ref(), 1, 1000, true, &limits, &|| false, &|| {}).unwrap().image;
         println!("{path}: page 1 rendered {}×{}", page.width(), page.height());

@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb ls`
+# `tos ls`
 
 List sessions, including exited ones that attaching restores
 
 ```
-tb ls [OPTIONS]
+tos ls [OPTIONS]
 ```
 
 Also: `list-sessions`.
@@ -17,6 +17,6 @@ Also: `list-sessions`.
 |---|---|
 | `-s, --short` | Print just the session names. |
 | `-r, --reverse` | List in reverse order. |
-| `-n, --no-formatting` | No colours or formatting (tb prints none; accepted for zellij's habit). |
+| `-n, --no-formatting` | No colours or formatting (tos prints none; accepted for zellij's habit). |
 
 See also: [all commands](README.md) · [the overview](../cli.md)

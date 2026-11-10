@@ -1,4 +1,4 @@
-//! `tb action …` (rebuild step 6): zellij's actions, plus `tb`'s own, run against the session.
+//! `tos action …` (rebuild step 6): zellij's actions, plus `tos`'s own, run against the session.
 //!
 //! Queries answer with JSON that uses zellij's field names (see
 //! `docs/findings/2026-11-05-zellij-action-formats.md`); the CLI turns it into zellij's text columns.
@@ -412,7 +412,7 @@ impl Server {
         log::info!("{} key bindings from {}", loaded.bindings.len(), path.display());
         self.bindings = loaded.bindings;
         self.config_note = (!loaded.warnings.is_empty()).then(|| {
-            format!("config.kdl: {} lines skipped; tb action reload-config lists them", loaded.warnings.len())
+            format!("config.kdl: {} lines skipped; tos action reload-config lists them", loaded.warnings.len())
         });
         Ok(loaded.warnings.join("\n"))
     }
@@ -569,7 +569,7 @@ impl Server {
         Ok(())
     }
 
-    /// One tab as zellij's `list-tabs -j` shows it, plus `tb`'s own fields.
+    /// One tab as zellij's `list-tabs -j` shows it, plus `tos`'s own fields.
     fn tab_json(&self, i: usize) -> Value {
         let tab = &self.tabs[i];
         let area = self.content_area();
@@ -593,12 +593,12 @@ impl Server {
             "tab_id": tab.id,
             "has_bell_notification": false,
             "is_flashing_bell": false,
-            // tb: true while the name follows the tab's folder (no name was given).
+            // tos: true while the name follows the tab's folder (no name was given).
             "auto_name": tab.auto_name,
         })
     }
 
-    /// Every pane, as zellij's `list-panes -j` shows it, plus `tb`'s own fields (`kind`, `tab`, …).
+    /// Every pane, as zellij's `list-panes -j` shows it, plus `tos`'s own fields (`kind`, `tab`, …).
     pub(super) fn pane_list(&self) -> Vec<Value> {
         let mut out = Vec::new();
         for (ti, tab) in self.tabs.iter().enumerate() {
@@ -668,7 +668,7 @@ impl Server {
                     "tab_name": self.tab_label(tab),
                     "pane_command": pane_command,
                     "pane_cwd": cwd,
-                    // tb's fields
+                    // termos's fields
                     "kind": kind,
                     "tab": ti + 1,
                     "name": self.pane_names.get(&id),

@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag such as v0.2.0 builds tb for each target and publishes a GitHub release with the tarballs,
+# Pushing a tag such as v0.2.0 builds tos for each target and publishes a GitHub release with the tarballs,
 # their .sha256 files and install.sh. See docs/plans/2026-11-09-distribution.md.
 on:
   push:
@@ -28,14 +28,14 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-about
-      - run: cargo build --release --locked -p tb --target ${{ matrix.target }}
+      - run: cargo build --release --locked -p tos --target ${{ matrix.target }}
       - run: cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md
-      # Also checks that the tag matches `tb --version`, and that the binary runs on this runner.
+      # Also checks that the tag matches `tos --version`, and that the binary runs on this runner.
       - run: scripts/package.sh ${{ matrix.target }} "${GITHUB_REF_NAME#v}"
       - uses: actions/upload-artifact@v4
         with:
-          name: tb-${{ matrix.target }}
-          path: dist/tb-${{ matrix.target }}.tar.gz*
+          name: tos-${{ matrix.target }}
+          path: dist/tos-${{ matrix.target }}.tar.gz*
           if-no-files-found: error
 
   licenses:
@@ -63,4 +63,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "$GITHUB_REF_NAME" dist/* scripts/install.sh
-          --title "tb ${GITHUB_REF_NAME#v}" --generate-notes
+          --title "termos ${GITHUB_REF_NAME#v}" --generate-notes

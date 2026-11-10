@@ -5,6 +5,9 @@
 `tb` builds and runs on **macOS on Apple Silicon** (`aarch64-apple-darwin`). **Linux and macOS both ship at
 launch.** Intel Macs are not supported.
 
+*Changed 2026-11-10:* the command is now **`tos`** (product **termos**), so read `tb` below as `tos`
+([rename plan](2026-11-10-rename-to-termos.md)).
+
 - **How:** a small `os` module in `crates/tb` gathers everything that differs between Linux and macOS. Linux
   keeps today's code; macOS gets its own versions through the `libc` crate, which is already in `Cargo.lock`.
 - **Size of the job:** the compile check found only **two** compile errors on macOS; everything else
@@ -99,7 +102,7 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
   - OSC 52 copy in iTerm2.
   - Trash.
   - Tab names follow `cd`.
-  - Restore after `tb kill`.
+  - Restore after `tos kill`.
 - [ ] **Docs:** a macOS section in `README.md` covering the terminal settings (Option as Alt, iTerm2 clipboard
   permission, which terminals show images) and `brew install poppler neovim`.
 - [x] **Release builds** (2026-11-10): `aarch64-apple-darwin` is in the release matrix

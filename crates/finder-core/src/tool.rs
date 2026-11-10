@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn missing_program() {
-        let cmd = Command::new("tb-no-such-program");
+        let cmd = Command::new("tos-no-such-program");
         match run(cmd, 100, None, &|| false, "needs it") {
             Err(ToolError::Missing(msg)) => assert_eq!(msg, "needs it"),
             other => panic!("{other:?}"),

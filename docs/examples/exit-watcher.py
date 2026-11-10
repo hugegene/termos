@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""An example tb extension: warns in the status bar when a pane's command fails.
+"""An example tos extension: warns in the status bar when a pane's command fails.
 
-It reads `tb subscribe` events, and when a pane closes with a non-zero exit status it shows
+It reads `tos subscribe` events, and when a pane closes with a non-zero exit status it shows
 "✗ <title> exited <status>" in the status bar for 30 seconds. Clicking the warning clears it and goes back
 to the tab where it happened.
 
-Run it inside a tb session (where TB_SESSION is set), or name the session:
+Run it inside a tos session (where TOS_SESSION is set), or name the session:
 
     python3 exit-watcher.py            # the session it runs in
     python3 exit-watcher.py work       # session "work"
 
-Set TB to the tb program if it isn't on your PATH.
+Set TOS to the tos program if it isn't on your PATH.
 """
 
 import json
@@ -18,18 +18,18 @@ import os
 import subprocess
 import sys
 
-TB = os.environ.get("TB", "tb")
+TOS = os.environ.get("TOS", "tos")
 SESSION = ["-s", sys.argv[1]] if len(sys.argv) > 1 else []
 
 
 def action(*args):
-    subprocess.run([TB, *SESSION, "action", *args], check=False, capture_output=True)
+    subprocess.run([TOS, *SESSION, "action", *args], check=False, capture_output=True)
 
 
 def main():
     titles = {}  # pane id -> its title, to name a pane after it has closed
     failed_in = None  # the tab the last failure happened in
-    sub = subprocess.Popen([TB, *SESSION, "subscribe", "--format", "json"], stdout=subprocess.PIPE, text=True)
+    sub = subprocess.Popen([TOS, *SESSION, "subscribe", "--format", "json"], stdout=subprocess.PIPE, text=True)
     for line in sub.stdout:
         event = json.loads(line)
         kind = event["event"]

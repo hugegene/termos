@@ -4,6 +4,9 @@
 **Findings:** [dependencies and licenses](../findings/2026-11-03-dependency-licenses.md) ·
 [iTerm2 image support](../findings/2026-11-03-iterm2-image-support.md)
 
+*Renamed 2026-11-10:* the product is **termos** and its command **`tos`**. This plan and the plans before
+2026-11-10 call it `tb`, its working name ([rename plan](2026-11-10-rename-to-termos.md)).
+
 ## Decision
 
 Build our own product in **Rust**. **Fork `alacritty_terminal`** (Apache-2.0) as the terminal-emulation

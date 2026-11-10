@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb action list-tabs`
+# `tos action list-tabs`
 
 List tabs
 
 ```
-tb action list-tabs [OPTIONS]
+tos action list-tabs [OPTIONS]
 ```
 
 ## Options
@@ -23,8 +23,8 @@ tb action list-tabs [OPTIONS]
 ## Examples
 
 ```sh
-tb action list-tabs -s
-tb action list-tabs -j | jq '.[] | select(.active) | .tab_id'
+tos action list-tabs -s
+tos action list-tabs -j | jq '.[] | select(.active) | .tab_id'
 ```
 
 See also: [all commands](../README.md) · [the overview](../../cli.md)

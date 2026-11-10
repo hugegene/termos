@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb action resize`
+# `tos action resize`
 
-Resize a pane: `increase|decrease [left|right|up|down]` (zellij), or `DIRECTION [CELLS]` (tb)
+Resize a pane: `increase|decrease [left|right|up|down]` (zellij), or `DIRECTION [CELLS]` (tos)
 
 ```
-tb action resize [OPTIONS] <HOW> [SIDE]
+tos action resize [OPTIONS] <HOW> [SIDE]
 ```
 
 ## Arguments
@@ -25,9 +25,9 @@ tb action resize [OPTIONS] <HOW> [SIDE]
 ## Examples
 
 ```sh
-tb action resize increase left
-tb action resize decrease          # every side
-tb action resize down 5            # tb's form: move the border 5 cells
+tos action resize increase left
+tos action resize decrease          # every side
+tos action resize down 5            # termos's form: move the border 5 cells
 ```
 
 See also: [all commands](../README.md) · [the overview](../../cli.md)

@@ -5,7 +5,8 @@
 This repo holds a terminal workspace in two stages:
 
 - **The prototype (current code):** a two-pane file finder built from zellij, yazi and our own `preview.py`.
-- **The planned rebuild:** a Rust product with our own multiplexer, finder and poller/webhook daemon, built
+- **The planned rebuild:** a Rust product called **termos** (the command is `tos`; it was `tb` until
+  2026-11-10, and older docs say `tb`). It has our own multiplexer, finder and poller/webhook daemon, built
   around a fork of `alacritty_terminal`. See [docs/plans/2026-11-03-rebuild-plan.md](docs/plans/2026-11-03-rebuild-plan.md).
 
 ## Docs workflow (always follow)
@@ -54,18 +55,18 @@ This applies to answers in chat and to everything in `docs/`.
   - **Request or network flow:** numbered arrows for each hop, labelled with what travels, such as keys, IPC
     messages, HTTP calls or webhooks.
 
-## Rust workspace (`tb`, a working name)
+## Rust workspace (termos, command `tos`)
 
 - **Layout:**
   - `Cargo.toml` (workspace)
-  - `crates/tb`: client, server, finder UI and CLI
+  - `crates/tos`: client, server, finder UI and CLI
   - `crates/finder-core`: listing, file types, preview data
   - `crates/alacritty_terminal`: our fork, unmodified so far; see its `UPSTREAM.md` and record every change there
   - `scripts/`: `install.sh` (the one-line installer) and `package.sh`, used by `.github/workflows/release.yml`.
     Pushing a tag `v<version>` publishes a release on GitHub (`hugegene/termos`, public, MIT).
 - **Build and test:** `cargo build`, `cargo test --workspace`,
-  `cargo clippy --no-deps -p tb -p finder-core --all-targets -- -D warnings`, `cargo deny check licenses`.
-  - Format with `cargo fmt -p tb -p finder-core`, never `cargo fmt --all`: that rewraps the
+  `cargo clippy --no-deps -p tos -p finder-core --all-targets -- -D warnings`, `cargo deny check licenses`.
+  - Format with `cargo fmt -p tos -p finder-core`, never `cargo fmt --all`: that rewraps the
     `alacritty_terminal` fork to our `rustfmt.toml`.
   - Rust lives in `~/.cargo/bin`.
   - Network access from Claude's shell is sandboxed, so build with `--offline`. A new dependency needs the user to
@@ -73,11 +74,11 @@ This applies to answers in chat and to everything in `docs/`.
 - **Command docs:** `docs/cli/` has a page per command, generated from the clap definitions, so don't edit it
   by hand.
   - After changing a command, its help text or its examples (`after_long_help`), run
-    `TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs`.
+    `TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs`.
   - The test `cli_docs_are_current` fails until you do.
   - New concepts that span commands (ids, JSON fields, events, config) go in `docs/cli.md`.
-- **End-to-end tests:** `crates/tb/tests/e2e.rs` runs `tb attach` in a pseudo-terminal and reads the screen back.
-  - Tests use their own socket and state folders (`TB_SOCKET_DIR`, `TB_STATE_DIR`), never the user's sessions.
+- **End-to-end tests:** `crates/tos/tests/e2e.rs` runs `tos attach` in a pseudo-terminal and reads the screen back.
+  - Tests use their own socket and state folders (`TOS_SOCKET_DIR`, `TOS_STATE_DIR`), never the user's sessions.
   - Socket paths must stay under about 100 bytes, so don't put sockets in the scratchpad.
 
 ## Prototype

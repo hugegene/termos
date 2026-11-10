@@ -43,10 +43,10 @@ impl Log for FileLogger {
     }
 }
 
-/// Logs to `path`. The level comes from `TB_LOG` (error, warn, info, debug, trace); the default is info.
+/// Logs to `path`. The level comes from `TOS_LOG` (error, warn, info, debug, trace); the default is info.
 pub fn init(path: &Path) -> std::io::Result<()> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
-    let level = std::env::var("TB_LOG").ok().and_then(|l| l.parse().ok()).unwrap_or(LevelFilter::Info);
+    let level = std::env::var("TOS_LOG").ok().and_then(|l| l.parse().ok()).unwrap_or(LevelFilter::Info);
     let logger = FileLogger { file: Mutex::new(file), level };
     if log::set_logger(Box::leak(Box::new(logger))).is_ok() {
         log::set_max_level(level);

@@ -1,4 +1,4 @@
-//! Renders `docs/cli/`: a Markdown page for each `tb` command, from the same definitions as `tb … --help`.
+//! Renders `docs/cli/`: a Markdown page for each `tos` command, from the same definitions as `tos … --help`.
 //! The test `cli_docs_are_current` (in main.rs) keeps the pages in step with the code; see
 //! docs/plans/2026-11-05-cli-docs.md.
 
@@ -6,26 +6,26 @@ use std::fmt::Write as _;
 
 use clap::{Arg, Command};
 
-const HEADER: &str = "<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run\n     \
-                      TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->\n";
+const HEADER: &str = "<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run\n     \
+                      TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->\n";
 
 /// Every page: (path under docs/cli, Markdown).
 pub fn render(mut root: Command) -> Vec<(String, String)> {
     root.build();
     let mut pages = Vec::new();
     let mut index = format!(
-        "{HEADER}\n# `tb` commands\n\nOne page per command, generated from `tb … --help`. For what spans commands \
+        "{HEADER}\n# `tos` commands\n\nOne page per command, generated from `tos … --help`. For what spans commands \
          (ids, JSON fields, events, key bindings, stability), see [the overview](../cli.md).\n\n"
     );
     let usage = root.render_usage().to_string();
     let usage = usage.trim().strip_prefix("Usage: ").unwrap_or(usage.trim()).to_owned();
-    let _ = writeln!(index, "```\n{usage}\n```\n\nPlain `tb` attaches to (or starts) the session.\n");
+    let _ = writeln!(index, "```\n{usage}\n```\n\nPlain `tos` attaches to (or starts) the session.\n");
     index.push_str(&options_table(&root));
     index.push_str("## Commands\n\n| Command | Does |\n|---|---|\n");
     let mut actions = String::from("| Action | Does |\n|---|---|\n");
     for cmd in visible(&root) {
         let name = cmd.get_name();
-        index.push_str(&format!("| [`tb {name}`]({name}.md){} | {} |\n", aliases(cmd), about(cmd)));
+        index.push_str(&format!("| [`tos {name}`]({name}.md){} | {} |\n", aliases(cmd), about(cmd)));
         pages.push((format!("{name}.md"), page(cmd, "")));
         for sub in visible(cmd) {
             let sub_name = sub.get_name();
@@ -33,7 +33,7 @@ pub fn render(mut root: Command) -> Vec<(String, String)> {
             pages.push((format!("{name}/{sub_name}.md"), page(sub, "../")));
         }
     }
-    index.push_str("\n## `tb action …`\n\nzellij's actions, with zellij's names and flags, and `tb`'s own.\n\n");
+    index.push_str("\n## `tos action …`\n\nzellij's actions, with zellij's names and flags, and `tos`'s own.\n\n");
     index.push_str(&actions);
     pages.push(("README.md".into(), index));
     pages

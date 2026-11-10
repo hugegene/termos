@@ -12,7 +12,7 @@
 //! }
 //! ```
 //!
-//! A binding replaces `tb`'s own key in that mode. Actions `tb` doesn't have (plugins, floating panes, …) are
+//! A binding replaces `tos`'s own key in that mode. Actions `tos` doesn't have (plugins, floating panes, …) are
 //! skipped with a warning naming the line, and so is a binding that uses one.
 
 use std::path::{Path, PathBuf};
@@ -53,7 +53,7 @@ pub struct Bindings {
     binds: Vec<(Modal, KeyEvent, Vec<Bound>)>,
 }
 
-/// Keys as `tb` compares them: an upper-case letter counts as Shift plus the letter, and Shift is ignored
+/// Keys as `tos` compares them: an upper-case letter counts as Shift plus the letter, and Shift is ignored
 /// on other characters (a terminal may or may not report it for `?`).
 fn normal_key(k: &KeyEvent) -> (KeyCode, KeyModifiers) {
     let mut mods =
@@ -90,16 +90,12 @@ pub struct Loaded {
     pub warnings: Vec<String>,
 }
 
-/// Where the config lives: `$TB_CONFIG`, else `$XDG_CONFIG_HOME/tb/config.kdl`, else `~/.config/tb/config.kdl`.
+/// Where the config lives: `$TOS_CONFIG`, else `$XDG_CONFIG_HOME/termos/config.kdl`, else `~/.config/termos/config.kdl`.
 pub fn path() -> PathBuf {
-    if let Some(p) = std::env::var_os("TB_CONFIG") {
+    if let Some(p) = std::env::var_os("TOS_CONFIG") {
         return p.into();
     }
-    let base = match std::env::var_os("XDG_CONFIG_HOME") {
-        Some(d) if !d.is_empty() => PathBuf::from(d),
-        _ => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
-    };
-    base.join("tb/config.kdl")
+    crate::paths::config_dir().join("config.kdl")
 }
 
 /// Reads the config. A missing file means no bindings; a file that isn't valid KDL is an error.
@@ -153,7 +149,7 @@ pub fn from_nodes(nodes: &[Node]) -> Loaded {
     for kb in nodes.iter().filter(|n| n.name == "keybinds") {
         if kb.prop("clear-defaults") == Some(&Value::Bool(true)) {
             out.warnings.push(format!(
-                "line {}: clear-defaults is ignored: tb keeps its own keys, and bindings replace them one by one",
+                "line {}: clear-defaults is ignored: tos keeps its own keys, and bindings replace them one by one",
                 kb.line
             ));
         }
@@ -168,7 +164,7 @@ pub fn from_nodes(nodes: &[Node]) -> Loaded {
                 name => match mode_named(name) {
                     Some(m) => vec![m],
                     None => {
-                        out.warnings.push(format!("line {}: skipped mode '{name}': tb has no such mode", block.line));
+                        out.warnings.push(format!("line {}: skipped mode '{name}': tos has no such mode", block.line));
                         continue;
                     }
                 },
@@ -218,7 +214,7 @@ fn direction(s: &str) -> Result<Direction, String> {
 
 fn split_dir(s: &str) -> Result<SplitDir, String> {
     if s.eq_ignore_ascii_case("stacked") {
-        return Err("stacked panes aren't in tb yet".into());
+        return Err("stacked panes aren't in tos yet".into());
     }
     match direction(s)? {
         Direction::Right => Ok(SplitDir::Right),
@@ -235,14 +231,14 @@ fn child_bool(node: &Node, name: &str) -> bool {
     node.child_arg(name) == Some(&Value::Bool(true))
 }
 
-/// One zellij keybind action, as `tb` does it.
+/// One zellij keybind action, as `tos` does it.
 fn action(node: &Node) -> Result<Bound, String> {
     use CliAction as A;
     let dir_arg = |i: usize| arg_str(node, i).map(direction).transpose();
     Ok(match node.name.as_str() {
         "SwitchToMode" => {
             let name = arg_str(node, 0).ok_or("SwitchToMode needs a mode")?;
-            Bound::Mode(mode_named(name).ok_or_else(|| format!("tb has no mode '{name}'"))?)
+            Bound::Mode(mode_named(name).ok_or_else(|| format!("tos has no mode '{name}'"))?)
         }
         "Run" => {
             let command = names(node);
@@ -251,7 +247,7 @@ fn action(node: &Node) -> Result<Bound, String> {
             }
             for unsupported in ["floating", "in_place", "stacked"] {
                 if child_bool(node, unsupported) {
-                    return Err(format!("Run's {unsupported} isn't in tb yet"));
+                    return Err(format!("Run's {unsupported} isn't in tos yet"));
                 }
             }
             Bound::Action(A::NewPane {
@@ -264,7 +260,7 @@ fn action(node: &Node) -> Result<Bound, String> {
         }
         "NewTab" => {
             if node.children.iter().any(|c| c.name == "layout") {
-                return Err("NewTab's layout isn't in tb yet".into());
+                return Err("NewTab's layout isn't in tos yet".into());
             }
             Bound::Action(A::NewTab {
                 name: node.child_arg("name").and_then(Value::as_str).map(str::to_owned),
@@ -346,7 +342,7 @@ fn action(node: &Node) -> Result<Bound, String> {
             "WholeWord" => 'o',
             other => return Err(format!("unknown search option '{other}'")),
         }),
-        other => return Err(format!("tb has no action '{other}' yet")),
+        other => return Err(format!("tos has no action '{other}' yet")),
     })
 }
 
@@ -394,7 +390,7 @@ keybinds clear-defaults=true {
         assert!(l.bindings.find(Modal::Pane, &key("w")).is_none());
         let w = l.warnings.join("\n");
         assert!(w.contains("clear-defaults is ignored"), "{w}");
-        assert!(w.contains("line 10: skipped this binding: tb has no action 'ToggleFloatingPanes' yet"), "{w}");
+        assert!(w.contains("line 10: skipped this binding: tos has no action 'ToggleFloatingPanes' yet"), "{w}");
         assert!(w.contains("skipped mode 'renamepane'"), "{w}");
     }
 }

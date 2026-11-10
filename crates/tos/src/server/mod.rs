@@ -67,7 +67,7 @@ type TabZone = (u16, u16, Option<usize>);
 /// A status-bar segment's click area: (start x, end x, segment id).
 type StatusZone = (u16, u16, String);
 
-/// Text an extension put in the status bar (`tb action set-status`).
+/// Text an extension put in the status bar (`tos action set-status`).
 struct StatusSegment {
     id: String,
     text: String,
@@ -103,9 +103,9 @@ struct Client {
     graphics: protocol::Graphics,
     /// The images this client's screen shows now.
     shown: Vec<images::Placed>,
-    /// Set for `tb subscribe` clients.
+    /// Set for `tos subscribe` clients.
     subscription: Option<events::Subscription>,
-    /// A `tb watch` client: shown the session, but its keys and size are ignored.
+    /// A `tos watch` client: shown the session, but its keys and size are ignored.
     read_only: bool,
 }
 
@@ -223,10 +223,10 @@ pub struct Server {
     pending_input: HashMap<PaneId, persist::PendingInput>,
     /// The last saved session, to skip writing when nothing changed.
     last_saved: Option<String>,
-    /// Delete the saved session when the server ends (its last pane exited, or `tb delete`).
+    /// Delete the saved session when the server ends (its last pane exited, or `tos delete`).
     forget: bool,
     images: images::Images,
-    /// Default colours set with `tb action set-pane-color`: (foreground, background).
+    /// Default colours set with `tos action set-pane-color`: (foreground, background).
     pane_colors: HashMap<PaneId, (Option<Color>, Option<Color>)>,
     /// The session as subscribers last heard of it (`None` while nobody is subscribed).
     event_summary: Option<events::Summary>,
@@ -251,7 +251,7 @@ fn peer_is_us(stream: &UnixStream) -> bool {
 /// typing them at the prompt (zellij's `attach --force-run-commands`).
 pub fn run(name: &str, run_commands: bool) -> anyhow::Result<()> {
     // Panes must not think they run inside another multiplexer. Safe: no other threads exist yet.
-    for var in ["ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID", "TMUX", "TMUX_PANE", "TB_SESSION", "TB_PANE_ID"] {
+    for var in ["ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID", "TMUX", "TMUX_PANE", "TOS_SESSION", "TOS_PANE_ID"] {
         unsafe { std::env::remove_var(var) };
     }
     paths::ensure_private_dir(&paths::state_dir())?;
@@ -515,8 +515,8 @@ impl Server {
             ClientMsg::Hello { version, kind } => {
                 if version != PROTOCOL_VERSION {
                     let text = format!(
-                        "this session uses protocol {PROTOCOL_VERSION} but this tb uses {version}; \
-                         end the session with the matching tb (tb kill) and start it again"
+                        "this session uses protocol {PROTOCOL_VERSION} but this tos uses {version}; \
+                         end the session with the matching tos (tos kill) and start it again"
                     );
                     self.send(id, ServerMsg::Reply { ok: false, text: text.clone() });
                     self.send(id, ServerMsg::Exit { reason: text });

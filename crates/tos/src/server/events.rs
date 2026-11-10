@@ -1,4 +1,4 @@
-//! `tb subscribe` (rebuild step 6): events for extensions, one JSON object per line.
+//! `tos subscribe` (rebuild step 6): events for extensions, one JSON object per line.
 //!
 //! The server keeps a small summary of the session (tabs, panes, mode, clients). While anyone is
 //! subscribed, it compares the summary with the last one it sent and turns each difference into an event,

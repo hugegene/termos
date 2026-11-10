@@ -1,21 +1,21 @@
 #!/bin/sh
-# Installs tb from a GitHub release, without Rust and without sudo:
+# Installs tos from a GitHub release, without Rust and without sudo:
 #
 #   curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
 #
 # Settings, all optional:
-#   TB_VERSION       a version such as 0.1.1 (default: the latest release)
-#   TB_INSTALL_DIR   where tb goes (default: ~/.local/bin)
-#   TB_DOWNLOAD_URL  the folder holding the release files (default: GitHub; used for testing)
+#   TOS_VERSION       a version such as 0.2.0 (default: the latest release)
+#   TOS_INSTALL_DIR   where tos goes (default: ~/.local/bin)
+#   TOS_DOWNLOAD_URL  the folder holding the release files (default: GitHub; used for testing)
 #
 # Everything is in functions and `main` runs on the last line, so a download cut short runs nothing.
 set -eu
 
 REPO=hugegene/termos
 
-say() { printf 'tb install: %s\n' "$*"; }
+say() { printf 'tos install: %s\n' "$*"; }
 die() {
-    printf 'tb install: error: %s\n' "$*" >&2
+    printf 'tos install: error: %s\n' "$*" >&2
     exit 1
 }
 
@@ -38,10 +38,10 @@ detect_target() {
         fi
         case "$arch" in
         arm64) echo aarch64-apple-darwin ;;
-        *) die "Intel Macs aren't supported. tb needs a Mac with Apple Silicon (M1 or later)." ;;
+        *) die "Intel Macs aren't supported. tos needs a Mac with Apple Silicon (M1 or later)." ;;
         esac
         ;;
-    *) die "$os isn't supported. tb runs on Linux and macOS." ;;
+    *) die "$os isn't supported. tos runs on Linux and macOS." ;;
     esac
 }
 
@@ -51,7 +51,7 @@ download() { # url file
     elif command -v wget >/dev/null 2>&1; then
         wget -q -O "$2" "$1" || die "couldn't download $1"
     else
-        die "needs curl or wget to download tb"
+        die "needs curl or wget to download tos"
     fi
 }
 
@@ -69,17 +69,17 @@ main() {
         die "needs sha256sum or shasum to check the download"
     command -v tar >/dev/null 2>&1 || die "needs tar to unpack the download"
 
-    install_dir=${TB_INSTALL_DIR:-$HOME/.local/bin}
-    if [ -n "${TB_DOWNLOAD_URL:-}" ]; then
-        base=${TB_DOWNLOAD_URL%/}
-    elif [ -n "${TB_VERSION:-}" ]; then
-        base=https://github.com/$REPO/releases/download/v${TB_VERSION#v}
+    install_dir=${TOS_INSTALL_DIR:-$HOME/.local/bin}
+    if [ -n "${TOS_DOWNLOAD_URL:-}" ]; then
+        base=${TOS_DOWNLOAD_URL%/}
+    elif [ -n "${TOS_VERSION:-}" ]; then
+        base=https://github.com/$REPO/releases/download/v${TOS_VERSION#v}
     else
         base=https://github.com/$REPO/releases/latest/download
     fi
-    file=tb-$target.tar.gz
+    file=tos-$target.tar.gz
 
-    tmp=$(mktemp -d 2>/dev/null || mktemp -d -t tb)
+    tmp=$(mktemp -d 2>/dev/null || mktemp -d -t tos)
     trap 'rm -rf "$tmp"' EXIT
 
     say "downloading $base/$file"
@@ -92,30 +92,35 @@ main() {
     fi
 
     tar -xzf "$tmp/$file" -C "$tmp"
-    set -- "$tmp"/tb-*/tb
-    [ -f "$1" ] || die "$file has no tb in it"
+    set -- "$tmp"/tos-*/tos
+    [ -f "$1" ] || die "$file has no tos in it"
     new=$1
     # Run it before installing, so a binary this system can't run never replaces a working one.
-    version=$("$new" --version 2>/dev/null) || die "the downloaded tb doesn't run on this system.
+    version=$("$new" --version 2>/dev/null) || die "the downloaded tos doesn't run on this system.
 On Linux it needs glibc 2.34 or newer: Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora 35+."
 
     mkdir -p "$install_dir"
     upgrade=no
-    [ -e "$install_dir/tb" ] && upgrade=yes
-    # Copy next to the old one, then rename over it: a tb that's running keeps its old file.
-    cp "$new" "$install_dir/.tb.new.$$"
-    chmod 755 "$install_dir/.tb.new.$$"
-    mv -f "$install_dir/.tb.new.$$" "$install_dir/tb"
-    say "installed $version as $install_dir/tb"
+    [ -e "$install_dir/tos" ] && upgrade=yes
+    # Copy next to the old one, then rename over it: a tos that's running keeps its old file.
+    cp "$new" "$install_dir/.tos.new.$$"
+    chmod 755 "$install_dir/.tos.new.$$"
+    mv -f "$install_dir/.tos.new.$$" "$install_dir/tos"
+    say "installed $version as $install_dir/tos"
 
     case ":$PATH:" in
     *":$install_dir:"*) ;;
     *) say "$install_dir isn't on your PATH. Add this line to your shell's startup file (~/.bashrc, ~/.zshrc):
     export PATH=\"$install_dir:\$PATH\"" ;;
     esac
-    if [ "$upgrade" = yes ] && command -v pgrep >/dev/null 2>&1 && pgrep -x tb >/dev/null 2>&1; then
-        say "a tb server from before is still running the old version. If tb refuses to attach,
-    run: tb kill   (attaching again restores the session)"
+    # Up to 0.1.1 the command was called tb.
+    if [ -e "$install_dir/tb" ]; then
+        say "$install_dir/tb is this program from before it was renamed tos. Sessions started by tb keep
+    running under it: end them with \`tb kill-all-sessions -y\` and \`tos\` restores them. Then: rm $install_dir/tb"
+    fi
+    if [ "$upgrade" = yes ] && command -v pgrep >/dev/null 2>&1 && pgrep -x tos >/dev/null 2>&1; then
+        say "a tos server from before is still running the old version. If tos refuses to attach,
+    run: tos kill   (attaching again restores the session)"
     fi
 }
 

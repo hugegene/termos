@@ -1,5 +1,5 @@
-//! `tb`: a terminal workspace with persistent sessions, tabs, split panes and a built-in file finder.
-//! ("tb" is a working name until the product name is chosen.)
+//! `tos`, the command of termos: a terminal workspace with persistent sessions, tabs, split panes and a
+//! built-in file finder.
 
 mod cli;
 mod client;
@@ -25,9 +25,9 @@ use protocol::Command;
 // The extension API's version is in `--version`. Within a version, commands, flags, JSON fields and events
 // are only ever added, never renamed, removed or changed in meaning (docs/cli.md).
 #[command(
-    name = "tb",
-    version = concat!(env!("CARGO_PKG_VERSION"), " (extension API 1)"),
-    about = "Terminal workspace: persistent sessions, tabs, split panes and a file finder"
+    name = "tos",
+    version = concat!(env!("CARGO_PKG_VERSION"), " (extension API 2)"),
+    about = "termos, a terminal workspace: persistent sessions, tabs, split panes and a file finder"
 )]
 struct Cli {
     /// Session name (default: the session you're in, else "main")
@@ -38,7 +38,7 @@ struct Cli {
 }
 
 /// `-s NAME` on each command that works on one session. It's given before any further subcommand
-/// (`tb action -s work new-tab`), because zellij's actions use `-s` for their own flags.
+/// (`tos action -s work new-tab`), because zellij's actions use `-s` for their own flags.
 #[derive(Args, Default)]
 struct SessionOpt {
     /// Session name (default: the session you're in, else "main")
@@ -53,7 +53,7 @@ struct AttachArgs {
     name: Option<String>,
     #[command(flatten)]
     s: SessionOpt,
-    /// Create the session if it doesn't exist (always the case in tb; accepted for zellij's habit)
+    /// Create the session if it doesn't exist (always the case in tos; accepted for zellij's habit)
     #[arg(short, long)]
     #[allow(dead_code)]
     create: bool,
@@ -73,7 +73,7 @@ enum Cmd {
     /// Attach to a session, starting it if needed (the default)
     #[command(visible_alias = "a")]
     #[command(
-        after_long_help = "Examples:\n  tb attach work            # attach to \"work\", starting it if needed\n  tb attach -b work         # start it in the background, without attaching\n  tb attach --forget work   # start fresh, without the saved layout"
+        after_long_help = "Examples:\n  tos attach work            # attach to \"work\", starting it if needed\n  tos attach -b work         # start it in the background, without attaching\n  tos attach --forget work   # start fresh, without the saved layout"
     )]
     Attach(AttachArgs),
     /// Start a session without attaching (same as `attach -b`)
@@ -91,7 +91,7 @@ enum Cmd {
         /// List in reverse order
         #[arg(short, long)]
         reverse: bool,
-        /// No colours or formatting (tb prints none; accepted for zellij's habit)
+        /// No colours or formatting (tos prints none; accepted for zellij's habit)
         #[arg(short, long)]
         #[allow(dead_code)]
         no_formatting: bool,
@@ -136,7 +136,7 @@ enum Cmd {
         #[command(flatten)]
         s: SessionOpt,
     },
-    /// Change the session from scripts: zellij's actions (same names and flags) and tb's own
+    /// Change the session from scripts: zellij's actions (same names and flags) and termos's own
     #[command(visible_alias = "ac")]
     Action {
         #[command(flatten)]
@@ -144,10 +144,10 @@ enum Cmd {
         #[command(subcommand)]
         action: cli::ActionCmd,
     },
-    /// Run COMMAND in a new pane (zellij's `run`); prints the pane's id. The session comes from `tb -s`
+    /// Run COMMAND in a new pane (zellij's `run`); prints the pane's id. The session comes from `tos -s`
     #[command(visible_alias = "r")]
     #[command(
-        after_long_help = "Examples:\n  tb run -- htop\n  tb run -d right -n logs -- tail -f app.log\n  tb -s work run -s -- make deploy   # typed at a prompt, not run"
+        after_long_help = "Examples:\n  tos run -- htop\n  tos run -d right -n logs -- tail -f app.log\n  tos -s work run -s -- make deploy   # typed at a prompt, not run"
     )]
     Run(cli::PaneArgs),
     /// Open FILE in the editor in a new pane (zellij's `edit`); prints the pane's id
@@ -155,9 +155,9 @@ enum Cmd {
     Edit(cli::EditArgs),
     /// Print events as JSON lines until the session ends: tabs and panes opening, closing, renaming and
     /// gaining focus, mode changes, clients. With -p, also those panes' text whenever it changes. The
-    /// session comes from `tb -s`
+    /// session comes from `tos -s`
     #[command(
-        after_long_help = "Examples:\n  tb subscribe -f json                 # every event as a JSON line\n  tb subscribe -p terminal_3           # pane 3's text whenever it changes\n  tb subscribe -p 3 -s 100 --ansi      # first with 100 lines of scrollback, in colour"
+        after_long_help = "Examples:\n  tos subscribe -f json                 # every event as a JSON line\n  tos subscribe -p terminal_3           # pane 3's text whenever it changes\n  tos subscribe -p 3 -s 100 --ansi      # first with 100 lines of scrollback, in colour"
     )]
     Subscribe {
         /// Panes whose text to print when it changes (e.g. terminal_1 or 1)
@@ -226,9 +226,12 @@ fn absolute(p: PathBuf) -> anyhow::Result<PathBuf> {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
+    for note in paths::migrate_from_tb() {
+        eprintln!("tos: {note}");
+    }
     let Cli { session: top, cmd } = cli;
     let session = |name: Option<String>, s: SessionOpt| {
-        pick_session([name, s.session, top.clone()], std::env::var("TB_SESSION").ok())
+        pick_session([name, s.session, top.clone()], std::env::var("TOS_SESSION").ok())
     };
     match cmd.unwrap_or(Cmd::Attach(AttachArgs::default())) {
         Cmd::Server { name, run_commands } => {
@@ -262,7 +265,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Cmd::Finder { dir, s } => {
             let session = session(None, s)?;
             let dir = absolute(dir.unwrap_or(std::env::current_dir()?))?;
-            let inside = std::env::var("TB_SESSION").is_ok_and(|s| s == session);
+            let inside = std::env::var("TOS_SESSION").is_ok_and(|s| s == session);
             client::ensure_server(&session, false)?;
             client::command(&session, Command::Finder { dir: Some(dir) })?;
             if !inside {
@@ -302,7 +305,7 @@ fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("tb: {e:#}");
+            eprintln!("tos: {e:#}");
             ExitCode::FAILURE
         }
     }
@@ -315,7 +318,7 @@ mod tests {
     use super::*;
 
     fn parse(args: &[&str]) -> Cli {
-        Cli::try_parse_from(std::iter::once("tb").chain(args.iter().copied())).unwrap()
+        Cli::try_parse_from(std::iter::once("tos").chain(args.iter().copied())).unwrap()
     }
 
     #[test]
@@ -355,7 +358,7 @@ mod tests {
         }
     }
 
-    /// docs/cli/ has a page per command, generated from these definitions. `TB_UPDATE_DOCS=1` rewrites it.
+    /// docs/cli/ has a page per command, generated from these definitions. `TOS_UPDATE_DOCS=1` rewrites it.
     #[test]
     fn cli_docs_are_current() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/cli");
@@ -374,7 +377,7 @@ mod tests {
             }
             found
         };
-        if std::env::var_os("TB_UPDATE_DOCS").is_some() {
+        if std::env::var_os("TOS_UPDATE_DOCS").is_some() {
             for old in on_disk(&dir) {
                 if !pages.iter().any(|(p, _)| *p == old) {
                     std::fs::remove_file(dir.join(&old)).unwrap();
@@ -395,7 +398,7 @@ mod tests {
         stale.extend(on_disk(&dir).into_iter().filter(|f| !pages.iter().any(|(p, _)| p == f)));
         assert!(
             stale.is_empty(),
-            "docs/cli is out of date ({}); run: TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs",
+            "docs/cli is out of date ({}); run: TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs",
             stale.join(", ")
         );
     }
@@ -411,7 +414,7 @@ mod tests {
             assert!(doc.contains(&format!("`{name}")), "docs/cli.md doesn't mention `{name}`");
         }
         for top in ["run", "edit", "watch", "subscribe"] {
-            assert!(doc.contains(&format!("`tb {top}")), "docs/cli.md doesn't mention `tb {top}`");
+            assert!(doc.contains(&format!("`tos {top}")), "docs/cli.md doesn't mention `tos {top}`");
         }
     }
 

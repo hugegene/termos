@@ -1,5 +1,5 @@
 //! Key names as zellij writes them, for example `Ctrl a`, `Alt Shift b`, `F1`, `PageDown`, `Enter`.
-//! Used by `tb action send-keys` and by key bindings in the config file.
+//! Used by `tos action send-keys` and by key bindings in the config file.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb action focus`
+# `tos action focus`
 
-Focus a pane: left, right, up, down, next, prev, or an id (tb's form)
+Focus a pane: left, right, up, down, next, prev, or an id (termos's form)
 
 ```
-tb action focus <TARGET>
+tos action focus <TARGET>
 ```
 
 ## Arguments

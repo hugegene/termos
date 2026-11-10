@@ -158,7 +158,7 @@ impl Grid {
     pub fn save(&mut self) -> Result<(), String> {
         let data = self.to_text()?;
         let name = self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let tmp = self.path.with_file_name(format!(".{name}.tb-save"));
+        let tmp = self.path.with_file_name(format!(".{name}.tos-save"));
         fs::write(&tmp, &data).map_err(|e| e.to_string())?;
         if let Ok(meta) = fs::metadata(&self.path) {
             let _ = fs::set_permissions(&tmp, meta.permissions());

@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb kill`
+# `tos kill`
 
 End a session and every program in it (attach again to restore its layout)
 
 ```
-tb kill [OPTIONS] [NAME]
+tos kill [OPTIONS] [NAME]
 ```
 
 Also: `kill-session`, `k`.

@@ -1,32 +1,32 @@
-# `tb`'s command line: the extension API
+# The `tos` command line: termos's extension API
 
-Other people extend `tb` by writing programs that call its command line, in any language. `tb` has no plugin
+Other people extend `tos` by writing programs that call its command line, in any language. `tos` has no plugin
 system. An extension is an ordinary program that:
-- **acts** with `tb action …`: zellij's actions, with the same names and flags
+- **acts** with `tos action …`: zellij's actions, with the same names and flags
 - **reads** state as JSON (`list-tabs -j`, `list-panes -j`)
-- **reacts** to what happens with `tb subscribe`
-- **shows** text in the status bar with `tb action set-status`
+- **reacts** to what happens with `tos subscribe`
+- **shows** text in the status bar with `tos action set-status`
 
-A user starts it from a key with a `Run` binding in `~/.config/tb/config.kdl`.
+A user starts it from a key with a `Run` binding in `~/.config/termos/config.kdl`.
 
-zellij scripts port by changing `zellij` to `tb` and `ZELLIJ_SESSION_NAME`/`ZELLIJ_PANE_ID` to
-`TB_SESSION`/`TB_PANE_ID`.
+zellij scripts port by changing `zellij` to `tos` and `ZELLIJ_SESSION_NAME`/`ZELLIJ_PANE_ID` to
+`TOS_SESSION`/`TOS_PANE_ID`.
 
 **[docs/cli/](cli/README.md) has a page for every command,** with its usage, options and examples. The pages
-are generated from the same definitions as `tb … --help`. This page covers what spans commands.
+are generated from the same definitions as `tos … --help`. This page covers what spans commands.
 
 ## Stability
 
-`tb --version` prints the extension API's version: `tb 0.1.1 (extension API 1)`. Within one API version,
+`tos --version` prints the extension API's version: `tos 0.2.0 (extension API 2)`. Within one API version,
 commands, flags, JSON fields and events are only ever **added**. They are never renamed, removed or changed in
 meaning. Failures exit non-zero with the message on stderr.
 
 ## Which session
 
-| Where the extension runs | How `tb` finds the session |
+| Where the extension runs | How `tos` finds the session |
 |---|---|
-| In a `tb` pane | `TB_SESSION` is set in every pane, so plain `tb action …` works. `TB_PANE_ID` names the pane it runs in |
-| Anywhere else | `tb -s NAME action …` (also `tb action -s NAME …`). Without either, the session is "main" |
+| In a `tos` pane | `TOS_SESSION` is set in every pane, so plain `tos action …` works. `TOS_PANE_ID` names the pane it runs in |
+| Anywhere else | `tos -s NAME action …` (also `tos action -s NAME …`). Without either, the session is "main" |
 
 ## Ids
 
@@ -49,18 +49,18 @@ meaning. Failures exit non-zero with the message on stderr.
 
 | Command | Does |
 |---|---|
-| `tb attach [NAME]` (`a`), `tb -s NAME` | Attach, starting the session if needed. `-b` starts it without attaching, `--forget` drops its saved layout first, `-f` runs restored commands, `-c` is accepted |
-| `tb start [NAME]` | Start without attaching |
-| `tb list-sessions` (`ls`) | zellij's shape: `NAME [2 tabs, 1 attached] (current)`, `NAME (EXITED - attach to restore)`. `-s` names only, `-r` reversed, `-n` accepted |
-| `tb kill-session [NAME]` (`k`), `tb kill-all-sessions` (`ka`) | End sessions; layouts are kept for next time. `-y` skips the question |
-| `tb delete-session [NAME]` (`d`), `tb delete-all-sessions` (`da`) | Forget saved layouts. `-f` also ends running sessions |
-| `tb watch [NAME]` (`w`) | Show a session read-only; `q` or Ctrl+C stops |
-| `tb run [-d right\|down] [-n NAME] [--cwd DIR] [-s] [--] COMMAND…` (`r`) | A new pane running COMMAND; prints its id. `-s` types it at a shell's prompt without running it |
-| `tb edit [-l LINE] [-d DIR] [--cwd DIR] FILE` (`e`) | FILE in the editor in a new pane; prints its id |
-| `tb subscribe` | Events, below |
-| `tb finder [DIR]` | A finder tab |
+| `tos attach [NAME]` (`a`), `tos -s NAME` | Attach, starting the session if needed. `-b` starts it without attaching, `--forget` drops its saved layout first, `-f` runs restored commands, `-c` is accepted |
+| `tos start [NAME]` | Start without attaching |
+| `tos list-sessions` (`ls`) | zellij's shape: `NAME [2 tabs, 1 attached] (current)`, `NAME (EXITED - attach to restore)`. `-s` names only, `-r` reversed, `-n` accepted |
+| `tos kill-session [NAME]` (`k`), `tos kill-all-sessions` (`ka`) | End sessions; layouts are kept for next time. `-y` skips the question |
+| `tos delete-session [NAME]` (`d`), `tos delete-all-sessions` (`da`) | Forget saved layouts. `-f` also ends running sessions |
+| `tos watch [NAME]` (`w`) | Show a session read-only; `q` or Ctrl+C stops |
+| `tos run [-d right\|down] [-n NAME] [--cwd DIR] [-s] [--] COMMAND…` (`r`) | A new pane running COMMAND; prints its id. `-s` types it at a shell's prompt without running it |
+| `tos edit [-l LINE] [-d DIR] [--cwd DIR] FILE` (`e`) | FILE in the editor in a new pane; prints its id |
+| `tos subscribe` | Events, below |
+| `tos finder [DIR]` | A finder tab |
 
-### `tb action …` (`tb ac …`)
+### `tos action …` (`tos ac …`)
 
 Pane actions take `-p/--pane-id` (default: the focused pane), and tab actions take `-t/--tab-id` (default: the
 active tab).
@@ -85,30 +85,30 @@ active tab).
 | Action | Does |
 |---|---|
 | `new-pane [-d right\|down] [-n NAME] [--cwd DIR] [-s] [--] [COMMAND…]` | A new pane (default: where there's most room); prints its id |
-| `split right\|down [--cwd DIR] [-- COMMAND…]` | `tb`'s older form of `new-pane` |
-| `edit FILE [-l LINE] [-d DIR] [--cwd DIR]` | As `tb edit` |
+| `split right\|down [--cwd DIR] [-- COMMAND…]` | `tos`'s older form of `new-pane` |
+| `edit FILE [-l LINE] [-d DIR] [--cwd DIR]` | As `tos edit` |
 | `close-pane [-p ID]` (`close`) | Close a pane |
 | `focus-pane-id ID`, `focus-next-pane`, `focus-previous-pane`, `move-focus DIR`, `move-focus-or-tab DIR` | Move focus |
-| `focus TARGET` | `tb`'s form: left, right, up, down, next, prev or an id |
+| `focus TARGET` | `tos`'s form: left, right, up, down, next, prev or an id |
 | `move-pane [DIR] [-p ID]`, `move-pane-backwards [-p ID]` | Swap a pane with a neighbour, or the next or previous pane |
 | `rename-pane NAME [-p ID]`, `undo-rename-pane [-p ID]` | The name in the pane's frame |
 | `toggle-fullscreen [-p ID]` (`zoom`) | Show a pane alone in its tab |
 | `toggle-pane-frames` | Frames on or off |
-| `resize increase\|decrease [DIR] [-p ID]`, `resize DIR [CELLS]` | zellij's form (5% steps), or `tb`'s (move the border by CELLS) |
+| `resize increase\|decrease [DIR] [-p ID]`, `resize DIR [CELLS]` | zellij's form (5% steps), or `tos`'s (move the border by CELLS) |
 | `clear [-p ID]` | Clear the screen and scrollback |
 | `edit-scrollback [-p ID]` | Open the scrollback in the editor, in the pane's place |
 | `set-pane-color [-p ID] [--fg COLOR] [--bg COLOR] [--reset]` | Default colours, `#00e000` or `rgb:00/e0/00`. Default pane: the one it runs in |
 | `scroll-up`, `scroll-down`, `page-scroll-up`, `page-scroll-down`, `half-page-scroll-up`, `half-page-scroll-down`, `scroll-to-top`, `scroll-to-bottom` | `[-p ID]` |
-| `list-panes [-j] [-t] [-c] [-s] [-g] [-a]` | zellij's columns, or JSON. `tb list-panes [-j] [-a]` too |
-| `dump-screen [-p ID] [-f] [-a] [--path FILE]` | The pane's text; `-f` with scrollback, `-a` with colours. `tb dump-screen` too |
-| `dump-layout` | The session's layout, as `tb` saves it (JSON) |
+| `list-panes [-j] [-t] [-c] [-s] [-g] [-a]` | zellij's columns, or JSON. `tos list-panes [-j] [-a]` too |
+| `dump-screen [-p ID] [-f] [-a] [--path FILE]` | The pane's text; `-f` with scrollback, `-a` with colours. `tos dump-screen` too |
+| `dump-layout` | The session's layout, as `tos` saves it (JSON) |
 | `list-clients` | Attached clients |
 
 **Input**
 
 | Action | Does |
 |---|---|
-| `write-chars TEXT [-p ID] [--enter]` | Type text; `--enter` presses Enter after it (`tb`) |
+| `write-chars TEXT [-p ID] [--enter]` | Type text; `--enter` presses Enter after it (`tos`) |
 | `write BYTE… [-p ID]` | Bytes as numbers: `write 27 91 65` |
 | `paste TEXT [-p ID]` | Paste, bracketed if the program asked for it |
 | `send-keys KEY… [-p ID]` | Keys as zellij names them: `"Ctrl a"`, `F1`, `"Alt Shift b"`, `Enter`, `PageDown` |
@@ -119,11 +119,11 @@ active tab).
 |---|---|
 | `switch-mode MODE` | normal, locked, pane, tab, resize, move, scroll, search, session, tmux |
 | `switch-session NAME` | Move your client (the one that typed last) to another session, starting it if needed |
-| `rename-session NAME` | Its socket, saved layout and log follow. Panes keep the old `TB_SESSION` until restarted |
+| `rename-session NAME` | Its socket, saved layout and log follow. Panes keep the old `TOS_SESSION` until restarted |
 | `save-session` | Save the layout now (it's also saved every 2 seconds) |
 | `detach` | Detach every attached client |
 
-**`tb`'s own**
+**`tos`'s own**
 
 | Action | Does |
 |---|---|
@@ -139,11 +139,11 @@ active tab).
 - `viewport_rows`, `viewport_columns`, `display_area_rows`, `display_area_columns`
 - `selectable_tiled_panes_count`
 
-Fields for features `tb` lacks have fixed values: `panes_to_hide` (0), `are_floating_panes_visible` (false),
+Fields for features `tos` lacks have fixed values: `panes_to_hide` (0), `are_floating_panes_visible` (false),
 `other_focused_clients` ([]), `active_swap_layout_name` (null), `is_swap_layout_dirty` (false),
 `selectable_floating_panes_count` (0), `has_bell_notification` and `is_flashing_bell` (false).
 
-`tb` adds `auto_name`: true while the name is automatic. A finder tab is then `finder`, or `finder: <folder>`
+`tos` adds `auto_name`: true while the name is automatic. A finder tab is then `finder`, or `finder: <folder>`
 when there are several; another tab follows its folder (the last part of the focused pane's working folder,
 or `~` for home).
 
@@ -157,7 +157,7 @@ or `~` for home).
 - `pane_cwd`, `default_fg`, `default_bg`
 - `tab_id`, `tab_position`, `tab_name`
 
-`tb` adds:
+`tos` adds:
 - `kind`: `terminal`, `finder` (a finder's file list) or `preview` (a finder's preview)
 - `tab`: position from 1
 - `name`: given with `rename-pane`
@@ -168,13 +168,13 @@ or `~` for home).
 
 **`list-clients`**: `client_id`, `pane_id`, `running_command`, `active`, `cols`, `rows`, `images`.
 
-## Events: `tb subscribe`
+## Events: `tos subscribe`
 
 ```
-tb subscribe [-f raw|json] [-p PANE…] [-s [N]] [--ansi]
+tos subscribe [-f raw|json] [-p PANE…] [-s [N]] [--ansi]
 ```
 
-`tb subscribe` prints one JSON object per line as things change, until the session ends.
+`tos subscribe` prints one JSON object per line as things change, until the session ends.
 - **Format:** with `-f json`, everything is JSON. With `raw` (the default), pane text prints as plain lines
   and other events as JSON.
 - **Pane text:** `-p` also sends those panes' text: once at the start (with `-s`, plus all of the scrollback,
@@ -204,10 +204,10 @@ tb subscribe [-f raw|json] [-p PANE…] [-s [N]] [--ansi]
 - Changes are collected for up to 0.1 seconds. Something that appears and disappears within that time may
   not be reported.
 
-## Key bindings: `~/.config/tb/config.kdl`
+## Key bindings: `~/.config/termos/config.kdl`
 
-The file is `$TB_CONFIG` if set, else `$XDG_CONFIG_HOME/tb/config.kdl`, else `~/.config/tb/config.kdl`. It's
-read when a session starts, and by `tb action reload-config`. It uses zellij's keybind syntax, so zellij
+The file is `$TOS_CONFIG` if set, else `$XDG_CONFIG_HOME/termos/config.kdl`, else `~/.config/termos/config.kdl`. It's
+read when a session starts, and by `tos action reload-config`. It uses zellij's keybind syntax, so zellij
 `bind` blocks copy across:
 
 ```kdl
@@ -224,7 +224,7 @@ keybinds {
 - **Blocks:**
   - modes: `normal`, `locked`, `pane`, `tab`, `resize`, `move`, `scroll`, `search`, `session`, `tmux`
   - `shared`, `shared_except "mode"…` and `shared_among "mode"…`
-- **A binding replaces `tb`'s own key in that mode.** `clear-defaults=true` is ignored: `tb` keeps its keys.
+- **A binding replaces `tos`'s own key in that mode.** `clear-defaults=true` is ignored: `tos` keeps its keys.
 - **Actions:**
   - `Run "cmd" "arg"…`, with `cwd`, `direction`, `name`, `start_suspended` and `close_on_exit`
   - `NewTab`, with `name` and `cwd`
@@ -240,7 +240,7 @@ keybinds {
   - `Write`, `WriteChars`, `Detach`, `Quit` (asks first)
 - **Skipped, with a warning naming the line:** a binding that uses anything else (plugins, floating panes,
   swap layouts, pane groups). The warnings show briefly in the status bar when you attach, and in full from
-  `tb action reload-config`.
+  `tos action reload-config`.
 
 ## Not copied from zellij
 
@@ -258,10 +258,10 @@ keybinds {
 and goes back to its tab when you click the warning:
 
 ```sh
-python3 docs/examples/exit-watcher.py          # inside a tb session
+python3 docs/examples/exit-watcher.py          # inside a tos session
 ```
 
-It subscribes with `tb subscribe --format json`, remembers pane titles from `pane_opened` and
+It subscribes with `tos subscribe --format json`, remembers pane titles from `pane_opened` and
 `pane_retitled`, and on a `pane_closed` with a non-zero `exit_status` runs
-`tb action set-status --id exit-watcher --ttl 30 "✗ make exited 2"`. On a `status_clicked` with that id, it
-clears the warning and runs `tb action go-to-tab-by-id`.
+`tos action set-status --id exit-watcher --ttl 30 "✗ make exited 2"`. On a `status_clicked` with that id, it
+clears the warning and runs `tos action go-to-tab-by-id`.

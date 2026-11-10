@@ -47,9 +47,9 @@ finder [folder]                   # inside zellij → new tab; outside → new z
 `Ctrl+z` undo. (`Ctrl+S`/`Ctrl+Q` are taken by zellij — and **Ctrl+Q quits all of zellij** in this setup.)
 
 
-## tb: the Rust rebuild (work in progress)
+## termos (`tos`): the Rust rebuild (work in progress)
 
-`tb` is a working name. It's our own multiplexer with the finder built in: persistent sessions, tabs, split
+termos, run as `tos`, is our own multiplexer with the finder built in: persistent sessions, tabs, split
 panes, scrolling and search, and mouse support, all in one binary. See `docs/plans/2026-11-03-build-steps-0-3.md`
 and `docs/plans/2026-11-04-zellij-keys-and-frames.md`.
 
@@ -61,21 +61,21 @@ curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.s
 
 - **Where it runs:** Linux on x86_64 or arm64 with glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+, RHEL 9+),
   and Macs with Apple Silicon.
-- **Where it goes:** `~/.local/bin/tb`, without sudo. `TB_INSTALL_DIR=<folder>` picks another folder, and
-  `TB_VERSION=0.1.1` a particular version. Run it again to upgrade.
-- **What it checks:** the download's SHA-256, and that `tb` runs, before it replaces anything.
-- **Optional programs:** Neovim, poppler (PDF), ffmpeg (video) and gio or trash. `tb` names the package when
+- **Where it goes:** `~/.local/bin/tos`, without sudo. `TOS_INSTALL_DIR=<folder>` picks another folder, and
+  `TOS_VERSION=0.2.0` a particular version. Run it again to upgrade.
+- **What it checks:** the download's SHA-256, and that `tos` runs, before it replaces anything.
+- **Optional programs:** Neovim, poppler (PDF), ffmpeg (video) and gio or trash. `tos` names the package when
   one is missing.
 
 ```bash
-tb               # attach to session "main", starting it if needed
-tb finder ~/docs # open a finder tab
-tb ls            # list sessions;  tb kill  ends one (attach again to restore it)
+tos               # attach to session "main", starting it if needed
+tos finder ~/docs # open a finder tab
+tos ls            # list sessions;  tos kill  ends one (attach again to restore it)
 ```
 
 ### Development
 
-- **Build:** `cargo build --release` gives `target/release/tb`. `CLAUDE.md` lists the tests and checks.
+- **Build:** `cargo build --release` gives `target/release/tos`. `CLAUDE.md` lists the tests and checks.
 - **Release:** set `version` in `Cargo.toml`, commit, then push a tag `v<version>`.
   `.github/workflows/release.yml` builds each target with `scripts/package.sh` and publishes the release
   with `scripts/install.sh`. See `docs/plans/2026-11-09-distribution.md`.
@@ -83,38 +83,38 @@ tb ls            # list sessions;  tb kill  ends one (attach again to restore it
 Session commands are **zellij's**, with the same names, aliases and flags:
 
 ```bash
-tb attach work           # or: tb a work, tb -s work; starts "work" if needed (-c is accepted)
-tb attach -b work        # start it in the background without attaching
-tb attach --forget work  # forget its saved layout and start fresh
-tb attach -f work        # when restoring, run the commands that were running
-tb list-sessions         # or: tb ls; -s names only, -r reversed
-tb kill-session work     # or: tb k work; keeps the layout for next time
-tb delete-session work   # or: tb d work; forgets the saved layout (-f also ends a running session)
-tb kill-all-sessions     # or: tb ka; -y skips the question
-tb delete-all-sessions   # or: tb da; -y skips the question, -f also ends and forgets running ones
+tos attach work           # or: tos a work, tos -s work; starts "work" if needed (-c is accepted)
+tos attach -b work        # start it in the background without attaching
+tos attach --forget work  # forget its saved layout and start fresh
+tos attach -f work        # when restoring, run the commands that were running
+tos list-sessions         # or: tos ls; -s names only, -r reversed
+tos kill-session work     # or: tos k work; keeps the layout for next time
+tos delete-session work   # or: tos d work; forgets the saved layout (-f also ends a running session)
+tos kill-all-sessions     # or: tos ka; -y skips the question
+tos delete-all-sessions   # or: tos da; -y skips the question, -f also ends and forgets running ones
 ```
 
-Unlike zellij, plain `tb` returns to "main" instead of starting a new session with a random name.
+Unlike zellij, plain `tos` returns to "main" instead of starting a new session with a random name.
 
 **PDFs** in the finder show their text; `t` shows the pages (`+`/`-` zoom, `0` fit width, `[` `]` page). This
 needs poppler-utils (`sudo apt install poppler-utils`).
 
 **Links** in a Markdown preview can be clicked: the finder shows the linked file, and `Backspace` goes back.
 
-**Extending `tb`** works through the same command line, from any language; there are no plugins. See
+**Extending `tos`** works through the same command line, from any language; there are no plugins. See
 [docs/cli.md](docs/cli.md) for the overview and [docs/cli/](docs/cli/README.md) for a page per command.
 
 ```bash
-tb action new-pane -d right -- make test    # zellij's actions, names and flags; prints terminal_7
-tb action list-tabs -j                      # JSON with zellij's fields
-tb subscribe -f json                        # events: tabs and panes opening, closing, exiting, …
-tb action set-status --id ci "build ✓"      # text in the status bar; clicks arrive as events
-tb run -- htop                              # also: tb edit FILE, tb watch NAME
+tos action new-pane -d right -- make test    # zellij's actions, names and flags; prints terminal_7
+tos action list-tabs -j                      # JSON with zellij's fields
+tos subscribe -f json                        # events: tabs and panes opening, closing, exiting, …
+tos action set-status --id ci "build ✓"      # text in the status bar; clicks arrive as events
+tos run -- htop                              # also: tos edit FILE, tos watch NAME
 ```
 
-Keys can run commands. Add zellij-style `bind` blocks to `~/.config/tb/config.kdl`, for example
+Keys can run commands. Add zellij-style `bind` blocks to `~/.config/termos/config.kdl`, for example
 `tab { bind "p" { Run "prbot" "ls"; SwitchToMode "Normal"; } }`. A zellij script such as `prbot` ports by
-changing `zellij` to `tb` and `ZELLIJ_*` to `TB_*`.
+changing `zellij` to `tos` and `ZELLIJ_*` to `TOS_*`.
 
 Inside a session the keys are **zellij's** (your `~/.config/zellij/config.kdl` bindings), and each pane has a
 frame like zellij's:
@@ -132,17 +132,17 @@ frame like zellij's:
 | `Ctrl+q` | quit: ends the session (asks first) |
 | `Alt+n`, `Alt+arrows`, `Alt+=`/`Alt+-`, `Alt+i`/`Alt+o` | new pane, focus, resize, move the tab |
 
-**Sessions come back.** `tb kill`, Ctrl+q, a crash or a reboot keeps the session's layout: tabs, splits, names,
+**Sessions come back.** `tos kill`, Ctrl+q, a crash or a reboot keeps the session's layout: tabs, splits, names,
 folders and finder state. Attaching again restores it. A command that was running is typed at the prompt
-without Enter. `tb ls` shows saved sessions, and `tb delete NAME` forgets one.
+without Enter. `tos ls` shows saved sessions, and `tos delete NAME` forgets one.
 
 **Finder:** images show for real in terminals that support kitty, iTerm2 or sixel images (Ghostty, kitty,
 WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one with
-`TB_IMAGES=kitty|iterm2|sixel|blocks`. Enter on a `.csv`/`.tsv` opens a **grid editor**: arrows move, `e`
+`TOS_IMAGES=kitty|iterm2|sixel|blocks`. Enter on a `.csv`/`.tsv` opens a **grid editor**: arrows move, `e`
 edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Alt+s` saves and `q` closes. `E`
 opens any text file in Neovim.
 
-`Esc` or `Enter` leaves a mode; `?` in any mode shows all keys. Not in `tb` yet: floating, stacked and pinned
+`Esc` or `Enter` leaves a mode; `?` in any mode shows all keys. Not in `tos` yet: floating, stacked and pinned
 panes, swap layouts, pane groups and zellij's plugins.
 
 - **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to

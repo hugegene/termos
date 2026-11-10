@@ -38,7 +38,7 @@ pub fn ensure_server(session: &str, run_commands: bool) -> anyhow::Result<bool> 
         return Ok(false);
     }
     paths::ensure_private_dir(&paths::socket_dir())?;
-    let exe = env::current_exe().context("finding the tb program")?;
+    let exe = env::current_exe().context("finding the tos program")?;
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("__server").arg(session);
     if run_commands {
@@ -79,7 +79,7 @@ pub fn command(session: &str, cmd: Command) -> anyhow::Result<String> {
 }
 
 pub fn list_sessions(short: bool, reverse: bool) -> anyhow::Result<()> {
-    let current = env::var("TB_SESSION").ok();
+    let current = env::var("TOS_SESSION").ok();
     let mark = |name: &str| if current.as_deref() == Some(name) { " (current)" } else { "" };
     // (name, the full line)
     let mut lines: Vec<(String, String)> = Vec::new();
@@ -93,7 +93,7 @@ pub fn list_sessions(short: bool, reverse: bool) -> anyhow::Result<()> {
                     let _ = fs::remove_file(paths::socket_path(&name));
                 } else {
                     let why = if e.to_string().contains("uses protocol") {
-                        "started by an older tb; `tb kill` ends it".to_owned()
+                        "started by an older tos; `tos kill` ends it".to_owned()
                     } else {
                         format!("not answering: {e}")
                     };
@@ -123,7 +123,7 @@ pub fn list_sessions(short: bool, reverse: bool) -> anyhow::Result<()> {
 /// Sessions whose server answers, with the one we're in (if any) last, so ending it doesn't stop us early.
 fn running_sessions() -> Vec<String> {
     let mut names: Vec<String> = paths::session_names().into_iter().filter(|n| connect(n).is_ok()).collect();
-    if let Ok(current) = env::var("TB_SESSION")
+    if let Ok(current) = env::var("TOS_SESSION")
         && let Some(i) = names.iter().position(|n| *n == current)
     {
         let me = names.remove(i);
@@ -154,7 +154,7 @@ pub fn kill_all_sessions(yes: bool) -> anyhow::Result<()> {
     let mut failed = 0;
     for name in &names {
         if let Err(e) = kill_session(name, false) {
-            eprintln!("tb: {name}: {e:#}");
+            eprintln!("tos: {name}: {e:#}");
             failed += 1;
         }
     }
@@ -191,14 +191,14 @@ pub fn delete_all_sessions(yes: bool, force: bool) -> anyhow::Result<()> {
     let mut failed = 0;
     for name in &exited {
         if let Err(e) = delete_session(name, false) {
-            eprintln!("tb: {name}: {e:#}");
+            eprintln!("tos: {name}: {e:#}");
             failed += 1;
         }
     }
     if force {
         for name in &running {
             if let Err(e) = kill_session(name, true) {
-                eprintln!("tb: {name}: {e:#}");
+                eprintln!("tos: {name}: {e:#}");
                 failed += 1;
             }
         }
@@ -214,7 +214,7 @@ pub fn delete_all_sessions(yes: bool, force: bool) -> anyhow::Result<()> {
 /// Deletes a session's saved layout before attaching, so it starts fresh. A running session is left alone.
 pub fn forget_saved(session: &str) -> anyhow::Result<()> {
     if connect(session).is_ok() {
-        eprintln!("tb: session '{session}' is running, so there's no saved layout to forget");
+        eprintln!("tos: session '{session}' is running, so there's no saved layout to forget");
         return Ok(());
     }
     let path = paths::saved_path(session);
@@ -224,7 +224,7 @@ pub fn forget_saved(session: &str) -> anyhow::Result<()> {
     }
 }
 
-/// Ends a session. A session started by an older `tb` can't read our commands, so its server process is ended
+/// Ends a session. A session started by an older `tos` can't read our commands, so its server process is ended
 /// directly (it's ours: the socket only accepts our user).
 pub fn kill_session(session: &str, forget: bool) -> anyhow::Result<()> {
     match command(session, Command::Kill { forget }) {
@@ -240,7 +240,7 @@ pub fn kill_session(session: &str, forget: bool) -> anyhow::Result<()> {
             }
             rustix::process::kill_process(peer.pid, rustix::process::Signal::TERM)?;
             let _ = fs::remove_file(paths::socket_path(session));
-            println!("ended session '{session}', which an older tb had started");
+            println!("ended session '{session}', which an older tos had started");
             Ok(())
         }
         Err(e) => Err(e),
@@ -248,7 +248,7 @@ pub fn kill_session(session: &str, forget: bool) -> anyhow::Result<()> {
 }
 
 /// The server answers `Kill` before it shuts down: it then saves the session and removes its socket. Waits for
-/// that (up to 5 s), so a `tb ls` or `tb attach` straight after sees the session ended and saved, not a server on
+/// that (up to 5 s), so a `tos ls` or `tos attach` straight after sees the session ended and saved, not a server on
 /// its way out.
 fn wait_until_ended(session: &str) {
     let sock = paths::socket_path(session);
@@ -275,7 +275,7 @@ pub fn delete_session(session: &str, force: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `tb subscribe`: prints events as they happen until the session ends (or the subscribed panes close).
+/// `tos subscribe`: prints events as they happen until the session ends (or the subscribed panes close).
 /// With `json` every event is a JSON line; otherwise pane text is printed as plain lines and other events
 /// as JSON lines.
 pub fn subscribe(
@@ -362,7 +362,7 @@ fn detect_graphics() -> Graphics {
         .ok()
         .filter(|w| w.width > 0 && w.height > 0 && w.columns > 0 && w.rows > 0)
         .map(|w| (w.width / w.columns, w.height / w.rows));
-    let forced = match var("TB_IMAGES").as_str() {
+    let forced = match var("TOS_IMAGES").as_str() {
         "kitty" => Some(ImageProtocol::Kitty),
         "iterm2" => Some(ImageProtocol::Iterm2),
         "sixel" => Some(ImageProtocol::Sixel),
@@ -495,7 +495,7 @@ fn choose_protocol(answers: &Answers, term_program: &str, lc_terminal: &str) -> 
 /// Attaches this terminal to the session until detach or the session ends.
 /// Attaching from inside a session would nest one in the other; refuse.
 pub fn ensure_outside() -> anyhow::Result<()> {
-    if let Ok(current) = env::var("TB_SESSION") {
+    if let Ok(current) = env::var("TOS_SESSION") {
         bail!("already inside session '{current}' (detach first with Ctrl+O d)");
     }
     Ok(())
@@ -506,7 +506,7 @@ pub fn attach(session: &str, run_commands: bool) -> anyhow::Result<()> {
     show(session, run_commands, false)
 }
 
-/// `tb watch`: shows a running session read-only. `q` or Ctrl+C stops watching.
+/// `tos watch`: shows a running session read-only. `q` or Ctrl+C stops watching.
 pub fn watch(session: &str) -> anyhow::Result<()> {
     ensure_outside()?;
     if connect(session).is_err() {

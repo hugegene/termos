@@ -1334,7 +1334,7 @@ impl Finder {
         }
     }
 
-    /// The file list as plain text, for `tb dump-screen`.
+    /// The file list as plain text, for `tos dump-screen`.
     pub fn list_text(&self) -> String {
         let area = Rect::new(0, 0, self.list_rect.width, self.list_rect.height);
         let mut buf = Buffer::empty(area);
@@ -1342,7 +1342,7 @@ impl Finder {
         buffer_text(&buf)
     }
 
-    /// The preview pane as plain text, for `tb dump-screen`.
+    /// The preview pane as plain text, for `tos dump-screen`.
     pub fn preview_text(&self, editor: Option<&TermPane>) -> String {
         let area = Rect::new(0, 0, self.preview_rect.width, self.preview_rect.height);
         let mut buf = Buffer::empty(area);

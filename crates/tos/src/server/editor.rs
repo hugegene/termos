@@ -1,4 +1,4 @@
-//! Which editor the finder opens: `$TB_EDITOR` if set, else Neovim with our notepad-style config, else
+//! Which editor the finder opens: `$TOS_EDITOR` if set, else Neovim with our notepad-style config, else
 //! `$VISUAL`/`$EDITOR`/`vi`.
 
 use std::collections::HashMap;
@@ -36,8 +36,8 @@ fn nvim_init() -> Option<PathBuf> {
 pub fn command(file: &Path) -> SpawnOptions {
     let cwd = file.parent().map(Path::to_path_buf);
     let file = file.to_string_lossy().into_owned();
-    // TB_EDITOR overrides everything (a command; the file name is added at the end).
-    if let Ok(editor) = env::var("TB_EDITOR")
+    // TOS_EDITOR overrides everything (a command; the file name is added at the end).
+    if let Ok(editor) = env::var("TOS_EDITOR")
         && !editor.trim().is_empty()
     {
         let mut command: Vec<String> = editor.split_whitespace().map(str::to_owned).collect();

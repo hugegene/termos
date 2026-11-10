@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb action list-panes`
+# `tos action list-panes`
 
 List panes
 
 ```
-tb action list-panes [OPTIONS]
+tos action list-panes [OPTIONS]
 ```
 
 ## Options
@@ -23,8 +23,8 @@ tb action list-panes [OPTIONS]
 ## Examples
 
 ```sh
-tb action list-panes -t -c
-tb action list-panes -j | jq '.[] | select(.is_focused) | .id'
+tos action list-panes -t -c
+tos action list-panes -j | jq '.[] | select(.is_focused) | .id'
 ```
 
 See also: [all commands](../README.md) · [the overview](../../cli.md)

@@ -21,7 +21,7 @@ mod macos;
 use macos as sys;
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-compile_error!("tb runs on Linux and macOS only");
+compile_error!("tos runs on Linux and macOS only");
 
 /// The process on the other end of a Unix socket.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,7 +52,7 @@ pub fn process_args(pid: u32) -> Option<Vec<String>> {
     sys::process_args(pid)
 }
 
-/// The command that moves a file to the trash when `$TB_TRASH` isn't set. The file's path goes at the end.
+/// The command that moves a file to the trash when `$TOS_TRASH` isn't set. The file's path goes at the end.
 pub fn default_trash_command() -> Vec<String> {
     sys::default_trash_command()
 }
@@ -104,7 +104,7 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         let exe = exe.file_name().unwrap().to_string_lossy();
         let name = process_name(me()).expect("our own name");
-        // The binary is "tb-<hash>", which Linux cuts to 15 bytes.
+        // The binary is "tos-<hash>", which Linux cuts to 15 bytes.
         assert!(name.len() >= 2 && exe.starts_with(&name), "name {name:?}, binary {exe:?}");
     }
 

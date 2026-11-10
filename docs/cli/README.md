@@ -1,15 +1,15 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb` commands
+# `tos` commands
 
-One page per command, generated from `tb … --help`. For what spans commands (ids, JSON fields, events, key bindings, stability), see [the overview](../cli.md).
+One page per command, generated from `tos … --help`. For what spans commands (ids, JSON fields, events, key bindings, stability), see [the overview](../cli.md).
 
 ```
-tb [OPTIONS] [COMMAND]
+tos [OPTIONS] [COMMAND]
 ```
 
-Plain `tb` attaches to (or starts) the session.
+Plain `tos` attaches to (or starts) the session.
 
 ## Options
 
@@ -21,25 +21,25 @@ Plain `tb` attaches to (or starts) the session.
 
 | Command | Does |
 |---|---|
-| [`tb attach`](attach.md) (`a`) | Attach to a session, starting it if needed (the default) |
-| [`tb start`](start.md) | Start a session without attaching (same as `attach -b`) |
-| [`tb ls`](ls.md) (`list-sessions`) | List sessions, including exited ones that attaching restores |
-| [`tb kill`](kill.md) (`kill-session`, `k`) | End a session and every program in it (attach again to restore its layout) |
-| [`tb kill-all`](kill-all.md) (`kill-all-sessions`, `ka`) | End every running session (attach again to restore their layouts) |
-| [`tb delete`](delete.md) (`delete-session`, `d`) | Forget a saved session so it isn't restored (default: the current session name) |
-| [`tb delete-all`](delete-all.md) (`delete-all-sessions`, `da`) | Forget every exited session |
-| [`tb finder`](finder.md) | Open a finder tab on DIR (default: the current folder) |
-| [`tb action`](action.md) (`ac`) | Change the session from scripts: zellij's actions (same names and flags) and tb's own |
-| [`tb run`](run.md) (`r`) | Run COMMAND in a new pane (zellij's `run`); prints the pane's id. The session comes from `tb -s` |
-| [`tb edit`](edit.md) (`e`) | Open FILE in the editor in a new pane (zellij's `edit`); prints the pane's id |
-| [`tb subscribe`](subscribe.md) | Print events as JSON lines until the session ends: tabs and panes opening, closing, renaming and gaining focus, mode changes, clients. With -p, also those panes' text whenever it changes. The session comes from `tb -s` |
-| [`tb watch`](watch.md) (`w`) | Show a running session read-only (zellij's `watch`); q or Ctrl+C stops watching |
-| [`tb list-panes`](list-panes.md) | List the session's panes |
-| [`tb dump-screen`](dump-screen.md) | Print a pane's text (default: the focused pane) |
+| [`tos attach`](attach.md) (`a`) | Attach to a session, starting it if needed (the default) |
+| [`tos start`](start.md) | Start a session without attaching (same as `attach -b`) |
+| [`tos ls`](ls.md) (`list-sessions`) | List sessions, including exited ones that attaching restores |
+| [`tos kill`](kill.md) (`kill-session`, `k`) | End a session and every program in it (attach again to restore its layout) |
+| [`tos kill-all`](kill-all.md) (`kill-all-sessions`, `ka`) | End every running session (attach again to restore their layouts) |
+| [`tos delete`](delete.md) (`delete-session`, `d`) | Forget a saved session so it isn't restored (default: the current session name) |
+| [`tos delete-all`](delete-all.md) (`delete-all-sessions`, `da`) | Forget every exited session |
+| [`tos finder`](finder.md) | Open a finder tab on DIR (default: the current folder) |
+| [`tos action`](action.md) (`ac`) | Change the session from scripts: zellij's actions (same names and flags) and termos's own |
+| [`tos run`](run.md) (`r`) | Run COMMAND in a new pane (zellij's `run`); prints the pane's id. The session comes from `tos -s` |
+| [`tos edit`](edit.md) (`e`) | Open FILE in the editor in a new pane (zellij's `edit`); prints the pane's id |
+| [`tos subscribe`](subscribe.md) | Print events as JSON lines until the session ends: tabs and panes opening, closing, renaming and gaining focus, mode changes, clients. With -p, also those panes' text whenever it changes. The session comes from `tos -s` |
+| [`tos watch`](watch.md) (`w`) | Show a running session read-only (zellij's `watch`); q or Ctrl+C stops watching |
+| [`tos list-panes`](list-panes.md) | List the session's panes |
+| [`tos dump-screen`](dump-screen.md) | Print a pane's text (default: the focused pane) |
 
-## `tb action …`
+## `tos action …`
 
-zellij's actions, with zellij's names and flags, and `tb`'s own.
+zellij's actions, with zellij's names and flags, and `tos`'s own.
 
 | Action | Does |
 |---|---|
@@ -60,7 +60,7 @@ zellij's actions, with zellij's names and flags, and `tb`'s own.
 | [`query-tab-names`](action/query-tab-names.md) | Print each tab's name |
 | [`current-tab-info`](action/current-tab-info.md) | The active tab |
 | [`new-pane`](action/new-pane.md) | Open a pane running a shell, or COMMAND; prints the pane's id |
-| [`split`](action/split.md) | Split the focused pane (tb's form of new-pane) |
+| [`split`](action/split.md) | Split the focused pane (termos's form of new-pane) |
 | [`edit`](action/edit.md) | Open FILE in the editor in a new pane; prints the pane's id |
 | [`close-pane`](action/close-pane.md) (`close`) | Close a pane |
 | [`focus-pane-id`](action/focus-pane-id.md) | Focus a pane by id |
@@ -68,14 +68,14 @@ zellij's actions, with zellij's names and flags, and `tb`'s own.
 | [`focus-previous-pane`](action/focus-previous-pane.md) | Focus the previous pane in the tab |
 | [`move-focus`](action/move-focus.md) | Focus the pane in a direction |
 | [`move-focus-or-tab`](action/move-focus-or-tab.md) | Focus the pane in a direction, or the next tab at the edge |
-| [`focus`](action/focus.md) | Focus a pane: left, right, up, down, next, prev, or an id (tb's form) |
+| [`focus`](action/focus.md) | Focus a pane: left, right, up, down, next, prev, or an id (termos's form) |
 | [`move-pane`](action/move-pane.md) | Swap a pane with its neighbour in a direction, or with the next pane |
 | [`move-pane-backwards`](action/move-pane-backwards.md) | Swap a pane with the previous pane |
 | [`rename-pane`](action/rename-pane.md) | Name a pane (shown in its frame) |
 | [`undo-rename-pane`](action/undo-rename-pane.md) | Remove a pane's name |
 | [`toggle-fullscreen`](action/toggle-fullscreen.md) (`zoom`) | Show a pane alone in its tab, or stop |
 | [`toggle-pane-frames`](action/toggle-pane-frames.md) | Turn pane frames on or off |
-| [`resize`](action/resize.md) | Resize a pane: `increase\|decrease [left\|right\|up\|down]` (zellij), or `DIRECTION [CELLS]` (tb) |
+| [`resize`](action/resize.md) | Resize a pane: `increase\|decrease [left\|right\|up\|down]` (zellij), or `DIRECTION [CELLS]` (tos) |
 | [`clear`](action/clear.md) | Clear a pane's screen and scrollback |
 | [`edit-scrollback`](action/edit-scrollback.md) | Open a pane's scrollback in the editor |
 | [`set-pane-color`](action/set-pane-color.md) | Set a pane's default colours ("#00e000" or "rgb:00/e0/00"); default: the pane this runs in |
@@ -89,7 +89,7 @@ zellij's actions, with zellij's names and flags, and `tb`'s own.
 | [`scroll-to-bottom`](action/scroll-to-bottom.md) | Scroll a pane back to the bottom |
 | [`list-panes`](action/list-panes.md) | List panes |
 | [`dump-screen`](action/dump-screen.md) | Print a pane's text |
-| [`dump-layout`](action/dump-layout.md) | Print the session's layout (tb's saved-session JSON) |
+| [`dump-layout`](action/dump-layout.md) | Print the session's layout (termos's saved-session JSON) |
 | [`list-clients`](action/list-clients.md) | List attached clients |
 | [`write`](action/write.md) | Send bytes, given as numbers (e.g. 27 91 65) |
 | [`write-chars`](action/write-chars.md) | Type text into a pane |
@@ -100,6 +100,6 @@ zellij's actions, with zellij's names and flags, and `tb`'s own.
 | [`save-session`](action/save-session.md) | Save the session's layout now |
 | [`detach`](action/detach.md) | Detach every attached client |
 | [`switch-session`](action/switch-session.md) | Move your client to another session, starting it if needed |
-| [`set-status`](action/set-status.md) | Show TEXT in the status bar (tb). Each --id is its own segment; clicks reach `tb subscribe` |
-| [`clear-status`](action/clear-status.md) | Remove a status segment, or all of them (tb) |
-| [`reload-config`](action/reload-config.md) | Read ~/.config/tb/config.kdl again and print what it skipped (tb) |
+| [`set-status`](action/set-status.md) | Show TEXT in the status bar (tos). Each --id is its own segment; clicks reach `tos subscribe` |
+| [`clear-status`](action/clear-status.md) | Remove a status segment, or all of them (tos) |
+| [`reload-config`](action/reload-config.md) | Read ~/.config/termos/config.kdl again and print what it skipped (tos) |

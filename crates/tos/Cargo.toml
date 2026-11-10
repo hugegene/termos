@@ -1,13 +1,13 @@
 [package]
-name = "tb"
-description = "Terminal workspace: session server, client, finder and CLI"
+name = "tos"
+description = "termos, a terminal workspace: session server, client, finder and CLI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "tb"
+name = "tos"
 path = "src/main.rs"
 
 [dependencies]

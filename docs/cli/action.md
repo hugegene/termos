@@ -1,12 +1,12 @@
-<!-- Generated from tb's command definitions: edit the help text in crates/tb/src, then run
-     TB_UPDATE_DOCS=1 cargo test -p tb --bin tb cli_docs -->
+<!-- Generated from termos's command definitions: edit the help text in crates/tos/src, then run
+     TOS_UPDATE_DOCS=1 cargo test -p tos --bin tos cli_docs -->
 
-# `tb action`
+# `tos action`
 
-Change the session from scripts: zellij's actions (same names and flags) and tb's own
+Change the session from scripts: zellij's actions (same names and flags) and termos's own
 
 ```
-tb action [OPTIONS] <COMMAND>
+tos action [OPTIONS] <COMMAND>
 ```
 
 Also: `ac`.
@@ -38,7 +38,7 @@ Also: `ac`.
 | [`query-tab-names`](action/query-tab-names.md) | Print each tab's name |
 | [`current-tab-info`](action/current-tab-info.md) | The active tab |
 | [`new-pane`](action/new-pane.md) | Open a pane running a shell, or COMMAND; prints the pane's id |
-| [`split`](action/split.md) | Split the focused pane (tb's form of new-pane) |
+| [`split`](action/split.md) | Split the focused pane (termos's form of new-pane) |
 | [`edit`](action/edit.md) | Open FILE in the editor in a new pane; prints the pane's id |
 | [`close-pane`](action/close-pane.md) (`close`) | Close a pane |
 | [`focus-pane-id`](action/focus-pane-id.md) | Focus a pane by id |
@@ -46,14 +46,14 @@ Also: `ac`.
 | [`focus-previous-pane`](action/focus-previous-pane.md) | Focus the previous pane in the tab |
 | [`move-focus`](action/move-focus.md) | Focus the pane in a direction |
 | [`move-focus-or-tab`](action/move-focus-or-tab.md) | Focus the pane in a direction, or the next tab at the edge |
-| [`focus`](action/focus.md) | Focus a pane: left, right, up, down, next, prev, or an id (tb's form) |
+| [`focus`](action/focus.md) | Focus a pane: left, right, up, down, next, prev, or an id (termos's form) |
 | [`move-pane`](action/move-pane.md) | Swap a pane with its neighbour in a direction, or with the next pane |
 | [`move-pane-backwards`](action/move-pane-backwards.md) | Swap a pane with the previous pane |
 | [`rename-pane`](action/rename-pane.md) | Name a pane (shown in its frame) |
 | [`undo-rename-pane`](action/undo-rename-pane.md) | Remove a pane's name |
 | [`toggle-fullscreen`](action/toggle-fullscreen.md) (`zoom`) | Show a pane alone in its tab, or stop |
 | [`toggle-pane-frames`](action/toggle-pane-frames.md) | Turn pane frames on or off |
-| [`resize`](action/resize.md) | Resize a pane: `increase\|decrease [left\|right\|up\|down]` (zellij), or `DIRECTION [CELLS]` (tb) |
+| [`resize`](action/resize.md) | Resize a pane: `increase\|decrease [left\|right\|up\|down]` (zellij), or `DIRECTION [CELLS]` (tos) |
 | [`clear`](action/clear.md) | Clear a pane's screen and scrollback |
 | [`edit-scrollback`](action/edit-scrollback.md) | Open a pane's scrollback in the editor |
 | [`set-pane-color`](action/set-pane-color.md) | Set a pane's default colours ("#00e000" or "rgb:00/e0/00"); default: the pane this runs in |
@@ -67,7 +67,7 @@ Also: `ac`.
 | [`scroll-to-bottom`](action/scroll-to-bottom.md) | Scroll a pane back to the bottom |
 | [`list-panes`](action/list-panes.md) | List panes |
 | [`dump-screen`](action/dump-screen.md) | Print a pane's text |
-| [`dump-layout`](action/dump-layout.md) | Print the session's layout (tb's saved-session JSON) |
+| [`dump-layout`](action/dump-layout.md) | Print the session's layout (termos's saved-session JSON) |
 | [`list-clients`](action/list-clients.md) | List attached clients |
 | [`write`](action/write.md) | Send bytes, given as numbers (e.g. 27 91 65) |
 | [`write-chars`](action/write-chars.md) | Type text into a pane |
@@ -78,8 +78,8 @@ Also: `ac`.
 | [`save-session`](action/save-session.md) | Save the session's layout now |
 | [`detach`](action/detach.md) | Detach every attached client |
 | [`switch-session`](action/switch-session.md) | Move your client to another session, starting it if needed |
-| [`set-status`](action/set-status.md) | Show TEXT in the status bar (tb). Each --id is its own segment; clicks reach `tb subscribe` |
-| [`clear-status`](action/clear-status.md) | Remove a status segment, or all of them (tb) |
-| [`reload-config`](action/reload-config.md) | Read ~/.config/tb/config.kdl again and print what it skipped (tb) |
+| [`set-status`](action/set-status.md) | Show TEXT in the status bar (tos). Each --id is its own segment; clicks reach `tos subscribe` |
+| [`clear-status`](action/clear-status.md) | Remove a status segment, or all of them (tos) |
+| [`reload-config`](action/reload-config.md) | Read ~/.config/termos/config.kdl again and print what it skipped (tos) |
 
 See also: [all commands](README.md) · [the overview](../cli.md)

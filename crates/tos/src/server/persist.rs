@@ -1,4 +1,4 @@
-//! Saving a session to disk and bringing it back after a reboot, crash, `tb kill` or Ctrl+Q (step 4).
+//! Saving a session to disk and bringing it back after a reboot, crash, `tos kill` or Ctrl+Q (step 4).
 //!
 //! What comes back: tabs, the split layout, names, each terminal's folder, and the finders' state. Programs
 //! can't come back; a command that was running is typed at the new shell's prompt, without Enter.
