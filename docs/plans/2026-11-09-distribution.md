@@ -16,7 +16,10 @@ curl -fsSL https://<host>/install.sh | sh
 - **Targets (first release):**
   - `x86_64-unknown-linux-gnu`, built on Ubuntu 22.04
   - `aarch64-unknown-linux-gnu` (arm64), if the arm runner is available to us
-  - `aarch64-apple-darwin`, once [macOS support](2026-11-09-macos-support.md) is done
+  - `aarch64-apple-darwin`, once [macOS support](2026-11-09-macos-support.md) is done. The launch release
+    must include it.
+  - *Changed 2026-11-10:* no Intel Mac build (`x86_64-apple-darwin`). `install.sh` tells Intel Mac users
+    it isn't supported.
 - **What's in each download:** the stripped `tb` binary, `THIRD_PARTY_NOTICES.md` (from `cargo-about`), our
   license text and a short README, packed as `tb-<version>-<target>.tar.gz` plus a `.sha256` file.
 - **Optional tools stay separate.** Neovim, poppler (PDF), ffmpeg (video) and gio (trash) are installed by

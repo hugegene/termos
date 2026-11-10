@@ -388,7 +388,7 @@ Sizes are rough estimates.
 | **7. Phone** | Everything for phones: the one-pane layout below ~80 columns, per-client layouts, plain keys and taps for every action; then the PWA ([phone plan](2026-11-03-phone-interface.md) P1–P4) | SSH-from-phone ready (**~10–15k lines** total before the PWA) |
 | **8. Floating panes** | Floating (pop-up) panes; maybe stacked and pinned panes and swap layouts, zellij's other gaps; their 12 CLI actions | No missing zellij pane features |
 | **Parallel track** | Daemon: poller, webhook, events into the finder; drives sessions through the step 6 CLI | Independent process; can start anytime |
-| **9. Launch** | Config, themes, layouts, key hints, docs, packaging, testing across terminals (Ghostty, Terminator, WezTerm, kitty, iTerm2 if macOS is supported, Termux, Blink) | Ready for other users (roughly **2×** the personal-use effort) |
+| **9. Launch** | Config, themes, layouts, key hints, docs, packaging, testing across terminals (Ghostty, Terminator, WezTerm, kitty, iTerm2, Termux, Blink) on Linux and macOS | Ready for other users (roughly **2×** the personal-use effort) |
 
 The prototype in `~/terminal-browser` stays in use until step 3. Its preview logic (file-type detection, the
 CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim config carry over as reference.
@@ -398,7 +398,8 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
 1. **Product name and repo location.** The name must avoid "zellij", "Alacritty" and "tmux".
 2. **Poller and webhook server:** where is the code, what does it poll, and what events should reach the finder?
 3. **Neovim:** bundle it or require it?
-4. **Platforms:** Linux only at launch, or macOS too?
+4. ~~**Platforms:** Linux only at launch, or macOS too?~~ **Answered 2026-11-10:** Linux and macOS on Apple
+   Silicon both ship at launch, and Intel Macs are not supported ([macOS plan](2026-11-09-macos-support.md)).
 5. **Legal review:** when, relative to fundraising or customers?
 6. **Rust toolchain:** not installed on the dev machine yet (`curl --proto '=https' -sSf https://sh.rustup.rs | sh`).
 
@@ -460,6 +461,10 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
   - Its border drags, and resize mode and fullscreen work on each half.
   - The CLI has a new pane kind, `preview`.
   - Details are in the [two-pane finder plan](2026-11-05-finder-divider.md).
+- **2026-11-10:** **platforms decided** (open question 4). Linux and macOS on Apple Silicon both ship at launch,
+  and Intel Macs are not supported.
+  - Step 9 tests the terminals on both systems, and iTerm2 is no longer conditional.
+  - Details are in the [macOS plan](2026-11-09-macos-support.md).
 
 ---
 

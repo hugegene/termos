@@ -2,8 +2,8 @@
 
 ## Decision
 
-`tb` builds and runs on **macOS on Apple Silicon** (`aarch64-apple-darwin`). Intel Macs are optional, a second
-build target once Apple Silicon works.
+`tb` builds and runs on **macOS on Apple Silicon** (`aarch64-apple-darwin`). **Linux and macOS both ship at
+launch.** Intel Macs are not supported.
 
 - **How:** a small `os` module in `crates/tb` gathers everything that differs between Linux and macOS. Linux
   keeps today's code; macOS gets its own versions through the `libc` crate, which is already in `Cargo.lock`.
@@ -84,7 +84,7 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
     calls are caught on every push.
   - On a `macos-14` runner, run `cargo test --workspace` with `brew install poppler` first. That runs the e2e
     tests for real. macOS minutes cost more on private repos.
-- [ ] **On a real Mac, by hand:**
+- [ ] **On the user's Mac, by hand:**
   - Images in iTerm2 and Ghostty: does `poll()` on stdin work for the terminal query (`client.rs:425`)? If not,
     use `select()`.
   - The Option key as Alt (`Alt+s`, `Alt+q` in the finder).
@@ -99,8 +99,15 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
 
 ## Open questions
 
-- Is there a Mac to test on, or do we rely on the macOS CI runner plus someone else's Mac?
-- Intel Macs: worth a second target? **Estimate:** Apple's last macOS for Intel is 26, so the audience is
-  shrinking.
-- The [rebuild plan](2026-11-03-rebuild-plan.md)'s open question 4 ("Linux only at launch, or macOS too?")
-  should be answered there once this is agreed.
+None at the moment. All three were answered on 2026-11-10; see the change log.
+
+## Change log
+
+- **2026-11-09:** first version.
+- **2026-11-10:** the user answered the open questions.
+  - **A Mac to test on:** the user has one, so the by-hand checks run there. The CI runner still runs the
+    tests on every push.
+  - **Intel Macs:** not supported. Only `aarch64-apple-darwin` is built. **Estimate:** macOS 26 is the last
+    version for Intel, so that audience is shrinking.
+  - **Launch:** Linux and macOS both ship at launch. This answers open question 4 in the
+    [rebuild plan](2026-11-03-rebuild-plan.md).
