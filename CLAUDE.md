@@ -61,6 +61,8 @@ This applies to answers in chat and to everything in `docs/`.
   - `crates/tb`: client, server, finder UI and CLI
   - `crates/finder-core`: listing, file types, preview data
   - `crates/alacritty_terminal`: our fork, unmodified so far; see its `UPSTREAM.md` and record every change there
+  - `scripts/`: `install.sh` (the one-line installer) and `package.sh`, used by `.github/workflows/release.yml`.
+    Pushing a tag `v<version>` publishes a release on GitHub (`hugegene/termos`, public, MIT).
 - **Build and test:** `cargo build`, `cargo test --workspace`,
   `cargo clippy --no-deps -p tb -p finder-core --all-targets -- -D warnings`, `cargo deny check licenses`.
   - Format with `cargo fmt -p tb -p finder-core`, never `cargo fmt --all`: that rewraps the

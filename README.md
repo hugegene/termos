@@ -53,12 +53,32 @@ finder [folder]                   # inside zellij → new tab; outside → new z
 panes, scrolling and search, and mouse support, all in one binary. See `docs/plans/2026-11-03-build-steps-0-3.md`
 and `docs/plans/2026-11-04-zellij-keys-and-frames.md`.
 
+### Install
+
 ```bash
-cargo build --release
-./target/release/tb               # attach to session "main", starting it if needed
-./target/release/tb finder ~/docs # open a finder tab
-./target/release/tb ls            # list sessions;  tb kill  ends one (attach again to restore it)
+curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
 ```
+
+- **Where it runs:** Linux on x86_64 or arm64 with glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+, RHEL 9+),
+  and Macs with Apple Silicon.
+- **Where it goes:** `~/.local/bin/tb`, without sudo. `TB_INSTALL_DIR=<folder>` picks another folder, and
+  `TB_VERSION=0.1.1` a particular version. Run it again to upgrade.
+- **What it checks:** the download's SHA-256, and that `tb` runs, before it replaces anything.
+- **Optional programs:** Neovim, poppler (PDF), ffmpeg (video) and gio or trash. `tb` names the package when
+  one is missing.
+
+```bash
+tb               # attach to session "main", starting it if needed
+tb finder ~/docs # open a finder tab
+tb ls            # list sessions;  tb kill  ends one (attach again to restore it)
+```
+
+### Development
+
+- **Build:** `cargo build --release` gives `target/release/tb`. `CLAUDE.md` lists the tests and checks.
+- **Release:** set `version` in `Cargo.toml`, commit, then push a tag `v<version>`.
+  `.github/workflows/release.yml` builds each target with `scripts/package.sh` and publishes the release
+  with `scripts/install.sh`. See `docs/plans/2026-11-09-distribution.md`.
 
 Session commands are **zellij's**, with the same names, aliases and flags:
 

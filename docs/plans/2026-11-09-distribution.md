@@ -25,7 +25,11 @@ curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.s
   - *Changed 2026-11-10:* no Intel Mac build (`x86_64-apple-darwin`). `install.sh` tells Intel Mac users
     it isn't supported.
 - **What's in each download:** the stripped `tb` binary, `THIRD_PARTY_NOTICES.md` (from `cargo-about`), our
-  license text and a short README, packed as `tb-<version>-<target>.tar.gz` plus a `.sha256` file.
+  license text and a short README, packed as `tb-<target>.tar.gz` plus a `.sha256` file. Inside is one folder,
+  `tb-<version>-<target>/`.
+  - *Changed 2026-11-10:* the file name has no version (it was `tb-<version>-<target>.tar.gz`). That way
+    `install.sh` can fetch `/releases/latest/download/tb-<target>.tar.gz` without first asking GitHub's API
+    which version is the latest. The release's tag carries the version.
 - **Optional tools stay separate.** Neovim, poppler (PDF), ffmpeg (video) and gio (trash) are installed by
   the user. `tb` already says which package is missing. Running them as separate programs also keeps their
   GPL/LGPL off `tb` ([video plan](2026-11-07-video-and-office-previews.md)).
@@ -42,9 +46,9 @@ the same day for one public repo.
                       │ ┌──────────────────────────┐     ┌──────────────────────────────────┐ │
 ┌──────────────┐      │ │ Actions runner, one per  │ 2   │ Release v0.2.0, files stored:    │ │
 │ bump version │  1   │ │ target: a throwaway VM   │────▶│   install.sh                     │ │
-│ git tag      │─────▶│ │ cargo build --release,   │ gh  │   tb-0.2.0-<target>.tar.gz       │ │
-│ git push     │ tag  │ │ strip, notices, tar,     │     │   tb-0.2.0-<target>.tar.gz       │ │
-└──────────────┘      │ │ sha256. VM wiped after.  │     │     .sha256                      │ │
+│ git tag      │─────▶│ │ cargo build --release,   │ gh  │   tb-<target>.tar.gz             │ │
+│ git push     │ tag  │ │ strip, notices, tar,     │     │   tb-<target>.tar.gz.sha256      │ │
+└──────────────┘      │ │ sha256. VM wiped after.  │     │                                  │ │
                       │ └──────────────────────────┘     └─────────────────┬────────────────┘ │
                       │    served from GitHub's download CDN               │                  │
                       └────────────────────────────────────────────────────┼──────────────────┘
@@ -65,10 +69,11 @@ the same day for one public repo.
    then on, the binaries are stored only as files on that release.
 3. The friend runs the one-liner, which downloads `install.sh` from the release. It runs `uname -sm` and gets
    `Linux x86_64`, so it picks `x86_64-unknown-linux-gnu`.
-4. It downloads `tb-0.2.0-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`. It uses GitHub's
+4. It downloads `tb-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`. It uses GitHub's
    `/releases/latest/download/…` link, which redirects to GitHub's download CDN.
-5. It checks the checksum and puts `tb` in `~/.local/bin`, warning if that folder isn't on `PATH`. It prints
-   `tb 0.2.0`.
+5. It checks the checksum, unpacks, and runs the new `tb --version`. That catches a glibc that's too old before
+   anything is replaced. It then puts `tb` in `~/.local/bin`, warning if that folder isn't on `PATH`, and prints
+   `installed tb 0.2.0 (extension API 1)`.
 
 **Where the binary is at each point:**
 
@@ -127,36 +132,58 @@ change, nothing is needed until the next restart.
     only the user's Gmail address.
   - Pushing needed the `workflow` scope (`gh auth refresh -s workflow`) because of `.github/workflows/ci.yml`.
     Git uses `gh` as its credential helper in this repo only (`git config --local`).
-- [ ] **Release profile:** add `strip = true` to `[profile.release]`. That removes 28,243 symbol names and
-  3.1 MB. Re-measure the CI-built binary in a new finding.
+- [x] **Release profile** (2026-11-10): added `strip = true` to `[profile.release]`. That removes 28,243
+  symbol names and 3.1 MB. A local build is now 9,627,704 bytes. Re-measure the CI-built binary in a new
+  finding.
   - *Changed 2026-11-09:* dropped `--remap-path-prefix`. The only absolute paths are dependency sources under
     the build machine's home, which is the CI runner's. Our own paths are already relative and make panic
     reports useful ([finding](../findings/2026-11-09-release-binary-contents.md), "Added later").
-- [ ] **`install.sh`** (in this repo, published with each release):
-  - Detects OS and architecture, and fails clearly on anything unsupported.
-  - Uses `curl`, falling back to `wget`, and checks the download with `sha256sum` (or `shasum -a 256` on
-    macOS).
-  - Installs to `~/.local/bin` by default. `TB_INSTALL_DIR` and `TB_VERSION` override that.
-  - Prints `tb --version` at the end.
-  - Test it locally against a folder served over HTTP, with `TB_INSTALL_DIR` in the scratchpad.
-- [ ] **`.github/workflows/release.yml`:**
-  - Runs on `v*` tags, with a target matrix.
-  - Builds with `cargo build --release --locked`.
-  - Runs `cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md` and `cargo deny check licenses`.
-  - Packs the tarballs and `sha256sum` files, then runs `gh release create` in `termos` with `GITHUB_TOKEN`
-    (`permissions: contents: write`).
+- [x] **`install.sh`** (2026-11-10), published with each release:
+  - *Changed:* it lives at **`scripts/install.sh`**, because `install.sh` in the repo root is the prototype's
+    setup script.
+  - It's POSIX `sh`, since `curl … | sh` runs `dash` on Ubuntu. Everything is in functions, with `main` called
+    on the last line, so a download that's cut short runs nothing.
+  - **Detects the target** from `uname -sm`: Linux x86_64 or aarch64, or Darwin arm64. A shell under Rosetta
+    reports x86_64, so it also checks `sysctl.proc_translated`. Intel Macs, other architectures and other
+    systems stop with a reason.
+  - **Downloads** with `curl`, falling back to `wget`, and checks the SHA-256 with `sha256sum` (or
+    `shasum -a 256` on macOS).
+  - **Runs the new `tb --version` before installing.** If it won't run (for example, glibc older than 2.34), it
+    stops with the supported distros and leaves the old `tb` alone.
+  - **Installs** to `~/.local/bin` by copying next to the old file and renaming over it, so a running `tb`
+    keeps its file. `TB_INSTALL_DIR`, `TB_VERSION` and `TB_DOWNLOAD_URL` (for testing) override the defaults.
+  - **Prints** the installed version, a `PATH` line if the folder isn't on `PATH`, and, on an upgrade with a
+    `tb` server running, the `tb kill` hint.
+  - **Tested locally** against `python3 -m http.server` with a locally packed tarball:
+    - a fresh install through `curl … | sh` (`dash`)
+    - an upgrade
+    - `wget` only
+    - a wrong checksum (stops, installs nothing)
+    - a 404
+    - a `tb` that won't run (stops, keeps the old one)
+    - a fake `uname` for riscv64, FreeBSD, an Intel Mac, Rosetta (picks `aarch64-apple-darwin`) and Linux
+      aarch64
+- [x] **`.github/workflows/release.yml`** (2026-11-10):
+  - Runs on `v*` tags. A `build` matrix runs on `ubuntu-22.04` (x86_64), `ubuntu-22.04-arm` and
+    `macos-latest`.
+  - Each build job runs `cargo build --release --locked -p tb --target <target>`. It installs `cargo-about`
+    with `taiki-e/install-action`, runs `cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md` and then
+    **`scripts/package.sh`**. That script refuses to pack unless the binary's `tb --version` matches the tag,
+    which also proves the binary runs on its runner.
+  - A `licenses` job runs `cargo deny check licenses`.
+  - The `release` job collects the tarballs (upload and download artifacts) and runs `gh release create` with
+    the tarballs, `.sha256` files and `scripts/install.sh`, using `GITHUB_TOKEN` (`contents: write`).
+  - `scripts/package.sh` also works by hand. It was tested locally, including that it refuses a version
+    mismatch.
 - [x] **A license for the source and the binary** (2026-11-10): **MIT**, the user's choice. Added `LICENSE`,
   set `license = "MIT"` in `Cargo.toml` and added a License section to the README. The `alacritty_terminal`
   fork stays Apache-2.0 with its own `LICENSE-APACHE`. `cargo deny check licenses` passes. Each release
   tarball carries `LICENSE`.
-  - *Changed 2026-11-10:* this is now about the source as well. Today it's public with no license file and
-    `LicenseRef-Proprietary` in `Cargo.toml`, so people may read it but not copy or reuse it. Picking an open
-    license (MIT, Apache-2.0, or both, as Rust projects often do) or a source-available one means adding a
-    `LICENSE` file and changing that field.
+  - This step first covered only the binary. It covers the source too since the source went public.
 - [ ] **The first test release `v0.1.1`:** install it with the one-liner on this machine and on an Ubuntu
   22.04 machine or VM. That confirms the glibc 2.34 reading in practice.
-- [ ] **README:** an Install section with the one-liner. The `cargo build --release` instructions move under
-  "Development".
+- [x] **README** (2026-11-10): the tb section has an Install part with the one-liner, then a Development part
+  with `cargo build --release` and how to release.
 - [ ] **Later:**
   - `tb update` (download, check, replace the binary atomically)
   - our own domain and bucket

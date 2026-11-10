@@ -102,8 +102,11 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
   - Restore after `tb kill`.
 - [ ] **Docs:** a macOS section in `README.md` covering the terminal settings (Option as Alt, iTerm2 clipboard
   permission, which terminals show images) and `brew install poppler neovim`.
-- [ ] **Release builds:** add `aarch64-apple-darwin` to the release matrix in the
-  [distribution plan](2026-11-09-distribution.md).
+- [x] **Release builds** (2026-11-10): `aarch64-apple-darwin` is in the release matrix
+  (`.github/workflows/release.yml`, on `macos-latest`), as the [distribution plan](2026-11-09-distribution.md)
+  describes.
+  - The first macOS CI runs found two tests that only passed on Linux, both fixed. The PDF test expected
+    poppler 24.02's wording, and the trash test used GNU `mv -t`.
 
 ## Open questions
 

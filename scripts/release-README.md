@@ -1,0 +1,26 @@
+# tb
+
+A terminal workspace: persistent sessions, tabs and split panes, with a file finder and previews built in.
+`tb` is a working name. Source and docs: https://github.com/hugegene/termos
+
+## Install
+
+Put `tb` in a folder on your `PATH`, such as `~/.local/bin`. Or use the installer, which does the same and
+checks the download:
+
+    curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
+
+Then run `tb` to start or attach to the session "main".
+
+## Optional tools
+
+Some previews use other programs if they're installed. When one is missing, `tb` names the package:
+
+- Neovim: editing files
+- poppler: PDF previews
+- ffmpeg: video previews
+- gio or trash: deleting to the trash
+
+## License
+
+MIT, see `LICENSE`. The licenses of the libraries built into `tb` are in `THIRD_PARTY_NOTICES.md`.

@@ -38,3 +38,5 @@ alacritty_terminal = { path = "crates/alacritty_terminal" }
 
 [profile.release]
 lto = "thin"
+# Drops the symbol table (3.1 MB). Our panic messages keep their file paths (docs/findings/2026-11-09-release-binary-contents.md).
+strip = true
