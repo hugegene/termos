@@ -17,7 +17,7 @@ are generated from the same definitions as `tb … --help`. This page covers wha
 
 ## Stability
 
-`tb --version` prints the extension API's version: `tb 0.1.0 (extension API 1)`. Within one API version,
+`tb --version` prints the extension API's version: `tb 0.1.1 (extension API 1)`. Within one API version,
 commands, flags, JSON fields and events are only ever **added**. They are never renamed, removed or changed in
 meaning. Failures exit non-zero with the message on stderr.
 
