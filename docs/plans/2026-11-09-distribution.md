@@ -235,7 +235,8 @@ change, nothing is needed until the next restart.
 - [x] **README** (2026-11-10): the tos section has an Install part with the one-liner, then a Development part
   with `cargo build --release` and how to release.
 - [ ] **Later:**
-  - `tos update` (download, check, replace the binary atomically)
+  - `tos update` (download, check, replace the binary atomically). *2026-11-10:* planned in
+    [tos update](2026-11-10-tos-update.md), with a versions folder and a notice.
   - our own domain and bucket
   - a Homebrew tap
   - a musl build
