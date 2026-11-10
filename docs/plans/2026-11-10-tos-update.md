@@ -101,9 +101,15 @@ says to run `tos kill`, and attaching again restores the session under 0.2.2.
     keeps `9.9.9`.
 - **Version 0.3.0**, a new command, so a minor bump. 0.2.1 was never tagged, and 0.3.0 includes its PATH
   change.
-- [ ] **Release** `v0.3.0` (the user pushes the tag), then upgrade to it from 0.2.1 with `tos update` and record a
-  finding: what the upgrade from a plain file did, rollback with `--version`, and the notice appearing.
-- [ ] **Distribution plan:** replace its "Later: `tos update`" item with a link here.
+- [x] **Release `v0.3.0`** (2026-11-10, tag pushed by the user): tested in a clean Ubuntu 22.04 container
+  ([finding](../findings/2026-11-10-release-v0.3.0-upgrades.md)).
+  - A 0.2.0 install (plain file, with a session running) upgraded with the one-liner: it became the symlink,
+    the PATH line went into `~/.bashrc`, and the 0.2.0 session kept running.
+  - `tos update --version 0.2.0` rolled back and kept 0.3.0, and the one-liner went forward again.
+  - The real update check recorded `0.3.0`.
+  - **Rough edges, not decided:** `tos update` reinstalls when already the newest, and rolling back below
+    0.3.0 loses the `update` command.
+- [x] **Distribution plan:** its "Later: `tos update`" item links here (2026-11-10).
 
 ## Open questions
 
