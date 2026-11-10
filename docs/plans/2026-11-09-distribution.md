@@ -158,6 +158,39 @@ change, nothing is needed until the next restart.
     keeps its file. `TOS_INSTALL_DIR`, `TOS_VERSION` and `TOS_DOWNLOAD_URL` (for testing) override the defaults.
   - **Prints** the installed version, a `PATH` line if the folder isn't on `PATH`, and, on an upgrade with a
     `tos` server running, the `tos kill` hint.
+  - *Changed 2026-11-10 (the user's choice):* when the folder isn't on `PATH`, `install.sh` **adds it to the
+    shell's startup file itself**, as uv's and rustup's installers do. `TOS_NO_MODIFY_PATH=1` turns that off,
+    and it then only prints the line, as before. This mainly helps Macs, where zsh doesn't have
+    `~/.local/bin` on `PATH`.
+    - **Which file**, from the login shell in `$SHELL`:
+      - zsh: `${ZDOTDIR:-~}/.zshrc`
+      - bash: `~/.bashrc` on Linux, `~/.bash_profile` on macOS (Terminal opens login shells, which don't
+        read `~/.bashrc`)
+      - fish: `~/.config/fish/conf.d/termos.fish` (`fish_add_path`)
+      - anything else: `~/.profile`
+    - **What it writes:** a marked block that adds the folder only if it's missing, written with `$HOME` when
+      the folder is under it. On Ubuntu, `~/.profile` adds `~/.local/bin` at login too, so this way it doesn't
+      appear twice:
+
+      ```sh
+      # Added by the termos installer (tos). TOS_NO_MODIFY_PATH=1 skips this.
+      case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+      ```
+    - **Once only:** a file that already has the marker isn't changed again. The file is created if it's
+      missing, which is common for `~/.zshrc` on a new Mac. If it can't be written, the installer falls back to
+      printing the line.
+    - **The shell that ran the one-liner** can't be changed from inside `sh`. The installer says to open a new
+      terminal, or prints the `export` line to paste.
+    - **Reaching users:** `install.sh` is downloaded from the latest release, so this takes effect with the next
+      release.
+    - **Tested** with throwaway home folders, installing from the v0.2.0 tarball:
+      - bash (local), and zsh and fish in an Ubuntu 22.04 container: each got its file, and a new shell found
+        `tos`. A second run changed nothing.
+      - Loading the line twice still leaves `~/.local/bin` on `PATH` once.
+      - No `$SHELL` uses `~/.profile`.
+      - `TOS_NO_MODIFY_PATH=1`, and a folder already on `PATH`, write nothing.
+      - A read-only `~/.bashrc` falls back to printing the line.
+      - With a fake `uname` saying Darwin: bash uses `~/.bash_profile`, and `ZDOTDIR` is respected.
   - **Tested locally** against `python3 -m http.server` with a locally packed tarball:
     - a fresh install through `curl … | sh` (`dash`)
     - an upgrade

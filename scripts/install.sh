@@ -7,6 +7,7 @@
 #   TOS_VERSION       a version such as 0.2.0 (default: the latest release)
 #   TOS_INSTALL_DIR   where tos goes (default: ~/.local/bin)
 #   TOS_DOWNLOAD_URL  the folder holding the release files (default: GitHub; used for testing)
+#   TOS_NO_MODIFY_PATH=1  don't add the folder to your shell's startup file; only say what to add
 #
 # Everything is in functions and `main` runs on the last line, so a download cut short runs nothing.
 set -eu
@@ -53,6 +54,59 @@ download() { # url file
     else
         die "needs curl or wget to download tos"
     fi
+}
+
+# The startup file of the user's login shell, where the folder is added to PATH.
+startup_file() {
+    case "${SHELL:-}" in
+    */zsh) echo "${ZDOTDIR:-$HOME}/.zshrc" ;;
+    */bash)
+        # Terminal on macOS opens login shells, and bash's login shells don't read ~/.bashrc.
+        if [ "$(uname -s)" = Darwin ]; then echo "$HOME/.bash_profile"; else echo "$HOME/.bashrc"; fi
+        ;;
+    */fish) echo "${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/termos.fish" ;;
+    *) echo "$HOME/.profile" ;;
+    esac
+}
+
+MARK="# Added by the termos installer (tos). TOS_NO_MODIFY_PATH=1 skips this."
+
+# Makes new shells find tos: adds the folder to the startup file, unless it's already on PATH or
+# TOS_NO_MODIFY_PATH=1. The line only adds the folder when it's missing, so on Ubuntu, whose ~/.profile adds
+# ~/.local/bin at login, it doesn't appear twice.
+add_to_path() { # folder
+    dir=$1
+    case ":$PATH:" in *":$dir:"*) return 0 ;; esac
+    case "$dir" in
+    "$HOME"/*) shown="\$HOME/${dir#"$HOME"/}" ;;
+    *) shown=$dir ;;
+    esac
+    rc=$(startup_file)
+    case "$rc" in
+    *.fish)
+        line="fish_add_path \"$shown\""
+        now="fish_add_path \"$dir\""
+        ;;
+    *)
+        line="case \":\$PATH:\" in *\":$shown:\"*) ;; *) export PATH=\"$shown:\$PATH\" ;; esac"
+        now="export PATH=\"$dir:\$PATH\""
+        ;;
+    esac
+    if [ "${TOS_NO_MODIFY_PATH:-0}" != 1 ]; then
+        if [ -f "$rc" ] && grep -qF "$MARK" "$rc"; then
+            say "$rc already adds $dir to PATH. Open a new terminal, or run this in this one:
+    $now"
+            return 0
+        fi
+        if { mkdir -p "$(dirname "$rc")" && printf '\n%s\n%s\n' "$MARK" "$line" >>"$rc"; } 2>/dev/null; then
+            say "added $dir to PATH in $rc. Open a new terminal, or run this in this one:
+    $now"
+            return 0
+        fi
+        say "couldn't write to $rc."
+    fi
+    say "$dir isn't on your PATH. Add this to $rc:
+    $now"
 }
 
 sha256_of() { # file
@@ -108,11 +162,7 @@ On Linux it needs glibc 2.34 or newer: Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedor
     mv -f "$install_dir/.tos.new.$$" "$install_dir/tos"
     say "installed $version as $install_dir/tos"
 
-    case ":$PATH:" in
-    *":$install_dir:"*) ;;
-    *) say "$install_dir isn't on your PATH. Add this line to your shell's startup file (~/.bashrc, ~/.zshrc):
-    export PATH=\"$install_dir:\$PATH\"" ;;
-    esac
+    add_to_path "$install_dir"
     # Up to 0.1.1 the command was called tb.
     if [ -e "$install_dir/tb" ]; then
         say "$install_dir/tb is this program from before it was renamed tos. Sessions started by tb keep

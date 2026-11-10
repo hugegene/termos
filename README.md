@@ -63,6 +63,9 @@ curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.s
   and Macs with Apple Silicon.
 - **Where it goes:** `~/.local/bin/tos`, without sudo. `TOS_INSTALL_DIR=<folder>` picks another folder, and
   `TOS_VERSION=0.2.0` a particular version. Run it again to upgrade.
+- **PATH:** if that folder isn't on your `PATH`, it adds it to your shell's startup file, once. That's
+  `~/.zshrc`, `~/.bashrc` (`~/.bash_profile` on macOS), fish's `conf.d/termos.fish`, else `~/.profile`.
+  `TOS_NO_MODIFY_PATH=1` skips this and prints the line instead.
 - **What it checks:** the download's SHA-256, and that `tos` runs, before it replaces anything.
 - **Optional programs:** Neovim, poppler (PDF), ffmpeg (video) and gio or trash. `tos` names the package when
   one is missing.
