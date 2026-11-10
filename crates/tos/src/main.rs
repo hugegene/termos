@@ -200,12 +200,16 @@ enum Cmd {
     },
     /// Install the newest release over this one (only a tos installed by the one-line installer)
     #[command(
-        after_long_help = "Examples:\n  tos update                    # the newest release\n  tos update --version 0.2.1    # a particular one, for example to go back\n\nThe installer keeps the version before, so a session still running it is unaffected; `tos kill` and attaching again move it to the new one."
+        after_long_help = "Examples:\n  tos update                    # the newest release; nothing if this is it\n  tos update --version 0.3.0    # a particular one, for example to go back\n\nThe installer keeps the version before, so a session still running it is unaffected; `tos kill` and attaching again move it to the new one."
     )]
     Update {
         /// The release to install, such as 0.3.0 (default: the newest)
         #[arg(long)]
         version: Option<String>,
+        /// Install a --version from before `tos update` existed (0.2.x), after which only the one-line
+        /// installer can bring you forward
+        #[arg(long, requires = "version")]
+        force: bool,
     },
     #[command(name = "__server", hide = true)]
     Server {
@@ -290,7 +294,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Cmd::DumpScreen { s, a } => cli::dump_screen(&session(None, s)?, a)?,
         Cmd::Watch { name } => client::watch(&session(name, SessionOpt::default())?)?,
-        Cmd::Update { version } => update::run(version)?,
+        Cmd::Update { version, force } => update::run(version, force)?,
         Cmd::Subscribe { pane_id, format, scrollback, ansi } => {
             let scrollback = match scrollback.as_deref() {
                 None => None,

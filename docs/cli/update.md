@@ -6,14 +6,20 @@
 Install the newest release over this one (only a tos installed by the one-line installer)
 
 ```
-tos update
+tos update [OPTIONS]
 ```
+
+## Options
+
+| Option | |
+|---|---|
+| `--force` | Install a --version from before `tos update` existed (0.2.x), after which only the one-line installer can bring you forward. |
 
 ## Examples
 
 ```sh
-tos update                    # the newest release
-tos update --version 0.2.1    # a particular one, for example to go back
+tos update                    # the newest release; nothing if this is it
+tos update --version 0.3.0    # a particular one, for example to go back
 The installer keeps the version before, so a session still running it is unaffected; `tos kill` and attaching again move it to the new one.
 ```
 

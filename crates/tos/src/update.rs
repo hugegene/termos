@@ -129,10 +129,39 @@ pub fn notice(version: &str) -> String {
     format!("tos {version} is available: run tos update")
 }
 
-/// `tos update [--version X]`: downloads the newest installer and runs it. It puts the release in the versions
-/// folder and points the `tos` symlink at it. Only a `tos` the installer put there is replaced: a build from
-/// source is left alone.
-pub fn run(version: Option<String>) -> anyhow::Result<()> {
+/// The first release with `tos update`: installing an older one leaves only the one-line installer to come back.
+const FIRST_WITH_UPDATE: &str = "0.3.0";
+/// The first release called `tos` (before it, `tb`, with differently named downloads).
+const FIRST_AS_TOS: &str = "0.2.0";
+
+/// Why `tos update --version <version>` shouldn't go ahead, if it shouldn't. Without `force`, that's any
+/// release older than `tos update` itself, and releases from before the rename are never possible.
+fn refuse_version(version: &str, force: bool) -> Option<String> {
+    if parse(version).is_none() {
+        return Some(format!("'{version}' isn't a version number, such as 0.3.0"));
+    }
+    if is_newer(FIRST_AS_TOS, version) {
+        return Some(format!("releases before {FIRST_AS_TOS} were called tb, so `tos update` can't install {version}"));
+    }
+    if !force && is_newer(FIRST_WITH_UPDATE, version) {
+        return Some(format!(
+            "tos {version} doesn't have `tos update`, so after installing it only the one-line installer can \
+             bring you forward again:\n  curl -fsSL {}/latest/download/install.sh | sh\nTo go ahead anyway: \
+             tos update --version {version} --force",
+            releases_url()
+        ));
+    }
+    None
+}
+
+/// `tos update [--version X] [--force]`: downloads the newest installer and runs it. It puts the release in the
+/// versions folder and points the `tos` symlink at it. Only a `tos` the installer put there is replaced: a build
+/// from source is left alone. Without `--version`, nothing happens when this is already the newest release.
+pub fn run(version: Option<String>, force: bool) -> anyhow::Result<()> {
+    let version = version.map(|v| v.trim_start_matches('v').to_owned());
+    if let Some(why) = version.as_deref().and_then(|v| refuse_version(v, force)) {
+        bail!(why);
+    }
     let exe = env::current_exe().and_then(|p| p.canonicalize()).context("finding the tos program")?;
     let versions = paths::data_dir().join("versions");
     let installed = versions.canonicalize().is_ok_and(|v| exe.parent().and_then(Path::parent) == Some(v.as_path()));
@@ -144,9 +173,25 @@ pub fn run(version: Option<String>) -> anyhow::Result<()> {
             releases_url()
         );
     }
-    let script_url = match env::var("TOS_DOWNLOAD_URL") {
-        Ok(base) if !base.is_empty() => format!("{}/install.sh", base.trim_end_matches('/')),
-        _ => format!("{}/latest/download/install.sh", releases_url()),
+    let download_base = env::var("TOS_DOWNLOAD_URL").ok().filter(|b| !b.is_empty());
+    // Asking for the newest release is one request (the same as the daily check). It's skipped when the files
+    // come from TOS_DOWNLOAD_URL, which has no "latest", and if it fails the installer finds out instead.
+    if version.is_none()
+        && download_base.is_none()
+        && let Some(latest) = fetch_latest()
+    {
+        let current = env!("CARGO_PKG_VERSION");
+        if !is_newer(&latest, current) {
+            println!(
+                "tos {current} is already the newest release ({latest}). To install it again: \
+                 tos update --version {current}"
+            );
+            return Ok(());
+        }
+    }
+    let script_url = match &download_base {
+        Some(base) => format!("{}/install.sh", base.trim_end_matches('/')),
+        None => format!("{}/latest/download/install.sh", releases_url()),
     };
     paths::ensure_private_dir(&paths::state_dir())?;
     let script = paths::state_dir().join(format!("install-{}.sh", std::process::id()));
@@ -159,7 +204,7 @@ pub fn run(version: Option<String>) -> anyhow::Result<()> {
             sh.env("TOS_INSTALL_DIR", dir.trim());
         }
         if let Some(v) = &version {
-            sh.env("TOS_VERSION", v.trim_start_matches('v'));
+            sh.env("TOS_VERSION", v);
         }
         sh.status().context("running the installer")
     });
@@ -202,6 +247,17 @@ mod tests {
         assert!(!is_newer("0.3.0-beta", "0.3.0"));
         assert!(!is_newer("garbage", "0.2.1"));
         assert!(!is_newer("0.3.0", "dev"));
+    }
+
+    #[test]
+    fn old_versions_need_force_and_tb_ones_are_refused() {
+        assert!(refuse_version("0.3.0", false).is_none());
+        assert!(refuse_version("0.4.1", false).is_none());
+        let why = refuse_version("0.2.0", false).unwrap();
+        assert!(why.contains("doesn't have `tos update`") && why.contains("--force"), "{why}");
+        assert!(refuse_version("0.2.0", true).is_none());
+        assert!(refuse_version("0.1.1", true).unwrap().contains("called tb"));
+        assert!(refuse_version("latest", false).unwrap().contains("isn't a version number"));
     }
 
     #[test]

@@ -17,7 +17,7 @@ are generated from the same definitions as `tos … --help`. This page covers wh
 
 ## Stability
 
-`tos --version` prints the extension API's version: `tos 0.3.0 (extension API 2)`. Within one API version,
+`tos --version` prints the extension API's version: `tos 0.3.1 (extension API 2)`. Within one API version,
 commands, flags, JSON fields and events are only ever **added**. They are never renamed, removed or changed in
 meaning. Failures exit non-zero with the message on stderr.
 
@@ -59,7 +59,7 @@ meaning. Failures exit non-zero with the message on stderr.
 | `tos edit [-l LINE] [-d DIR] [--cwd DIR] FILE` (`e`) | FILE in the editor in a new pane; prints its id |
 | `tos subscribe` | Events, below |
 | `tos finder [DIR]` | A finder tab |
-| `tos update [--version X]` | Install the newest release, or X, over a `tos` that the one-line installer put there (below) |
+| `tos update [--version X] [--force]` | Install the newest release, or X, over a `tos` that the one-line installer put there (below) |
 
 ### `tos action …` (`tos ac …`)
 
@@ -253,8 +253,11 @@ as Claude Code does:
                                 ~/.local/share/termos/versions/0.3.0/tos   (the one before, kept)
 ```
 
-- **`tos update`** downloads the newest `install.sh` and runs it. `tos update --version 0.3.0` installs a
-  particular release, for example to go back. The installer keeps the version that was current before, so a
+- **`tos update`** asks for the newest release first, and stops with `tos 0.3.1 is already the newest
+  release` if there's nothing newer. Otherwise it downloads the newest `install.sh` and runs it.
+  `tos update --version 0.3.0` installs a particular release, for example to go back. Releases before 0.3.0
+  have no `tos update`, so they need `--force`: after installing one, only the one-line installer comes back.
+  Releases before 0.2.0 were called `tb` and can't be installed this way. The installer keeps the version that was current before, so a
   session still running it is unaffected. `tos kill` and attaching again move it to the new version (the
   session is restored). A `tos` that the installer didn't put there, such as a `cargo build`, is never
   replaced: `tos update` says so and stops.

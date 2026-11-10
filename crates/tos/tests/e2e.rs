@@ -1709,44 +1709,111 @@ fn fake_release(dir: &Path, version: &str) {
     fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/install.sh"), dir.join("install.sh")).unwrap();
 }
 
-#[test]
-fn update_replaces_an_installed_tos_and_keeps_the_one_before() {
-    let env = Env::new("e2e-update");
+/// Stands in for GitHub: `/releases/latest` redirects to the tag of `version`. Returns the releases URL.
+fn fake_github(version: &str) -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let location = format!("http://127.0.0.1:{port}/releases/tag/v{version}");
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0u8; 1024];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let reply =
+                format!("HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            let _ = std::io::Write::write_all(&mut stream, reply.as_bytes());
+        }
+    });
+    format!("http://127.0.0.1:{port}/releases")
+}
+
+/// Lays this build out as the installer would: `<data>/termos/versions/<version>/tos`, `<root>/bin/tos` a symlink
+/// to it, and `install-dir` noting `<root>/bin`. Returns `<root>/bin/tos`.
+fn install_like_the_installer(env: &Env) -> PathBuf {
     let data = env.root.join("data/termos");
-    let current = env!("CARGO_PKG_VERSION");
-    // As the installer leaves it: the binary in versions/<version>, and bin/tos a symlink to it.
-    let installed = data.join("versions").join(current);
+    let installed = data.join("versions").join(env!("CARGO_PKG_VERSION"));
     fs::create_dir_all(&installed).unwrap();
     fs::copy(TOS, installed.join("tos")).unwrap();
     let bin = env.root.join("bin");
     fs::create_dir_all(&bin).unwrap();
     std::os::unix::fs::symlink(installed.join("tos"), bin.join("tos")).unwrap();
     fs::write(data.join("install-dir"), format!("{}\n", bin.display())).unwrap();
+    bin.join("tos")
+}
+
+/// Runs `<exe> update <args>` with the test's variables, a throwaway HOME and no PATH changes.
+fn run_update(env: &Env, exe: &Path, args: &[&str], extra: &[(&str, String)]) -> std::process::Output {
+    Command::new(exe)
+        .arg("update")
+        .args(args)
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("HOME", env.root.join("home"))
+        .env("TOS_NO_MODIFY_PATH", "1")
+        .envs(extra.iter().map(|(k, v)| (k, v)))
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn update_replaces_an_installed_tos_and_keeps_the_one_before() {
+    let env = Env::new("e2e-update");
+    let tos = install_like_the_installer(&env);
+    let versions = env.root.join("data/termos/versions");
     let release = env.root.join("release");
     fake_release(&release, "9.9.9");
+    let from_release = [("TOS_DOWNLOAD_URL", format!("file://{}", release.display()))];
 
-    let update = |exe: &Path| {
-        Command::new(exe)
-            .arg("update")
-            .envs(env.vars.iter().map(|(k, v)| (k, v)))
-            .env("HOME", env.root.join("home"))
-            .env("TOS_NO_MODIFY_PATH", "1")
-            .env("TOS_DOWNLOAD_URL", format!("file://{}", release.display()))
-            .output()
-            .unwrap()
-    };
     // A tos that the installer didn't put there (this test's own build) isn't replaced.
-    let out = update(Path::new(TOS));
+    let out = run_update(&env, Path::new(TOS), &[], &from_release);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("wasn't installed by the installer"), "{out:?}");
 
     // The installed one is: bin/tos now points at 9.9.9, and the version before stays for running sessions.
-    let out = update(&bin.join("tos"));
+    let out = run_update(&env, &tos, &[], &from_release);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert_eq!(fs::read_link(bin.join("tos")).unwrap(), data.join("versions/9.9.9/tos"));
-    assert!(installed.join("tos").exists());
-    let said = Command::new(bin.join("tos")).arg("--version").output().unwrap();
+    assert_eq!(fs::read_link(&tos).unwrap(), versions.join("9.9.9/tos"));
+    assert!(versions.join(env!("CARGO_PKG_VERSION")).join("tos").exists());
+    let said = Command::new(&tos).arg("--version").output().unwrap();
     assert_eq!(String::from_utf8_lossy(&said.stdout).trim(), "tos 9.9.9 (extension API 2)");
+}
+
+#[test]
+fn update_does_nothing_when_already_the_newest() {
+    if Command::new("curl").arg("--version").output().is_err() {
+        eprintln!("curl isn't installed; skipping");
+        return;
+    }
+    let env = Env::new("e2e-update-newest");
+    let tos = install_like_the_installer(&env);
+    let before = fs::read_link(&tos).unwrap();
+    let github = fake_github(env!("CARGO_PKG_VERSION"));
+    let out = run_update(&env, &tos, &[], &[("TOS_RELEASES_URL", github)]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains(&format!("tos {} is already the newest release", env!("CARGO_PKG_VERSION"))), "{said}");
+    assert_eq!(fs::read_link(&tos).unwrap(), before);
+}
+
+#[test]
+fn update_to_a_release_without_update_needs_force() {
+    let env = Env::new("e2e-update-old");
+    let tos = install_like_the_installer(&env);
+    let release = env.root.join("release");
+    fake_release(&release, "0.2.0");
+    let from_release = [("TOS_DOWNLOAD_URL", format!("file://{}", release.display()))];
+
+    let out = run_update(&env, &tos, &["--version", "0.2.0"], &from_release);
+    assert!(!out.status.success());
+    let why = String::from_utf8_lossy(&out.stderr);
+    assert!(why.contains("doesn't have `tos update`") && why.contains("--force"), "{why}");
+    assert_eq!(fs::read_link(&tos).unwrap().parent().unwrap().file_name().unwrap(), env!("CARGO_PKG_VERSION"));
+
+    let out = run_update(&env, &tos, &["--version", "0.2.0", "--force"], &from_release);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(fs::read_link(&tos).unwrap(), env.root.join("data/termos/versions/0.2.0/tos"));
+
+    // Before the rename it was tb, which `tos update` can't install even with --force.
+    let out = run_update(&env, Path::new(TOS), &["--version", "0.1.1", "--force"], &from_release);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("called tb"), "{out:?}");
 }
 
 #[test]
@@ -1755,22 +1822,9 @@ fn update_notice_shows_a_newer_release() {
         eprintln!("curl isn't installed; skipping");
         return;
     }
-    // Stands in for GitHub: /latest redirects to the newest release's tag.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        for mut stream in listener.incoming().flatten() {
-            let mut buf = [0u8; 1024];
-            let _ = std::io::Read::read(&mut stream, &mut buf);
-            let reply = format!(
-                "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/releases/tag/v9.9.9\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            );
-            let _ = std::io::Write::write_all(&mut stream, reply.as_bytes());
-        }
-    });
     let mut env = Env::new("e2e-notice");
     env.vars.retain(|(k, _)| k != "TOS_NO_UPDATE_CHECK");
-    env.set("TOS_RELEASES_URL", &format!("http://127.0.0.1:{port}/releases"));
+    env.set("TOS_RELEASES_URL", &fake_github("9.9.9"));
     let s = env.attach(120, 20);
     s.wait_for("tos 9.9.9 is available: run tos update");
     // The answer is kept for a day, so other sessions don't ask again.

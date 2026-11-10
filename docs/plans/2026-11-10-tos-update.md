@@ -109,6 +109,17 @@ says to run `tos kill`, and attaching again restores the session under 0.2.2.
   - The real update check recorded `0.3.0`.
   - **Rough edges, not decided:** `tos update` reinstalls when already the newest, and rolling back below
     0.3.0 loses the `update` command.
+- [x] **The rough edges, fixed in 0.3.1** (2026-11-10, the user's go-ahead):
+  - **Already the newest:** without `--version`, `tos update` asks for the newest release first (one request,
+    as the daily check makes). If nothing is newer, it says `tos <v> is already the newest release` and stops.
+    It skips that request when `TOS_DOWNLOAD_URL` is set.
+  - **Older releases:** `--version` older than 0.3.0 needs `--force`, and the message says only the one-liner
+    can come back. Older than 0.2.0 (`tb`) is always refused, as is something that isn't a version.
+  - **The installer's hint** about a server from before still running now appears only when the version
+    changed.
+  - **Tests:** unit tests for the rules, and e2e tests `update_does_nothing_when_already_the_newest` (a
+    stand-in GitHub on the current version) and `update_to_a_release_without_update_needs_force`. The hint
+    was checked by hand with a dummy `tos` process: nothing on a reinstall, and one line on 0.3.0 → 0.3.1.
 - [x] **Distribution plan:** its "Later: `tos update`" item links here (2026-11-10).
 
 ## Open questions

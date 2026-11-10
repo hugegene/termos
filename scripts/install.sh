@@ -195,7 +195,9 @@ On Linux it needs glibc 2.34 or newer: Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedor
         say "$install_dir/tb is this program from before it was renamed tos. Sessions started by tb keep
     running under it: end them with \`tb kill-all-sessions -y\` and \`tos\` restores them. Then: rm $install_dir/tb"
     fi
-    if [ "$upgrade" = yes ] && command -v pgrep >/dev/null 2>&1 && pgrep -x tos >/dev/null 2>&1; then
+    # Only when the version changed: reinstalling the same one leaves running servers as current as before.
+    if [ "$upgrade" = yes ] && [ "${previous%/tos}" != "$dest" ] &&
+        command -v pgrep >/dev/null 2>&1 && pgrep -x tos >/dev/null 2>&1; then
         say "a tos server from before is still running the old version. If tos refuses to attach,
     run: tos kill   (attaching again restores the session)"
     fi
