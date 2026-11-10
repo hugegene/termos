@@ -125,6 +125,13 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
   reports a shell's folder by its real path. On macOS, `/var/…` is really `/private/var/…`, so a tab whose
   shell was in `$HOME` didn't show `~`. `paths::home_dirs()` now gives `$HOME` and its real path, and tab
   labels and the finder's `~/…` use both. This also helps Linux homes that sit behind a symlink.
+- [x] **Clicking a PNG in iTerm2 jumped the finder to its last file** (2026-11-10, found by the user in
+  iTerm2; [finding](../findings/2026-11-10-iterm2-kitty-chunk-reply.md)):
+  - **The bug:** tos sends a picture as kitty chunks with `q=2` (don't answer) on the first chunk only. iTerm2
+    answers the last chunk by that chunk's own `q`. Its answer `ESC _ G i=0;OK ESC \` reached the client as
+    typed keys, Alt+`_` then `G`, and `G` selects the last file.
+  - **The fix:** every chunk carries `q=2` (`server/images.rs`), as the kitty spec allows.
+  - **Still to check on the Mac:** clicking a PNG keeps it selected, and the picture shows.
 
 ## Open questions
 
@@ -148,3 +155,4 @@ None at the moment. All three were answered on 2026-11-10; see the change log.
   - **Not yet run on macOS:** the macOS CI job runs on the next push. Then come the by-hand checks on the
     user's Mac.
   - One change from the plan: the peer test uses a real socket instead of a socket pair (see Steps).
+- **2026-11-10:** fixed the iTerm2 kitty answer that made the finder jump to its last file (see Steps).

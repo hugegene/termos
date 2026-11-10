@@ -77,16 +77,20 @@ fn png(img: &RgbImage) -> Vec<u8> {
 
 /// kitty graphics protocol: transmit and display in one go, in base64 chunks of 4096 bytes. `C=1` keeps the
 /// cursor still and `q=2` stops the terminal from answering (answers would arrive as typed input).
+///
+/// Every chunk carries `q=2`, not just the first. iTerm2 answers the last chunk by that chunk's own `q`, and
+/// its `ESC _ G i=0;OK ESC \` reached the finder as Alt+_ then `G`, which jumps to the last file
+/// (docs/findings/2026-11-10-iterm2-kitty-chunk-reply.md).
 pub fn kitty(png: &[u8], id: u32, cols: u16, rows: u16) -> Vec<u8> {
     let data = base64::engine::general_purpose::STANDARD.encode(png);
     let chunks: Vec<&[u8]> = data.as_bytes().chunks(4096).collect();
-    let mut out = Vec::with_capacity(data.len() + chunks.len() * 16 + 64);
+    let mut out = Vec::with_capacity(data.len() + chunks.len() * 20 + 64);
     for (i, chunk) in chunks.iter().enumerate() {
         let more = u8::from(i + 1 < chunks.len());
         if i == 0 {
             let _ = write!(VecWriter(&mut out), "\x1b_Ga=T,f=100,t=d,i={id},c={cols},r={rows},C=1,q=2,m={more};");
         } else {
-            let _ = write!(VecWriter(&mut out), "\x1b_Gm={more};");
+            let _ = write!(VecWriter(&mut out), "\x1b_Gm={more},q=2;");
         }
         out.extend_from_slice(chunk);
         out.extend_from_slice(b"\x1b\\");
@@ -337,7 +341,7 @@ mod tests {
         let out = String::from_utf8(kitty(&data, 3, 10, 4)).unwrap();
         assert!(out.starts_with("\x1b_Ga=T,f=100,t=d,i=3,c=10,r=4,C=1,q=2,m=1;"));
         assert_eq!(out.matches("\x1b_G").count(), 2, "5000 bytes are 6668 base64 characters: two chunks");
-        assert!(out.contains("\x1b_Gm=0;"));
+        assert!(out.contains("\x1b_Gm=0,q=2;"), "the last chunk is quiet too, or iTerm2 answers it");
         assert!(out.ends_with("\x1b\\"));
     }
 
