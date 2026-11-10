@@ -107,6 +107,17 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
   describes.
   - The first macOS CI runs found two tests that only passed on Linux, both fixed. The PDF test expected
     poppler 24.02's wording, and the trash test used GNU `mv -t`.
+- [x] **Shells start without `/usr/bin/login`** (2026-11-10, found by the first macOS CI run of the e2e tests):
+  - **The bug:** given no command, `alacritty_terminal` starts the shell on macOS as
+    `/usr/bin/login -flp <user> /bin/zsh -fc 'exec -a -<shell> <shell>'`. `login` runs as root, so the pane's
+    process was `login`, and `proc_pidinfo` couldn't read its folder. Tabs stayed "shell" instead of following
+    `cd`, and restored sessions lost their folders. `running_command` also compared the foreground group
+    with `login`'s pid, so it would have taken the idle shell for a command to run again.
+  - **The fix:** on macOS, tb starts `$SHELL -l` (else `/bin/zsh -l`) itself (`os::default_shell`), so it's
+    still a login shell, as Terminal.app gives. The fork is unchanged. The "Last login: …" line no longer
+    appears.
+  - **The tests:** the e2e tests use `SHELL=/bin/dash` instead of `/bin/sh`. On macOS `/bin/sh` is bash, and
+    bash as a login shell reads `/etc/bashrc`, which replaces the tests' `PS1="$ "`.
 
 ## Open questions
 

@@ -82,7 +82,9 @@ impl Env {
             ("TB_SOCKET_DIR".to_owned(), sock.display().to_string()),
             ("TB_STATE_DIR".to_owned(), root.join("state").display().to_string()),
             ("XDG_DATA_HOME".to_owned(), root.join("data").display().to_string()),
-            ("SHELL".to_owned(), "/bin/sh".to_owned()),
+            // dash, because on macOS /bin/sh is bash, and as a login shell (which tb starts there) bash reads
+            // /etc/bashrc, which replaces PS1. Ubuntu and macOS both have /bin/dash.
+            ("SHELL".to_owned(), "/bin/dash".to_owned()),
             ("PS1".to_owned(), "$ ".to_owned()),
             ("TB_EDITOR".to_owned(), String::new()),
         ];
@@ -710,7 +712,7 @@ fn tabs_are_named_after_the_working_folder() {
     s.wait_for("┌ cat ");
     s.wait_for(" 1 proj ");
     s.send(b"\x04");
-    s.wait_for("┌ sh ");
+    s.wait_for("┌ dash ");
     s.send(b"cd\r");
     s.wait_for(" 1 ~ ");
     // A named tab keeps its name when the folder changes; removing the name follows the folder again.
@@ -770,7 +772,7 @@ fn sessions_come_back_after_kill() {
     assert_eq!(panes[2]["cwd"].as_str(), Some(proj.to_str().unwrap()));
     let second = panes[3]["id"].as_u64().unwrap().to_string();
     wait("sleep typed, not run", || env.tb(&["dump-screen", "-p", &second]).contains("$ sleep 300").then_some(()));
-    assert_eq!(panes[3]["title"].as_str(), Some("sh"), "the shell, not sleep, is running");
+    assert_eq!(panes[3]["title"].as_str(), Some("dash"), "the shell, not sleep, is running");
 
     // `tb delete` refuses a running session without --force, then forgets it.
     let out = Command::new(TB)

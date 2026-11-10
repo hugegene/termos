@@ -29,3 +29,8 @@ pub fn process_args(pid: u32) -> Option<Vec<String>> {
 pub fn default_trash_command() -> Vec<String> {
     vec!["gio".into(), "trash".into(), "--".into()]
 }
+
+/// `alacritty_terminal` runs `$SHELL` itself.
+pub fn default_shell() -> Option<Vec<String>> {
+    None
+}

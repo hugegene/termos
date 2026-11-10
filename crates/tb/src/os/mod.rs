@@ -57,6 +57,12 @@ pub fn default_trash_command() -> Vec<String> {
     sys::default_trash_command()
 }
 
+/// The shell, with its arguments, for a pane started without a command. `None` leaves the choice to
+/// `alacritty_terminal`: `$SHELL`, else the user's shell from the password database.
+pub fn default_shell() -> Option<Vec<String>> {
+    sys::default_shell()
+}
+
 /// Splits NUL-separated arguments, as the kernel stores them, leaving out empty ones.
 fn split_args<'a>(raw: impl IntoIterator<Item = &'a [u8]>) -> Option<Vec<String>> {
     let args: Vec<String> =

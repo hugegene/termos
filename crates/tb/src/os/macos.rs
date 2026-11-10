@@ -94,3 +94,12 @@ fn arg_max() -> usize {
 pub fn default_trash_command() -> Vec<String> {
     vec!["trash".into()]
 }
+
+/// `$SHELL -l` (else `/bin/zsh -l`): a login shell, as Terminal.app starts one. Left to itself,
+/// `alacritty_terminal` starts it through `/usr/bin/login`, which runs as root. The pane's process would then
+/// be `login`, so tb couldn't read the shell's folder (tab names, restored sessions) or tell the shell from a
+/// command running in it.
+pub fn default_shell() -> Option<Vec<String>> {
+    let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".to_owned());
+    Some(vec![shell, "-l".to_owned()])
+}

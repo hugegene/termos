@@ -101,7 +101,9 @@ impl TermPane {
         env.insert("COLORTERM".into(), "truecolor".into());
         env.insert("TB_SESSION".into(), session.into());
         env.insert("TB_PANE_ID".into(), id.to_string());
-        let shell = opts.command.split_first().map(|(p, args)| tty::Shell::new(p.clone(), args.to_vec()));
+        // `command` stays empty for a plain shell: `running_command` then treats the shell as nothing to rerun.
+        let program = if opts.command.is_empty() { os::default_shell().unwrap_or_default() } else { opts.command };
+        let shell = program.split_first().map(|(p, args)| tty::Shell::new(p.clone(), args.to_vec()));
         let options = tty::Options { shell, working_directory: opts.cwd, drain_on_exit: true, env };
 
         let pty = tty::new(&options, window_size(cols, rows, cell), u64::from(id))?;
