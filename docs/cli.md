@@ -17,7 +17,7 @@ are generated from the same definitions as `tos … --help`. This page covers wh
 
 ## Stability
 
-`tos --version` prints the extension API's version: `tos 0.2.0 (extension API 2)`. Within one API version,
+`tos --version` prints the extension API's version: `tos 0.2.1 (extension API 2)`. Within one API version,
 commands, flags, JSON fields and events are only ever **added**. They are never renamed, removed or changed in
 meaning. Failures exit non-zero with the message on stderr.
 
