@@ -299,6 +299,12 @@ Neither repo has a NOTICE file (checked on 2026-11-03), so there are no extra at
   - contracts
 - This summarises how the licenses read; it is **not legal advice**. Have a lawyer review the notices and
   IP position before fundraising or a sale.
+- *Changed 2026-11-10:* the source is now **public under MIT** in
+  [`hugegene/termos`](https://github.com/hugegene/termos) ([distribution plan](2026-11-09-distribution.md)).
+  That means:
+  - Keeping the source private no longer protects it as a trade secret.
+  - Anyone may use, change and resell the code, as long as they keep the copyright notice.
+  - The `alacritty_terminal` fork stays Apache-2.0, so the "Modified by…" notes above still apply.
 
 ## 8. Scope compared with zellij
 

@@ -89,7 +89,7 @@ change, nothing is needed until the next restart.
 ### Hosting
 
 - **Make the source repo public (chosen 2026-11-10):** the simplest option. Source, CI and releases are in one
-  repo, and Actions is free. The catch is that the code needs a license (see "Steps").
+  repo, and Actions is free. The code is licensed MIT (see "Steps").
 - **A public repo that holds only releases (chosen first, replaced 2026-11-10):** free downloads and private
   source, but CI in the private repo costs money and the release workflow needs a token for the second repo.
 - **A bucket on our own domain (R2, S3 or GCS) (later):** a short URL like `https://<domain>/install.sh` and
@@ -145,8 +145,10 @@ change, nothing is needed until the next restart.
   - Runs `cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md` and `cargo deny check licenses`.
   - Packs the tarballs and `sha256sum` files, then runs `gh release create` in `termos` with `GITHUB_TOKEN`
     (`permissions: contents: write`).
-- [ ] **A license for the source and the binary.** Needs a decision, and ideally a lawyer, as the
-  [rebuild plan](2026-11-03-rebuild-plan.md) §7 says.
+- [x] **A license for the source and the binary** (2026-11-10): **MIT**, the user's choice. Added `LICENSE`,
+  set `license = "MIT"` in `Cargo.toml` and added a License section to the README. The `alacritty_terminal`
+  fork stays Apache-2.0 with its own `LICENSE-APACHE`. `cargo deny check licenses` passes. Each release
+  tarball carries `LICENSE`.
   - *Changed 2026-11-10:* this is now about the source as well. Today it's public with no license file and
     `LicenseRef-Proprietary` in `Cargo.toml`, so people may read it but not copy or reuse it. Picking an open
     license (MIT, Apache-2.0, or both, as Rust projects often do) or a source-available one means adding a

@@ -152,3 +152,8 @@ TFINDER_IMAGES=sixel finder     # or =symbols
   editor in its own pane, then focuses yazi again via `zellij action focus-pane-id`.
 
 Files: `finder` · `bin/files` · `bin/send` · `preview.py` · `yazi/` · `nvim/init.lua` · `visidata/visidatarc` · `install.sh`
+
+## License
+
+MIT, see [LICENSE](LICENSE). `crates/alacritty_terminal` is a fork of Alacritty's terminal crate and stays
+under its own license, Apache-2.0 ([crates/alacritty_terminal/LICENSE-APACHE](crates/alacritty_terminal/LICENSE-APACHE)).
