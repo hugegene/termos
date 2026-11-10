@@ -180,8 +180,18 @@ change, nothing is needed until the next restart.
   fork stays Apache-2.0 with its own `LICENSE-APACHE`. `cargo deny check licenses` passes. Each release
   tarball carries `LICENSE`.
   - This step first covered only the binary. It covers the source too since the source went public.
-- [ ] **The first test release `v0.1.1`:** install it with the one-liner on this machine and on an Ubuntu
-  22.04 machine or VM. That confirms the glibc 2.34 reading in practice.
+- [x] **The first test release `v0.1.1`** (2026-11-10):
+  [published](https://github.com/hugegene/termos/releases/tag/v0.1.1) about 3 minutes after the tag
+  ([finding](../findings/2026-11-10-first-release.md)).
+  - **Installs:** the one-liner installs on this machine, Ubuntu 22.04 and Debian 12 (Docker). Ubuntu 20.04 is
+    refused cleanly. A session started, took input and was saved by `tb kill` on 22.04.
+  - **glibc:** both Linux builds need glibc 2.34, as measured before.
+  - **macOS:** the binary declares macOS 11.0 as its minimum.
+  - **Not yet tried:** the macOS binary by hand on a Mac, and the one-liner on a real arm64 Linux machine.
+  - **What getting CI green took:** two tests that assumed Linux tools, a timing test too tight for shared
+    runners, and two real bugs. On macOS, shells now start without `/usr/bin/login`, and `~` is recognised by
+    its real path ([macOS plan](2026-11-09-macos-support.md)). `tb kill` now waits until the session has ended,
+    and a renamed session removes its socket.
 - [x] **README** (2026-11-10): the tb section has an Install part with the one-liner, then a Development part
   with `cargo build --release` and how to release.
 - [ ] **Later:**
@@ -200,8 +210,8 @@ change, nothing is needed until the next restart.
 - **Who it's for at first:** a few friends (the GitHub URL is enough), or a public launch (worth the domain
   and bucket first)?
 - **arm64 Linux runners:** check they're available on the account's plan. If not, cross-compile from x86_64.
-  - *2026-11-10:* from memory, not checked: public repos get free arm64 Linux runners (`ubuntu-22.04-arm`).
-    The first release run will confirm it.
+  - *Answered 2026-11-10:* yes. `ubuntu-22.04-arm` built v0.1.1 in 1 min 37 s
+    ([finding](../findings/2026-11-10-first-release.md)).
 - **GitHub Actions minutes:** a private repo pays for minutes, and macOS minutes cost more. Check that it fits
   the plan's free allowance.
   - *Answered 2026-11-10* ([finding](../findings/2026-11-10-github-actions-cost.md)): GitHub Free includes $12
