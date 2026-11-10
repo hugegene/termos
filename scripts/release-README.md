@@ -11,7 +11,8 @@ skips that):
 
     curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
 
-Then run `tos` to start or attach to the session "main".
+Then run `tos` to start or attach to the session "main". Later, `tos update` installs the newest release
+(the status bar says when there's one).
 
 ## Optional tools
 

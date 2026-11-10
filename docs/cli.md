@@ -17,7 +17,7 @@ are generated from the same definitions as `tos … --help`. This page covers wh
 
 ## Stability
 
-`tos --version` prints the extension API's version: `tos 0.2.1 (extension API 2)`. Within one API version,
+`tos --version` prints the extension API's version: `tos 0.3.0 (extension API 2)`. Within one API version,
 commands, flags, JSON fields and events are only ever **added**. They are never renamed, removed or changed in
 meaning. Failures exit non-zero with the message on stderr.
 
@@ -59,6 +59,7 @@ meaning. Failures exit non-zero with the message on stderr.
 | `tos edit [-l LINE] [-d DIR] [--cwd DIR] FILE` (`e`) | FILE in the editor in a new pane; prints its id |
 | `tos subscribe` | Events, below |
 | `tos finder [DIR]` | A finder tab |
+| `tos update [--version X]` | Install the newest release, or X, over a `tos` that the one-line installer put there (below) |
 
 ### `tos action …` (`tos ac …`)
 
@@ -241,6 +242,31 @@ keybinds {
 - **Skipped, with a warning naming the line:** a binding that uses anything else (plugins, floating panes,
   swap layouts, pane groups). The warnings show briefly in the status bar when you attach, and in full from
   `tos action reload-config`.
+
+## Upgrading: `tos update`
+
+The one-line installer keeps each version in its own folder and makes `tos` a symlink to the current one,
+as Claude Code does:
+
+```
+~/.local/bin/tos  ──symlink──▶  ~/.local/share/termos/versions/0.3.1/tos
+                                ~/.local/share/termos/versions/0.3.0/tos   (the one before, kept)
+```
+
+- **`tos update`** downloads the newest `install.sh` and runs it. `tos update --version 0.3.0` installs a
+  particular release, for example to go back. The installer keeps the version that was current before, so a
+  session still running it is unaffected. `tos kill` and attaching again move it to the new version (the
+  session is restored). A `tos` that the installer didn't put there, such as a `cargo build`, is never
+  replaced: `tos update` says so and stops.
+- **The notice:** each session's server checks for a newer release, asking GitHub at most once a day per
+  machine. The answer is kept in `~/.local/state/termos/update-check`. A newer release shows in the status
+  bar as `tos 0.3.2 is available: run tos update`, a segment with the id `update`.
+  `tos action clear-status --id update` hides it. Extensions see its clicks as `status_clicked` events like
+  any other segment.
+- **`TOS_NO_UPDATE_CHECK=1`** turns the check off. It's one request to
+  `https://github.com/hugegene/termos/releases/latest`, which redirects to the newest tag. Nothing else is
+  sent.
+- **`TOS_RELEASES_URL`** (for tests) replaces `https://github.com/hugegene/termos/releases`.
 
 ## Not copied from zellij
 

@@ -1,5 +1,7 @@
 #!/bin/sh
-# Installs tos from a GitHub release, without Rust and without sudo:
+# Installs tos from a GitHub release, without Rust and without sudo. Each version goes in
+# ~/.local/share/termos/versions/<version>/, and $TOS_INSTALL_DIR/tos (~/.local/bin/tos) links to it.
+# `tos update` runs this script again:
 #
 #   curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
 #
@@ -153,14 +155,39 @@ main() {
     version=$("$new" --version 2>/dev/null) || die "the downloaded tos doesn't run on this system.
 On Linux it needs glibc 2.34 or newer: Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora 35+."
 
-    mkdir -p "$install_dir"
+    # Each version gets its own folder, like Claude Code's, and $install_dir/tos is a symlink to the current
+    # one. `tos update` runs this script again.
+    number=$(printf '%s\n' "$version" | cut -d ' ' -f 2)
+    case "$number" in
+    "" | */* | .*) die "the downloaded tos gave an unexpected version: $version" ;;
+    esac
+    data=${XDG_DATA_HOME:-$HOME/.local/share}/termos
+    dest=$data/versions/$number
+    mkdir -p "$dest" "$install_dir"
     upgrade=no
-    [ -e "$install_dir/tos" ] && upgrade=yes
-    # Copy next to the old one, then rename over it: a tos that's running keeps its old file.
-    cp "$new" "$install_dir/.tos.new.$$"
-    chmod 755 "$install_dir/.tos.new.$$"
-    mv -f "$install_dir/.tos.new.$$" "$install_dir/tos"
-    say "installed $version as $install_dir/tos"
+    previous=
+    if [ -L "$install_dir/tos" ]; then
+        upgrade=yes
+        previous=$(readlink "$install_dir/tos")
+    elif [ -e "$install_dir/tos" ]; then
+        upgrade=yes # a plain file, from 0.2.x
+    fi
+    # Copy, then rename into place, so a tos that's running keeps its file.
+    cp "$new" "$dest/.tos.new.$$"
+    chmod 755 "$dest/.tos.new.$$"
+    mv -f "$dest/.tos.new.$$" "$dest/tos"
+    # Switch the symlink in one step: make a new one, then rename it over the old.
+    ln -s "$dest/tos" "$install_dir/.tos.link.$$"
+    mv -f "$install_dir/.tos.link.$$" "$install_dir/tos"
+    printf '%s\n' "$install_dir" >"$data/install-dir"
+    # Keep this version and the one before it: a session may still be running that one.
+    for old in "$data/versions"/*; do
+        [ -d "$old" ] || continue
+        [ "$old" = "$dest" ] && continue
+        [ -n "$previous" ] && [ "$old" = "${previous%/tos}" ] && continue
+        rm -rf "$old"
+    done
+    say "installed $version as $install_dir/tos (in $dest)"
 
     add_to_path "$install_dir"
     # Up to 0.1.1 the command was called tb.

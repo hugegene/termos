@@ -75,16 +75,33 @@ says to run `tos kill`, and attaching again restores the session under 0.2.2.
 
 ## Steps
 
-- [ ] **`install.sh`:** use the versions folder and the symlink, keep the newest two, and turn a plain-file
-  `~/.local/bin/tos` (0.2.0 and 0.2.1 installs) into the symlink. Test the upgrade from 0.2.1 locally and in
-  a container.
-- [ ] **`tos update [--version X]`:** clap definition, `after_long_help` examples, a docs page (regenerated),
-  and the concept in `docs/cli.md`. It refuses, explaining why, when `tos` wasn't installed by the installer
-  (no versions folder, for example a `cargo build`), so a dev build is never replaced.
-- [ ] **The update notice:** a background check on attach, at most daily, with the state file, the status bar
-  note and `TOS_NO_UPDATE_CHECK`. Unit-test the version comparison, and use an e2e test against a local
-  server through a test-only variable for the base URL.
-- [ ] **Release** a version with all three, then upgrade to it from 0.2.1 with `tos update` and record a
+- [x] **`install.sh`** (2026-11-10): `versions/<version>/tos`, the symlink switched in one step (`ln -s`
+  to a temporary name, then `mv -f` over the old one), and `install-dir` noted for `tos update`.
+  - *Changed:* it keeps **the version just installed and the one the symlink pointed at before**, instead of
+    "the newest two". With "the newest two", rolling back to an older version would have deleted the
+    version just installed.
+  - **Tested** with fake releases 0.3.0–0.3.2. The 0.2.1 plain file became the symlink, 0.3.0 → 0.3.1 kept
+    both, 0.3.1 → 0.3.2 dropped 0.3.0, and rolling back to 0.3.0 kept 0.3.2.
+- [x] **`tos update [--version X]`** (2026-11-10, `crates/tos/src/update.rs`): it downloads the newest
+  `install.sh` to the state folder and runs it, with `TOS_INSTALL_DIR` from `install-dir` and `TOS_VERSION`.
+  It refuses unless its own resolved path is `<data>/termos/versions/<v>/tos`. Docs: `docs/cli/update.md`
+  (generated) and "Upgrading" in `docs/cli.md`.
+  - **e2e test** `update_replaces_an_installed_tos_and_keeps_the_one_before`: the test's own build is refused.
+    An "installed" copy is updated from a fake 9.9.9 release (`file://`), and the version before is kept.
+- [x] **The update notice** (2026-11-10):
+  - *Changed:* the check runs **in each session's server**, not in the client on attach. Every hour a thread
+    reads `update-check` and asks GitHub only when that file is more than a day old, so it's still at most one
+    request a day per machine. A session left running for weeks still hears about a release.
+  - It uses `curl -w '%{redirect_url}'`, else `wget -S --spider --max-redirect=0`, which was parsed from
+    real `wget` output in a unit test.
+  - A newer version becomes the status segment `update`, once per version. `TOS_NO_UPDATE_CHECK=1` turns it
+    off, and the e2e tests set it, so tests never ask GitHub.
+  - **e2e test** `update_notice_shows_a_newer_release`: a local server stands in for GitHub
+    (`TOS_RELEASES_URL`). The status bar shows `tos 9.9.9 is available: run tos update`, and `update-check`
+    keeps `9.9.9`.
+- **Version 0.3.0**, a new command, so a minor bump. 0.2.1 was never tagged, and 0.3.0 includes its PATH
+  change.
+- [ ] **Release** `v0.3.0` (the user pushes the tag), then upgrade to it from 0.2.1 with `tos update` and record a
   finding: what the upgrade from a plain file did, rollback with `--version`, and the notice appearing.
 - [ ] **Distribution plan:** replace its "Later: `tos update`" item with a link here.
 

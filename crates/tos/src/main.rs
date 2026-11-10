@@ -12,6 +12,7 @@ mod os;
 mod paths;
 mod protocol;
 mod server;
+mod update;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -197,6 +198,15 @@ enum Cmd {
         #[command(flatten)]
         a: cli::DumpScreenArgs,
     },
+    /// Install the newest release over this one (only a tos installed by the one-line installer)
+    #[command(
+        after_long_help = "Examples:\n  tos update                    # the newest release\n  tos update --version 0.2.1    # a particular one, for example to go back\n\nThe installer keeps the version before, so a session still running it is unaffected; `tos kill` and attaching again move it to the new one."
+    )]
+    Update {
+        /// The release to install, such as 0.3.0 (default: the newest)
+        #[arg(long)]
+        version: Option<String>,
+    },
     #[command(name = "__server", hide = true)]
     Server {
         name: String,
@@ -280,6 +290,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Cmd::DumpScreen { s, a } => cli::dump_screen(&session(None, s)?, a)?,
         Cmd::Watch { name } => client::watch(&session(name, SessionOpt::default())?)?,
+        Cmd::Update { version } => update::run(version)?,
         Cmd::Subscribe { pane_id, format, scrollback, ansi } => {
             let scrollback = match scrollback.as_deref() {
                 None => None,

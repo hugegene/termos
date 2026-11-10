@@ -58,6 +58,8 @@ pub enum Ev {
     Finder(PaneId, FinderEvent),
     /// An encoded image is ready (`None`: the job was skipped).
     Image(images::ImageKey, Option<std::sync::Arc<Vec<u8>>>),
+    /// A newer release exists (`update::spawn_check`).
+    UpdateAvailable(String),
 }
 
 pub type ClientId = u32;
@@ -282,6 +284,11 @@ pub fn run(name: &str, run_commands: bool) -> anyhow::Result<()> {
         }
     });
 
+    let update_tx = tx.clone();
+    crate::update::spawn_check(move |version| {
+        let _ = update_tx.send(Ev::UpdateAvailable(version));
+    });
+
     let mut server = Server::new(name, tx);
     if let Err(e) = server.reload_config() {
         server.config_note = Some(e);
@@ -428,6 +435,14 @@ impl Server {
             }
             Ev::Image(key, bytes) => {
                 self.images.done(key, bytes);
+                self.dirty = true;
+            }
+            Ev::UpdateAvailable(version) => {
+                let text = crate::update::notice(&version);
+                match self.status.iter_mut().find(|s| s.id == "update") {
+                    Some(seg) => seg.text = text,
+                    None => self.status.push(StatusSegment { id: "update".into(), text, until: None }),
+                }
                 self.dirty = true;
             }
         }

@@ -36,6 +36,7 @@ Plain `tos` attaches to (or starts) the session.
 | [`tos watch`](watch.md) (`w`) | Show a running session read-only (zellij's `watch`); q or Ctrl+C stops watching |
 | [`tos list-panes`](list-panes.md) | List the session's panes |
 | [`tos dump-screen`](dump-screen.md) | Print a pane's text (default: the focused pane) |
+| [`tos update`](update.md) | Install the newest release over this one (only a tos installed by the one-line installer) |
 
 ## `tos action …`
 

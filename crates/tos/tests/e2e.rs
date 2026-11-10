@@ -87,6 +87,8 @@ impl Env {
             ("SHELL".to_owned(), "/bin/dash".to_owned()),
             ("PS1".to_owned(), "$ ".to_owned()),
             ("TOS_EDITOR".to_owned(), String::new()),
+            // No requests to GitHub from tests; `update_notice_shows_a_newer_release` turns it back on.
+            ("TOS_NO_UPDATE_CHECK".to_owned(), "1".to_owned()),
         ];
         Env { _dir: dir, root, sock, session: session.to_owned(), vars, cell: (8, 16) }
     }
@@ -1678,4 +1680,99 @@ fn real_neovim() {
     s.wait_until("nvim closed", |t| !t.contains("Alt+s save"));
     assert_eq!(fs::read_to_string(files.join("a.md")).unwrap(), "# Hello\n");
     println!("{}", s.text());
+}
+
+/// The target name the installer picks on this machine.
+fn release_target() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        other => panic!("no release target for {other:?}"),
+    }
+}
+
+/// A release folder like GitHub's: install.sh, and a tarball whose `tos` is a script printing `version`.
+fn fake_release(dir: &Path, version: &str) {
+    let target = release_target();
+    let folder = format!("tos-{version}-{target}");
+    fs::create_dir_all(dir.join(&folder)).unwrap();
+    let bin = dir.join(&folder).join("tos");
+    fs::write(&bin, format!("#!/bin/sh\necho 'tos {version} (extension API 2)'\n")).unwrap();
+    Command::new("chmod").arg("755").arg(&bin).status().unwrap();
+    let tarball = format!("tos-{target}.tar.gz");
+    let script = format!(
+        "tar -czf {tarball} {folder} && (sha256sum {tarball} 2>/dev/null || shasum -a 256 {tarball}) > {tarball}.sha256"
+    );
+    assert!(Command::new("sh").arg("-c").arg(script).current_dir(dir).status().unwrap().success());
+    fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/install.sh"), dir.join("install.sh")).unwrap();
+}
+
+#[test]
+fn update_replaces_an_installed_tos_and_keeps_the_one_before() {
+    let env = Env::new("e2e-update");
+    let data = env.root.join("data/termos");
+    let current = env!("CARGO_PKG_VERSION");
+    // As the installer leaves it: the binary in versions/<version>, and bin/tos a symlink to it.
+    let installed = data.join("versions").join(current);
+    fs::create_dir_all(&installed).unwrap();
+    fs::copy(TOS, installed.join("tos")).unwrap();
+    let bin = env.root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(installed.join("tos"), bin.join("tos")).unwrap();
+    fs::write(data.join("install-dir"), format!("{}\n", bin.display())).unwrap();
+    let release = env.root.join("release");
+    fake_release(&release, "9.9.9");
+
+    let update = |exe: &Path| {
+        Command::new(exe)
+            .arg("update")
+            .envs(env.vars.iter().map(|(k, v)| (k, v)))
+            .env("HOME", env.root.join("home"))
+            .env("TOS_NO_MODIFY_PATH", "1")
+            .env("TOS_DOWNLOAD_URL", format!("file://{}", release.display()))
+            .output()
+            .unwrap()
+    };
+    // A tos that the installer didn't put there (this test's own build) isn't replaced.
+    let out = update(Path::new(TOS));
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("wasn't installed by the installer"), "{out:?}");
+
+    // The installed one is: bin/tos now points at 9.9.9, and the version before stays for running sessions.
+    let out = update(&bin.join("tos"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(fs::read_link(bin.join("tos")).unwrap(), data.join("versions/9.9.9/tos"));
+    assert!(installed.join("tos").exists());
+    let said = Command::new(bin.join("tos")).arg("--version").output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&said.stdout).trim(), "tos 9.9.9 (extension API 2)");
+}
+
+#[test]
+fn update_notice_shows_a_newer_release() {
+    if Command::new("curl").arg("--version").output().is_err() {
+        eprintln!("curl isn't installed; skipping");
+        return;
+    }
+    // Stands in for GitHub: /latest redirects to the newest release's tag.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0u8; 1024];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let reply = format!(
+                "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/releases/tag/v9.9.9\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            let _ = std::io::Write::write_all(&mut stream, reply.as_bytes());
+        }
+    });
+    let mut env = Env::new("e2e-notice");
+    env.vars.retain(|(k, _)| k != "TOS_NO_UPDATE_CHECK");
+    env.set("TOS_RELEASES_URL", &format!("http://127.0.0.1:{port}/releases"));
+    let s = env.attach(120, 20);
+    s.wait_for("tos 9.9.9 is available: run tos update");
+    // The answer is kept for a day, so other sessions don't ask again.
+    let kept = fs::read_to_string(env.root.join("state/update-check")).unwrap();
+    assert!(kept.trim().ends_with(" 9.9.9"), "{kept}");
 }

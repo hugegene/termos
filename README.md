@@ -67,6 +67,9 @@ curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.s
   `~/.zshrc`, `~/.bashrc` (`~/.bash_profile` on macOS), fish's `conf.d/termos.fish`, else `~/.profile`.
   `TOS_NO_MODIFY_PATH=1` skips this and prints the line instead.
 - **What it checks:** the download's SHA-256, and that `tos` runs, before it replaces anything.
+- **Upgrading:** `tos update`. Each version lives in `~/.local/share/termos/versions/`, `~/.local/bin/tos`
+  links to the current one, and the one before is kept. Sessions show a note in the status bar when a newer
+  release is out (at most one check a day; `TOS_NO_UPDATE_CHECK=1` turns it off).
 - **Optional programs:** Neovim, poppler (PDF), ffmpeg (video) and gio or trash. `tos` names the package when
   one is missing.
 
