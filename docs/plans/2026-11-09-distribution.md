@@ -5,14 +5,18 @@
 People install `tb` with one line, without Rust and without sudo:
 
 ```sh
-curl -fsSL https://<host>/install.sh | sh
+curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
 ```
 
 - **Builds:** GitHub Actions builds the release binaries when we push a version tag (`v0.2.0`). Nothing is
   built on the dev box for a release, and nothing builds automatically after edits (it doesn't today either).
-- **Hosting (to start):** the source repo stays **private**. Releases are published to a separate **public
-  repo that holds only releases** (working name `tb-releases`). Its download links are anonymous and served from
-  a CDN. Later, a bucket on our own domain gives a shorter URL, as Claude Code does.
+- **Hosting (to start):** one **public** repo, [`hugegene/termos`](https://github.com/hugegene/termos), holds
+  the source, CI and the releases. Download links are anonymous and served from GitHub's CDN. Later, a bucket
+  on our own domain gives a shorter URL, as Claude Code does.
+  - *Changed 2026-11-10:* the source is public too. Before, it was a private source repo plus a separate public
+    `tb-releases` repo. Public repos run Actions for free, macOS included
+    ([finding](../findings/2026-11-10-github-actions-cost.md)). The release workflow uploads with the built-in
+    `GITHUB_TOKEN`, so there's no second repo and no token to store. The source was pushed on 2026-11-10.
 - **Targets (first release):**
   - `x86_64-unknown-linux-gnu`, built on Ubuntu 22.04
   - `aarch64-unknown-linux-gnu` (arm64), if the arm runner is available to us
@@ -28,31 +32,52 @@ curl -fsSL https://<host>/install.sh | sh
 
 ### Example: releasing 0.2.0 and a friend installing it
 
+*Changed 2026-11-10:* redrawn so that GitHub shows as the host, with where each file is stored. Redrawn again
+the same day for one public repo.
+
 ```
- dev box               GitHub Actions (private repo)           tb-releases (public)          friend's Ubuntu 22.04
-┌──────────────┐ 1 tag ┌───────────────────────────────┐ 2 gh  ┌──────────────────────┐
-│ bump version │ v0.2.0│ matrix: x86_64 linux, arm64   │release│ v0.2.0:              │
-│ git tag      │──────▶│ linux, arm64 macOS            │create │  install.sh          │
-│ git push     │       │ cargo build --release --locked│──────▶│  tb-0.2.0-<target>   │
-└──────────────┘       │ strip, notices, tar, sha256   │       │   .tar.gz, .sha256   │
-                       └───────────────────────────────┘       └──────────────────────┘
-                                                                   ▲  │      ▲  │
-                                               3 GET install.sh    │  │ 4    │  │ 5 GET tarball + .sha256
-                                                                ┌──┴──▼──────┴──▼───────┐
-                                                                │ curl … | sh           │ 6 check sha256,
-                                                                │                       │   ~/.local/bin/tb
-                                                                └───────────────────────┘
+ dev box (yours)        GitHub, the host: it stores and serves everything in this box
+                      ┌───────────────────────────────────────────────────────────────────────┐
+                      │ public repo hugegene/termos: source, CI and releases. All free.       │
+                      │ ┌──────────────────────────┐     ┌──────────────────────────────────┐ │
+┌──────────────┐      │ │ Actions runner, one per  │ 2   │ Release v0.2.0, files stored:    │ │
+│ bump version │  1   │ │ target: a throwaway VM   │────▶│   install.sh                     │ │
+│ git tag      │─────▶│ │ cargo build --release,   │ gh  │   tb-0.2.0-<target>.tar.gz       │ │
+│ git push     │ tag  │ │ strip, notices, tar,     │     │   tb-0.2.0-<target>.tar.gz       │ │
+└──────────────┘      │ │ sha256. VM wiped after.  │     │     .sha256                      │ │
+                      │ └──────────────────────────┘     └─────────────────┬────────────────┘ │
+                      │    served from GitHub's download CDN               │                  │
+                      └────────────────────────────────────────────────────┼──────────────────┘
+                                                             3 install.sh, │
+                                                             4 tarball and ▼ .sha256
+                                                        ┌────────────────────────────────────┐
+                                                        │ friend's Ubuntu 22.04: curl … | sh │
+                                                        │ 5 check sha256, put tb in          │
+                                                        │   ~/.local/bin/tb                  │
+                                                        └────────────────────────────────────┘
 ```
 
-1. On the dev box: set `version = "0.2.0"` in `Cargo.toml`, commit, `git tag v0.2.0`, push.
-2. The release workflow checks that the tag matches `tb --version` (`tb 0.2.0 (extension API 1)`), builds each
-   target and creates release `v0.2.0` in `tb-releases` with a token stored as a repo secret.
-3. The friend runs the one-liner. `install.sh` runs `uname -sm` and gets `Linux x86_64`.
-4. It picks `x86_64-unknown-linux-gnu` and resolves "latest" through GitHub's
-   `/releases/latest/download/…` link.
-5. It downloads `tb-0.2.0-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`.
-6. It checks the checksum and puts `tb` in `~/.local/bin`, warning if that folder isn't on `PATH`. It prints
+1. On the dev box: set `version = "0.2.0"` in `Cargo.toml`, commit, `git tag v0.2.0`, push the tag to
+   `termos`.
+2. The release workflow starts one throwaway runner per target. Each checks that the tag matches `tb --version`
+   (`tb 0.2.0 (extension API 1)`), builds and packs. Then `gh release create` uploads the files to release
+   `v0.2.0` in `termos`, using the workflow's built-in `GITHUB_TOKEN`. The runner is deleted after the job. From
+   then on, the binaries are stored only as files on that release.
+3. The friend runs the one-liner, which downloads `install.sh` from the release. It runs `uname -sm` and gets
+   `Linux x86_64`, so it picks `x86_64-unknown-linux-gnu`.
+4. It downloads `tb-0.2.0-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`. It uses GitHub's
+   `/releases/latest/download/…` link, which redirects to GitHub's download CDN.
+5. It checks the checksum and puts `tb` in `~/.local/bin`, warning if that folder isn't on `PATH`. It prints
    `tb 0.2.0`.
+
+**Where the binary is at each point:**
+
+- **During the build:** on the runner, a throwaway VM that's deleted when the job ends.
+- **After the release:** as a file attached to the release in `termos`, not in its git history.
+- **On the user's machine:** in `~/.local/bin/tb`.
+
+**Who pays:** nobody. Standard GitHub-hosted runners are free in public repos, macOS included, and release
+downloads have no bandwidth limit ([finding](../findings/2026-11-10-github-actions-cost.md)).
 
 **Upgrading with a session running:** the old server keeps running the old binary. If the protocol changed
 (`PROTOCOL_VERSION`, now 3), `tb` refuses to attach and says to run `tb kill`. `tb kill` can end servers
@@ -63,10 +88,10 @@ change, nothing is needed until the next restart.
 
 ### Hosting
 
-- **A public repo that holds only releases (chosen to start):** free, fast and anonymous, with no server to
-  run. The source stays private.
-- **Make the source repo public:** simplest for GitHub Releases, but the code is proprietary
-  (`LicenseRef-Proprietary`).
+- **Make the source repo public (chosen 2026-11-10):** the simplest option. Source, CI and releases are in one
+  repo, and Actions is free. The catch is that the code needs a license (see "Steps").
+- **A public repo that holds only releases (chosen first, replaced 2026-11-10):** free downloads and private
+  source, but CI in the private repo costs money and the release workflow needs a token for the second repo.
 - **A bucket on our own domain (R2, S3 or GCS) (later):** a short URL like `https://<domain>/install.sh` and
   full control, as Claude Code does. Costs a domain and a little setup. `install.sh` only needs its base URL
   changed.
@@ -79,6 +104,8 @@ change, nothing is needed until the next restart.
   including the separate releases repo.
 - **`dist` (formerly cargo-dist):** generates both, but it's built around publishing to the same repo's GitHub
   Releases. **Estimate:** its upkeep after 2025 is uncertain.
+  - *2026-11-10:* with one public repo, `dist`'s same-repo model now fits. Not reconsidered; our own scripts
+    are still the choice.
 
 ### Linux builds
 
@@ -91,8 +118,15 @@ change, nothing is needed until the next restart.
 
 ## Steps
 
-- [ ] **A private GitHub repo for the source, and push.** Today there's no remote, so this machine holds the
-  only copy. You run this, since it publishes outside the machine.
+- [x] **A GitHub repo for the source, and push** (2026-11-10): [`hugegene/termos`](https://github.com/hugegene/termos),
+  public, on a **personal** account. `main` was pushed with 30 commits, and CI started on the push.
+  - `gh` was logged in only as a work account that looks enterprise-managed. Such an account can't create
+    public repos and can't use GitHub-hosted runners on its own repos
+    ([finding](../findings/2026-11-10-github-actions-cost.md)).
+  - Before the push, the history was checked for tokens, keys and work names. None were found. Commits carry
+    only the user's Gmail address.
+  - Pushing needed the `workflow` scope (`gh auth refresh -s workflow`) because of `.github/workflows/ci.yml`.
+    Git uses `gh` as its credential helper in this repo only (`git config --local`).
 - [ ] **Release profile:** add `strip = true` to `[profile.release]`. That removes 28,243 symbol names and
   3.1 MB. Re-measure the CI-built binary in a new finding.
   - *Changed 2026-11-09:* dropped `--remap-path-prefix`. The only absolute paths are dependency sources under
@@ -109,9 +143,14 @@ change, nothing is needed until the next restart.
   - Runs on `v*` tags, with a target matrix.
   - Builds with `cargo build --release --locked`.
   - Runs `cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md` and `cargo deny check licenses`.
-  - Packs the tarballs and `sha256sum` files, then runs `gh release create` in `tb-releases`.
-- [ ] **License text for the binary** (what users may do with it). Needs a decision, and ideally a lawyer, as
-  the [rebuild plan](2026-11-03-rebuild-plan.md) §7 says.
+  - Packs the tarballs and `sha256sum` files, then runs `gh release create` in `termos` with `GITHUB_TOKEN`
+    (`permissions: contents: write`).
+- [ ] **A license for the source and the binary.** Needs a decision, and ideally a lawyer, as the
+  [rebuild plan](2026-11-03-rebuild-plan.md) §7 says.
+  - *Changed 2026-11-10:* this is now about the source as well. Today it's public with no license file and
+    `LicenseRef-Proprietary` in `Cargo.toml`, so people may read it but not copy or reuse it. Picking an open
+    license (MIT, Apache-2.0, or both, as Rust projects often do) or a source-available one means adding a
+    `LICENSE` file and changing that field.
 - [ ] **The first test release `v0.1.1`:** install it with the one-liner on this machine and on an Ubuntu
   22.04 machine or VM. That confirms the glibc 2.34 reading in practice.
 - [ ] **README:** an Install section with the one-liner. The `cargo build --release` instructions move under
@@ -125,10 +164,20 @@ change, nothing is needed until the next restart.
 
 ## Open questions
 
-- **Product name:** `tb` is a working name. Pick the real name before the URL and the releases repo are
-  public, because renaming later breaks the one-liner.
-- **Who it's for at first:** a few friends (the releases repo is enough), or a public launch (worth the domain
+- **Public source?** *Answered 2026-11-10:* yes. The source is public in `termos`, and the plan above was
+  updated for it.
+- **Product name:** `tb` is a working name, and the repo is now called `termos`. Pick the real name before the
+  first release, because the one-liner contains the repo name and the binary is still called `tb`.
+- **Who it's for at first:** a few friends (the GitHub URL is enough), or a public launch (worth the domain
   and bucket first)?
 - **arm64 Linux runners:** check they're available on the account's plan. If not, cross-compile from x86_64.
+  - *2026-11-10:* from memory, not checked: public repos get free arm64 Linux runners (`ubuntu-22.04-arm`).
+    The first release run will confirm it.
 - **GitHub Actions minutes:** a private repo pays for minutes, and macOS minutes cost more. Check that it fits
   the plan's free allowance.
+  - *Answered 2026-11-10* ([finding](../findings/2026-11-10-github-actions-cost.md)): GitHub Free includes $12
+    a month. A Linux minute costs $0.006 and a macOS minute $0.062. The `macos` job in `ci.yml` runs on every
+    push, so it uses most of the allowance: about 17 pushes a month (**estimate**). Without a card on file,
+    runs stop when the allowance runs out, and nothing is charged. Still to decide: add a build cache, run
+    `macos` only on `main` or tags, or both.
+  - *No longer applies (2026-11-10):* the repo is public, so standard runners cost nothing.
