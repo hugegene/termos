@@ -13,6 +13,7 @@ mod keys;
 pub mod layout;
 mod pane;
 mod persist;
+mod player;
 mod render;
 mod scroll;
 
@@ -103,6 +104,8 @@ struct Client {
     status_zones: Vec<StatusZone>,
     /// How this client's terminal shows images.
     graphics: protocol::Graphics,
+    /// Where programs this client starts, such as a video player, open their windows.
+    display: protocol::Display,
     /// The images this client's screen shows now.
     shown: Vec<images::Placed>,
     /// Set for `tos subscribe` clients.
@@ -495,6 +498,7 @@ impl Server {
                 status_zones: Vec::new(),
                 read_only: false,
                 graphics: protocol::Graphics::default(),
+                display: protocol::Display::default(),
                 shown: Vec::new(),
                 subscription: None,
             },
@@ -539,12 +543,13 @@ impl Server {
                     return;
                 }
                 match kind {
-                    ClientKind::Attach { cols, rows, graphics } => {
+                    ClientKind::Attach { cols, rows, graphics, display } => {
                         if let Some(c) = self.clients.get_mut(&id) {
                             c.attached = true;
                             c.cols = cols;
                             c.rows = rows;
                             c.graphics = graphics;
+                            c.display = display;
                         }
                         log::info!("client {id} shows images with {:?}", graphics);
                         self.active_client = Some(id);
@@ -1448,6 +1453,11 @@ impl Server {
             Action::Copy(text) => {
                 self.copy_to_clipboard(None, &text);
                 self.flash(format!("copied '{text}'"));
+            }
+            Action::Play(path) => {
+                // The client whose key this was: a key makes its client the active one.
+                let display = self.active_client.and_then(|c| self.clients.get(&c)).map(|c| c.display.clone());
+                self.flash(player::play(&path, &display.unwrap_or_default()));
             }
         }
     }

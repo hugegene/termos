@@ -1,4 +1,5 @@
-//! Turns preview data into styled lines for the terminal: Markdown, code, CSV tables, folders and images.
+//! Turns preview data into styled lines for the terminal: Markdown, code, CSV tables and spreadsheets, Word and
+//! PowerPoint files (as Markdown), folders, images and video frames.
 
 use finder_core::{Entry, Kind, Preview, human_size};
 use std::sync::Arc;
@@ -34,6 +35,8 @@ pub struct View {
     pub body: Body,
     /// Where the links are in `body`'s lines.
     pub links: Vec<Link>,
+    /// For a spreadsheet: which sheet this is (0-based), and how many there are.
+    pub sheets: Option<(usize, usize)>,
 }
 
 /// A link, or the part of one on one line: columns `start..end` of rendered line `line`, and where it points.
@@ -47,7 +50,7 @@ pub struct Link {
 
 impl View {
     fn lines(info: String, lines: Vec<Line<'static>>) -> View {
-        View { info, body: Body::Lines(lines), links: Vec::new() }
+        View { info, body: Body::Lines(lines), links: Vec::new(), sheets: None }
     }
 }
 
@@ -66,7 +69,7 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
         Preview::Dir(entries) => View::lines(format!("folder · {} items", entries.len()), dir_lines(&entries)),
         Preview::Markdown(src) | Preview::Html(src) => {
             let (lines, links) = markdown(&src, width);
-            View { info: info(""), body: Body::Lines(lines), links }
+            View { info: info(""), body: Body::Lines(lines), links, sheets: None }
         }
         Preview::Csv { rows, truncated } => {
             let mut lines = table(&rows, width, true);
@@ -77,7 +80,7 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
         }
         Preview::Image { thumbnail, width: w, height: h } => {
             let body = Body::Image(Arc::new(thumbnail), next_image_id());
-            View { info: info(&format!("{w}×{h}")), body, links: Vec::new() }
+            View { info: info(&format!("{w}×{h}")), body, links: Vec::new(), sheets: None }
         }
         Preview::Pdf { info: doc, pages, truncated } => {
             let (mut lines, _) = super::pdf::text_lines(1, &pages, width);
@@ -85,6 +88,38 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
                 lines.push(Line::styled("… the preview stops here (file too large)", dim()));
             }
             View::lines(info(&format!("{} pages", doc.pages)), lines)
+        }
+        Preview::Video { info: facts, frame } => {
+            let info = info(&facts.summary());
+            match frame {
+                Some(Ok(img)) => {
+                    View { info, body: Body::Image(Arc::new(img), next_image_id()), links: Vec::new(), sheets: None }
+                }
+                Some(Err(e)) => View::lines(
+                    info,
+                    vec![Line::styled(format!("can't show a frame: {e}"), Style::default().fg(Color::Red))],
+                ),
+                None => View::lines(info, vec![Line::styled("loading frame…", dim())]),
+            }
+        }
+        Preview::Sheet(sheet) => {
+            let mut lines = table(&sheet.rows, width, true);
+            if sheet.truncated {
+                lines.push(Line::styled(format!("… only the first {} rows are shown", sheet.rows.len()), dim()));
+            }
+            let name = sheet.names.get(sheet.current).map_or("", String::as_str);
+            let place = format!("sheet {}/{} {name} · {} rows", sheet.current + 1, sheet.names.len(), sheet.rows.len());
+            let mut view = View::lines(info(&place), lines);
+            view.sheets = Some((sheet.current, sheet.names.len()));
+            view
+        }
+        Preview::Office(doc) => {
+            let (mut lines, links) = markdown(&doc.markdown, width);
+            if doc.truncated {
+                lines.push(Line::styled("… the preview stops here (file too large)", dim()));
+            }
+            let slides = doc.slides.map(|n| format!("{n} slide{}", if n == 1 { "" } else { "s" }));
+            View { info: info(slides.as_deref().unwrap_or("")), body: Body::Lines(lines), links, sheets: None }
         }
         Preview::Text { text, syntax, truncated } => {
             let mut lines = code_lines(&text, syntax.as_deref());

@@ -11,7 +11,7 @@ use crossterm::event::{KeyEvent, MouseEvent};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 const MAX_FRAME: usize = 64 << 20;
 
 pub type PaneId = u32;
@@ -26,8 +26,9 @@ pub enum ClientMsg {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientKind {
-    /// An interactive client showing the session.
-    Attach { cols: u16, rows: u16, graphics: Graphics },
+    /// An interactive client showing the session. `display` is where programs it starts open windows (since
+    /// version 4).
+    Attach { cols: u16, rows: u16, graphics: Graphics, display: Display },
     /// A one-shot CLI command; the server replies once.
     Command(Command),
     /// `tos subscribe`: events as JSON lines until the session ends. `panes` also send their text when it
@@ -53,6 +54,38 @@ pub struct Graphics {
     pub protocol: ImageProtocol,
     /// The size of one cell in pixels, if the terminal told us.
     pub cell_px: Option<(u16, u16)>,
+}
+
+/// Where a client's windows go: its display variables, and whether it's an SSH login. A video started with
+/// Enter plays on the display of the client that pressed it, not on the server's, which came from whichever
+/// client started the session.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct Display {
+    /// Those of `DISPLAY_VARS` that are set and not empty, with their values.
+    pub vars: Vec<(String, String)>,
+    /// `SSH_CONNECTION` or `SSH_TTY` is set.
+    pub ssh: bool,
+}
+
+/// The variables that say where windows open: X11, Wayland, and the folder holding Wayland's socket.
+pub const DISPLAY_VARS: [&str; 3] = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"];
+
+impl Display {
+    /// This process's display.
+    pub fn from_env() -> Display {
+        let set = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let vars = DISPLAY_VARS.iter().filter_map(|k| set(k).map(|v| ((*k).to_owned(), v))).collect();
+        Display { vars, ssh: set("SSH_CONNECTION").is_some() || set("SSH_TTY").is_some() }
+    }
+
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    /// An X11 or Wayland display to open windows on.
+    pub fn has_screen(&self) -> bool {
+        self.get("DISPLAY").is_some() || self.get("WAYLAND_DISPLAY").is_some()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

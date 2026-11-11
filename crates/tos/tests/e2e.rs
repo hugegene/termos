@@ -1478,6 +1478,144 @@ fn pdf_page_view_with_kitty_images() {
     s.wait_until("page 2 placed", |t| t.contains("page 2/2") && !t.contains('▀') && !t.contains("rendering"));
 }
 
+/// Opens a finder on `dir` in the test's session, which must be running.
+fn open_finder(env: &Env, dir: &Path) {
+    let out = Command::new(TOS)
+        .args(["-s", &env.session, "finder", dir.to_str().unwrap()])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TOS_SESSION", &env.session)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// Writes a stand-in for a video player into `bin`: it writes its arguments and `DISPLAY` to `<bin>/<name>.out`.
+fn fake_player(bin: &Path, name: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let out = bin.join(format!("{name}.out"));
+    // Only shell built-ins, as the test's PATH may hold nothing else.
+    let script =
+        format!("#!/bin/sh\n{{ printf '%s\\n' \"$@\"; printf 'DISPLAY=%s\\n' \"$DISPLAY\"; }} > '{}'\n", out.display());
+    let path = bin.join(name);
+    fs::write(&path, script).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    out
+}
+
+/// What a fake player wrote, once it has run.
+fn played(out: &Path) -> String {
+    wait("the player to run", || fs::read_to_string(out).ok().filter(|t| t.contains("DISPLAY=")))
+}
+
+#[test]
+fn video_preview_and_play() {
+    // Like finder-core's video tests, this needs ffmpeg.
+    if Command::new("ffprobe").arg("-version").output().is_err() {
+        eprintln!("skipped: ffmpeg isn't installed");
+        return;
+    }
+    let mut env = Env::new("e2e-video");
+    let bin = env.root.join("bin");
+    let files = env.root.join("clips");
+    fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(&files).unwrap();
+    let mpv = fake_player(&bin, "mpv");
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../finder-core/tests/data");
+    fs::copy(data.join("two-seconds.mp4"), files.join("clip.mp4")).unwrap();
+    env.set("PATH", &format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
+    // The server starts with one display; the client that presses Enter has another.
+    env.set("DISPLAY", ":41");
+    env.tos(&["start"]);
+    open_finder(&env, &files);
+    env.set("DISPLAY", ":42");
+    let s = env.attach(100, 30);
+
+    // The header first, then the frame, drawn as blocks in this terminal.
+    s.wait_for("video · 0:02 · 64×48 · h264");
+    s.wait_until("the frame drawn", |t| t.contains('▀') && !t.contains("loading frame"));
+
+    // Enter plays it in mpv, on the client's display.
+    s.send(b"\r");
+    s.wait_for("playing in mpv");
+    let clip = files.join("clip.mp4");
+    assert_eq!(played(&mpv), format!("--force-window=immediate\n--\n{}\nDISPLAY=:42\n", clip.display()));
+}
+
+#[test]
+fn spreadsheets_word_and_powerpoint() {
+    let env = Env::new("e2e-office");
+    let files = env.root.join("office");
+    fs::create_dir_all(&files).unwrap();
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../finder-core/tests/data");
+    fs::copy(data.join("sheet.xlsx"), files.join("a-budget.xlsx")).unwrap();
+    fs::copy(data.join("office.docx"), files.join("b-trip.docx")).unwrap();
+    fs::copy(data.join("deck.pptx"), files.join("c-deck.pptx")).unwrap();
+    env.tos(&["start"]);
+    open_finder(&env, &files);
+    let s = env.attach(140, 30);
+
+    // The first sheet, with formulas' values and dates.
+    s.wait_for("xlsx · sheet 1/2 Budget · 3 rows");
+    s.wait_until("the table", |t| t.contains("Apples") && t.contains("2026-11-07") && t.contains("1.5"));
+    // In the preview, ] shows the next sheet.
+    s.send(b"l]");
+    s.wait_for("sheet 2/2 Notes");
+    s.wait_for("Second sheet");
+
+    // Enter opens that sheet in the grid, read-only; [ goes back a sheet there too.
+    s.send(b"\r");
+    s.wait_for("▦ a-budget.xlsx");
+    s.wait_for("sheet 2/2 Notes · row 0/0 · col 1 · read-only");
+    s.send(b"e");
+    s.wait_for("read-only: tos can't save .xlsx");
+    s.send(b"[");
+    s.wait_until("sheet 1 in the grid", |t| t.contains("sheet 1/2 Budget · row 0/2") && t.contains("Pears"));
+    s.send(b"q");
+    s.wait_until("grid closed", |t| !t.contains("▦ a-budget.xlsx"));
+
+    // Word and PowerPoint as Markdown.
+    s.send(b"hj");
+    s.wait_until("the docx", |t| t.contains("Trip report") && t.contains("We went to Lisbon"));
+    s.send(b"j");
+    s.wait_for("pptx · 3 slides");
+    s.wait_for("2 · Results");
+    s.wait_for("Mostly in Europe");
+}
+
+#[test]
+fn video_without_ffmpeg_mpv_or_a_display() {
+    let mut env = Env::new("e2e-video-none");
+    let bin = env.root.join("bin");
+    let files = env.root.join("clips");
+    fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(&files).unwrap();
+    let ffplay = fake_player(&bin, "ffplay");
+    fs::write(files.join("clip.mp4"), "not really a video").unwrap();
+    // Nothing on PATH but the fake ffplay: no ffmpeg, no mpv.
+    env.set("PATH", bin.to_str().unwrap());
+    env.set("DISPLAY", ":42");
+    env.tos(&["start"]);
+    open_finder(&env, &files);
+    let s = env.attach(100, 30);
+    s.wait_for("video preview needs ffmpeg");
+
+    // Without mpv, ffplay plays it.
+    s.send(b"\r");
+    s.wait_for("playing in ffplay (install mpv for a better player)");
+    assert!(played(&ffplay).starts_with("-autoexit\n"), "{}", played(&ffplay));
+
+    // A client logged in over SSH, without X forwarding, has nowhere to show it.
+    fs::remove_file(&ffplay).unwrap();
+    env.set("DISPLAY", "");
+    env.set("WAYLAND_DISPLAY", "");
+    env.set("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.1 22");
+    let ssh = env.attach(100, 30);
+    ssh.wait_for("video preview needs ffmpeg");
+    ssh.send(b"\r");
+    ssh.wait_for("no display to play on: you're attached over SSH");
+    assert!(!ffplay.exists(), "ffplay ran");
+}
+
 /// The finder's file list and preview are two real panes: borders drag, the preview goes fullscreen, closing
 /// one closes both, and a narrow tab shows one at a time.
 #[test]

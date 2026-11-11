@@ -10,8 +10,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 pub mod link;
+pub mod office;
 pub mod pdf;
+pub mod sheet;
 pub mod tool;
+pub mod video;
 
 /// One row of a folder listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +38,16 @@ pub enum Kind {
     },
     Image,
     Pdf,
+    /// A video, known by its extension (`video::EXTENSIONS`).
+    Video,
+    /// A spreadsheet (`sheet::EXTENSIONS`); holds its extension, for the label.
+    Sheet(&'static str),
+    /// A Word document, shown as Markdown.
+    Docx,
+    /// A PowerPoint presentation, shown as Markdown.
+    Pptx,
+    /// An old binary Word or PowerPoint file (`doc`, `ppt`), which isn't read; holds its extension.
+    OldOffice(&'static str),
     /// Text or source code. `syntax` is a file extension or name a highlighter can use.
     Text {
         syntax: Option<String>,
@@ -53,6 +66,10 @@ impl Kind {
             Kind::Csv { .. } => "csv",
             Kind::Image => "image",
             Kind::Pdf => "pdf",
+            Kind::Video => "video",
+            Kind::Sheet(ext) | Kind::OldOffice(ext) => ext,
+            Kind::Docx => "docx",
+            Kind::Pptx => "pptx",
             Kind::Text { .. } => "text",
             Kind::Binary => "binary",
         }
@@ -87,6 +104,16 @@ pub enum Preview {
         pages: Vec<String>,
         truncated: bool,
     },
+    /// A video's facts, and a frame from 10% of the way in: `None` while it's still being read (the finder reads
+    /// the facts first, then the frame), or the reason there's none.
+    Video {
+        info: video::VideoInfo,
+        frame: Option<Result<image::RgbImage, String>>,
+    },
+    /// One sheet of a spreadsheet, as text, up to `Limits::max_rows` rows.
+    Sheet(sheet::Sheet),
+    /// A Word or PowerPoint file as Markdown.
+    Office(office::Document),
     Text {
         text: String,
         syntax: Option<String>,
@@ -198,7 +225,16 @@ pub fn detect(path: &Path) -> Kind {
         "tsv" => return Kind::Csv { delimiter: b'\t' },
         e if IMAGE_EXTS.contains(&e) => return Kind::Image,
         "pdf" => return Kind::Pdf,
-        _ => {}
+        e if video::EXTENSIONS.contains(&e) => return Kind::Video,
+        "docx" => return Kind::Docx,
+        "pptx" => return Kind::Pptx,
+        "doc" => return Kind::OldOffice("doc"),
+        "ppt" => return Kind::OldOffice("ppt"),
+        e => {
+            if let Some(ext) = sheet::EXTENSIONS.iter().find(|x| **x == e) {
+                return Kind::Sheet(ext);
+            }
+        }
     }
     let head = read_head(path);
     if head.starts_with(b"%PDF-") {
@@ -283,6 +319,18 @@ fn load(path: &Path, kind: &Kind, limits: Limits) -> io::Result<Preview> {
             let (pages, truncated) =
                 pdf::text(path, 1, limits.pdf_text_pages, limits.max_bytes, &never).map_err(io::Error::other)?;
             Preview::Pdf { info, pages, truncated }
+        }
+        Kind::Video => {
+            let never = || false;
+            let info = video::info(path, &never).map_err(io::Error::other)?;
+            let frame = video::frame(path, &info, &limits, &never).map_err(|e| e.to_string());
+            Preview::Video { info, frame: Some(frame) }
+        }
+        Kind::Sheet(_) => Preview::Sheet(sheet::read(path, 0, limits.max_rows).map_err(io::Error::other)?),
+        Kind::Docx => Preview::Office(office::docx(path, limits.max_bytes).map_err(io::Error::other)?),
+        Kind::Pptx => Preview::Office(office::pptx(path, limits.max_bytes).map_err(io::Error::other)?),
+        Kind::OldOffice(ext) => {
+            return Err(io::Error::other(format!(".{ext} isn't supported, only .{ext}x")));
         }
         Kind::Binary => Preview::Binary { size: fs::metadata(path)?.len() },
     })
@@ -399,6 +447,23 @@ mod tests {
         assert_eq!(detect(&p("doc.PDF")), Kind::Pdf);
         assert_eq!(detect(&p("download")), Kind::Pdf);
         assert!(!Kind::Pdf.is_editable());
+        fs::write(p("clip.MOV"), "").unwrap();
+        fs::write(p("types.ts"), "export {}").unwrap();
+        assert_eq!(detect(&p("clip.MOV")), Kind::Video);
+        assert_eq!(detect(&p("types.ts")), Kind::Text { syntax: Some("ts".into()) });
+        assert!(!Kind::Video.is_editable());
+        for (name, kind) in [
+            ("a.XLSX", Kind::Sheet("xlsx")),
+            ("a.ods", Kind::Sheet("ods")),
+            ("a.docx", Kind::Docx),
+            ("a.pptx", Kind::Pptx),
+            ("a.doc", Kind::OldOffice("doc")),
+        ] {
+            fs::write(p(name), "").unwrap();
+            assert_eq!(detect(&p(name)), kind, "{name}");
+            assert!(!kind.is_editable());
+        }
+        assert_eq!(Kind::Sheet("xlsm").label(), "xlsm");
     }
 
     #[test]

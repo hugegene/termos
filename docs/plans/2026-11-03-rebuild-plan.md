@@ -212,7 +212,11 @@ These replace yazi, glow, bat, chafa, html2text, w3m and VisiData.
 | Image decoding | `image` | 0.25.10 | MIT/Apache |
 | Image display (kitty, iTerm2, sixel, blocks; auto-detected) | ~~`ratatui-image`, `icy_sixel`~~ our own encoders (changed 2026-11-04), PNG via `image` | n/a | ours |
 | CSV read/write and grid editor | `csv` | 1.4.0 | MIT/Unlicense |
+| Spreadsheets (xlsx, xlsm, xlsb, xls, ods), read-only ([calamine finding](../findings/2026-11-11-calamine.md)) | `calamine` | 0.38.0 | MIT |
+| Word and PowerPoint as Markdown (zip files of XML) | `zip` + `quick-xml`, the versions calamine uses | 9.5.1, 0.42.0 | MIT |
 | PDF text and pages | poppler's `pdfinfo`, `pdftotext`, `pdftoppm`, run as separate programs ([PDF plan](2026-11-05-pdf-preview.md)) | 24.02 tested | GPL (not linked or bundled) |
+| Video facts and a frame | ffmpeg's `ffprobe` and `ffmpeg`, run as separate programs ([video and Office plan](2026-11-07-video-and-office-previews.md)) | 6.1.1 tested | LGPL/GPL (not linked or bundled) |
+| Playing a video (Enter) | `mpv`, else `ffplay` (from ffmpeg), in their own window | n/a | GPL/LGPL (not linked or bundled) |
 
 ### Daemon (poller + webhook)
 
@@ -240,6 +244,10 @@ These replace yazi, glow, bat, chafa, html2text, w3m and VisiData.
   without it a PDF's preview says which package to install.
   - Running it as a separate program keeps its licence off `tb`.
   - It also means killing the program cancels a slow page, and a crash in it can't take the server down.
+- **ffmpeg** (LGPL/GPL) for video previews: `ffprobe` for the facts and `ffmpeg` for one frame. Optional and not
+  bundled, as poppler is; without it a video's preview says which package to install.
+- **mpv** (GPL/LGPL) plays a video when you press Enter on it, in its own window on the screen of the client that
+  pressed it. Optional and not bundled. Without it `ffplay`, which comes with ffmpeg, plays it instead.
 
 ### Avoid
 
@@ -484,6 +492,16 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
 - **2026-11-10:** **the poller is prbot, an extension in its own repo** (open question 2, for the poller). It
   drives `tos` or zellij through the CLI, so it doesn't go into the daemon. Details are in the
   [prbot plan](2026-11-10-prbot-extension.md).
+- **2026-11-11:** the finder **previews videos**: the duration, size and codec, and a frame from 10% in. Enter
+  plays the video in mpv, or ffplay.
+  - **ffmpeg and mpv** are new optional external programs (§6).
+  - The protocol goes to version 4: an attaching client sends its display, so the player opens on its screen.
+  - Details are in the [video and Office plan](2026-11-07-video-and-office-previews.md).
+- **2026-11-11:** the finder **previews Office files**: spreadsheets as a table (and read-only in the grid), and
+  Word and PowerPoint files as Markdown.
+  - **calamine** reads the spreadsheets; `zip` and `quick-xml`, which it brings in, read docx and pptx. 12 new
+    crates, all MIT or Apache-2.0 compatible ([calamine finding](../findings/2026-11-11-calamine.md)).
+  - Details are in the [video and Office plan](2026-11-07-video-and-office-previews.md).
 
 ---
 

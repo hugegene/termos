@@ -13,6 +13,8 @@ finder-core = { path = "crates/finder-core" }
 alacritty_terminal = "=0.26.0"
 anyhow = "1"
 base64 = "0.23"
+# Spreadsheets. Its `dates` feature (chrono) isn't needed: date cells come back as dates without it.
+calamine = "0.38"
 clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.29", features = ["serde"] }
 csv = "1.4"
@@ -23,6 +25,8 @@ log = "0.4"
 notify = "8"
 postcard = { version = "1", features = ["use-std"] }
 pulldown-cmark = { version = "0.13", default-features = false }
+# docx and pptx are zip files of XML; these are the versions calamine uses, so nothing extra is built.
+quick-xml = "0.42"
 ratatui = "0.30"
 rustix = { version = "1", features = ["process", "net", "fs", "termios", "event"] }
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +34,7 @@ serde_json = "1"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 unicode-width = "0.2"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 tempfile = "3"
 
 # Our fork (crates/alacritty_terminal/UPSTREAM.md) replaces the crates.io release everywhere.

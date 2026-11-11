@@ -23,7 +23,7 @@ use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 
 use crate::paths;
 use crate::protocol::{
-    ClientKind, ClientMsg, Command, Graphics, ImageProtocol, InputEvent, PROTOCOL_VERSION, PaneId, ServerMsg,
+    ClientKind, ClientMsg, Command, Display, Graphics, ImageProtocol, InputEvent, PROTOCOL_VERSION, PaneId, ServerMsg,
     read_frame, write_frame,
 };
 
@@ -555,7 +555,7 @@ fn show_one(session: &str, graphics: Graphics, read_only: bool) -> anyhow::Resul
     let kind = if read_only {
         ClientKind::Watch { cols, rows, graphics }
     } else {
-        ClientKind::Attach { cols, rows, graphics }
+        ClientKind::Attach { cols, rows, graphics, display: Display::from_env() }
     };
     write_frame(&mut stream, &ClientMsg::Hello { version: PROTOCOL_VERSION, kind })?;
     let mut reader = stream.try_clone()?;

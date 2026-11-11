@@ -1,12 +1,16 @@
 # Plan: video and Office previews in `tb`'s finder
 
-**Status:** proposed · **Date:** 2026-11-07 · **Related:** [PDF preview](2026-11-05-pdf-preview.md) (the same
+**Status:** built (2026-11-11); the checks by hand (V8, O8) are yours · **Date:** 2026-11-07 · **Related:** [PDF preview](2026-11-05-pdf-preview.md) (the same
 pattern of separate programs), [the finder as two panes](2026-11-05-finder-divider.md),
 [rebuild plan](2026-11-03-rebuild-plan.md) (finder and previews) · **Findings:**
 [video facts and frames with ffmpeg](../findings/2026-11-07-video-preview-ffmpeg.md),
+[calamine: licences, dependencies and speed](../findings/2026-11-11-calamine.md),
 [dependency licences](../findings/2026-11-03-dependency-licenses.md)
 
 ## Decision
+
+Written before the rename, so it says `tb`; the command is now `tos`. What was built differs in a few places,
+listed in the change log under 2026-11-11.
 
 Two new kinds of preview, which can be built in either order. **Video comes first,** because it needs no new
 crate. **Office needs you to run `cargo fetch`** for calamine.
@@ -142,8 +146,8 @@ crate. **Office needs you to run `cargo fetch`** for calamine.
 
 ### Video
 
-- [ ] **V1. File type** (`finder-core`): `Kind::Video` by extension, with the label "video". It isn't editable.
-- [ ] **V2. Facts and frame** (`finder-core`, new `video.rs`), using `tool.rs` to run and stop programs:
+- [x] **V1. File type** (`finder-core`): `Kind::Video` by extension, with the label "video". It isn't editable.
+- [x] **V2. Facts and frame** (`finder-core`, new `video.rs`), using `tool.rs` to run and stop programs:
   - `video_info(path)`: duration, the shown width and height (rotation applied), and the codec
   - `video_frame(path, info, cancel)`: the PPM frame, shrunk to 1600 pixels
   - **Fixtures**, made by `crates/finder-core/tests/data/make.sh` with ffmpeg's `testsrc`:
@@ -151,23 +155,23 @@ crate. **Office needs you to run `cargo fetch`** for calamine.
     - the same rotated 90° (`-display_rotation 90`)
     - a truncated copy
   - Tests that need ffmpeg say so and skip when it's missing.
-- [ ] **V3. Worker** (`tb`): a video job sends the facts first, then the frame, both carrying the request number
+- [x] **V3. Worker** (`tb`): a video job sends the facts first, then the frame, both carrying the request number
   (as PDF jobs do).
-- [ ] **V4. Playing:**
+- [x] **V4. Playing:**
   - `Action::Play(path)`: mpv, then ffplay, then the message
   - detached with `setsid`, with null stdio
   - the display variables taken from the active client
-- [ ] **V5. Client display** (`protocol.rs`, `client.rs`):
+- [x] **V5. Client display** (`protocol.rs`, `client.rs`):
   - `Attach` and `Watch` carry `DISPLAY`, `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`
   - `PROTOCOL_VERSION` becomes 4
-- [ ] **V6. Tests:**
+- [x] **V6. Tests:**
   - **Unit:** the facts and frame on the fixtures, rotation, cancelling, and ffmpeg not installed (an empty
     `PATH`).
   - **End to end:** a finder on the fixtures shows `video · 0:02 · 64×48`.
   - **Enter, end to end:** with `PATH` holding fake `mpv` and `ffplay` scripts that write down their arguments
     and environment, Enter runs mpv with the client's `DISPLAY`.
   - **CI:** install `ffmpeg` in the `check` job, beside poppler-utils.
-- [ ] **V7. Docs:**
+- [x] **V7. Docs:**
   - rebuild plan: ffmpeg and mpv under "External programs" (optional, not bundled), a video row under
     "Finder and previews", and a change-log line
   - README's finder keys
@@ -178,7 +182,7 @@ crate. **Office needs you to run `cargo fetch`** for calamine.
 
 ### Office
 
-- [ ] **O1. Fetch and check calamine** (you run `cargo fetch` after it's added to the workspace):
+- [x] **O1. Fetch and check calamine** (you run `cargo fetch` after it's added to the workspace):
   - Record a finding with:
     - its version, licence and dependency tree
     - whether its `zip` and `quick-xml` can be used directly
@@ -186,24 +190,24 @@ crate. **Office needs you to run `cargo fetch`** for calamine.
   - **Measure the time to the first 2000 rows** of a 100,000-row × 20-column xlsx (made with openpyxl, which
     is installed). Compare the cell reader with `worksheet_range`, and record it in the same finding.
   - If calamine fails the licence check, stop and come back to this plan.
-- [ ] **O2. File types** (`finder-core`): `Kind::Sheet` for spreadsheets, and `Kind::Docx` and `Kind::Pptx`,
+- [x] **O2. File types** (`finder-core`): `Kind::Sheet` for spreadsheets, and `Kind::Docx` and `Kind::Pptx`,
   labelled by their extension.
-- [ ] **O3. Spreadsheets** (`finder-core`, new `sheet.rs`):
+- [x] **O3. Spreadsheets** (`finder-core`, new `sheet.rs`):
   - sheet names, and one sheet's rows as text (up to the row limit), with dates as ISO 8601
   - `Preview::Sheet { sheets, current, rows, truncated }`
-- [ ] **O4. docx and pptx** (`finder-core`, new `office.rs`):
+- [x] **O4. docx and pptx** (`finder-core`, new `office.rs`):
   - turn each into Markdown, with the limits above
   - **fixtures:** a small docx and pptx made with `soffice --convert-to` from text sources kept beside them,
     plus a truncated docx
-- [ ] **O5. Finder** (`tb`):
+- [x] **O5. Finder** (`tb`):
   - sheet switching in the preview, and the header
   - the grid's read-only mode, filled from calamine's rows, with sheet switching
-- [ ] **O6. Tests:**
+- [x] **O6. Tests:**
   - **Unit:** cells and dates; sheet names; the row limit; headings, lists and tables from docx; slide order
     and titles from pptx; broken and password-protected files.
   - **End to end:** a spreadsheet's preview shows `sheet 1/2`, and `]` shows sheet 2; Enter opens the grid,
     and `e` says read-only; a docx shows its heading.
-- [ ] **O7. Docs:** calamine in the rebuild plan's "Finder and previews" table, with its version and licence;
+- [x] **O7. Docs:** calamine in the rebuild plan's "Finder and previews" table, with its version and licence;
   README.
 - [ ] **O8. Check by hand (you):** real xlsx, docx and pptx files of yours.
 
@@ -212,12 +216,47 @@ Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspa
 
 ## Open questions
 
-1. **A frame 10% in, or the first frame?** The plan says 10% (it skips black openings, at up to about 0.2 s
-   more). Is that the right trade?
-2. **Read-only spreadsheets:** is that enough for now, or do you want editing (a much larger job)?
+Both were answered on 2026-11-11, when you asked for the plan to be built as written:
+
+1. **A frame 10% in, or the first frame?** 10% in.
+2. **Read-only spreadsheets, or editing?** Read-only for now.
 
 ## Change log
 
 - **2026-11-07:** written, from the [ffmpeg finding](../findings/2026-11-07-video-preview-ffmpeg.md). The user
   asked for video previews (a frame, the duration and size; Enter opens mpv in a window), xlsx in the CSV grid
   with calamine, and docx and pptx as text.
+- **2026-11-11:** you asked for the whole plan to be built, as written. **Video is built** (V1–V7; V8 is yours).
+  Where it differs from the text above:
+  - **Only `Attach` carries the display,** not `Watch`: a watching client's keys are ignored, so it can't press
+    Enter.
+  - **The client also says whether it's an SSH login** (`SSH_CONNECTION` or `SSH_TTY`). The "attached over SSH"
+    message needs it; without a display and without SSH (a Linux console), it says `no display to play on`.
+  - **macOS** needs no display variables to open a window, so there it only refuses a client attached over SSH.
+  - **ffplay** gets `-autoexit`, so its window closes at the end, as mpv's does.
+  - **The fallback frame:** if ffmpeg writes nothing at 10% (seeking past the last keyframe of an oddly cut
+    file), it takes the first frame instead.
+  - **calamine's `dates` feature isn't needed:** date cells come back as dates without it
+    (`ExcelDateTime::to_ymd_hms_milli`), which saves building chrono.
+- **2026-11-11:** **Office is built** (O1–O7; O8 is yours). The [calamine
+  finding](../findings/2026-11-11-calamine.md) settled step 1: calamine is MIT and adds 12 crates under licences
+  already allowed. Its cell reader gives the first 2000 rows of a 100,000-row xlsx in 21 ms, against 804 ms to
+  load the sheet whole. Where it differs from the text above:
+  - **Only xlsx and xlsm are read cell by cell.** xls and ods have no cell reader in calamine, so their sheets
+    load whole: 1.1 s for a 100,000-row ods, during which the preview worker is busy. xlsb has a cell reader,
+    but LibreOffice can't write xlsb, so there's no test file; it loads whole too, for now.
+  - **Numbers** show at most 15 significant digits, as Excel does in a general cell, so a stored
+    `0.30000000000000004` shows as `0.3`. Booleans show as `TRUE` and `FALSE`.
+  - **The grid has no `/` search,** in CSV files either, so read-only it has arrows, `g`/`G`, `0`/`$`, paging,
+    `[` `]` and `q`. A sheet with more than 100,000 rows shows the first 100,000 and says so.
+  - **Headings in docx** are found by their style's name in `styles.xml` ("heading 1"), which Word keeps in
+    English in every language; without `styles.xml`, by the ids `Heading1` and `Title`.
+  - **pptx:** dates, footers and slide numbers are left out; tables come through as tables, pictures as
+    `[image]`, bold and italic are kept, and a hidden slide's heading says `(hidden)`.
+  - **Password-protected files** (an OLE file with an `EncryptionInfo` stream, not a zip) say "password-protected
+    spreadsheet", "… document" or "… presentation". An old OLE file renamed to `.docx` says so instead.
+  - **The test files are made through LibreOffice's Python bridge** (`make_office.py`), not `soffice
+    --convert-to`: it's the only way to set a password, and to build slides with placeholders and bullet levels.
+    `office.html` is the docx's source.
+  - **A frame cuts any preview's header with `…`** instead of dropping it when it doesn't fit, as it already did
+    for PDFs: a spreadsheet's header (`xlsx · sheet 1/2 Budget · 3 rows · 6.6 KB`) is long.

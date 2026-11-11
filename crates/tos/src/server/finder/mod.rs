@@ -114,6 +114,8 @@ pub enum Action {
     FocusFiles,
     /// Copy this text to the clipboard (the menu's Copy name and Copy path).
     Copy(String),
+    /// Play this video in a window, on the screen of the client whose key it was.
+    Play(PathBuf),
 }
 
 struct Request {
@@ -132,6 +134,10 @@ enum Job {
         show_hidden: bool,
     },
     Pdf(PdfJob),
+    /// A video's facts, then a frame: two views, so the header shows while the frame is read.
+    Video,
+    /// A sheet of a spreadsheet (0-based).
+    Sheet(usize),
 }
 
 pub struct Finder {
@@ -165,8 +171,10 @@ pub struct Finder {
     seq: Arc<AtomicU64>,
     /// The embedded editor's pane, while editing.
     pub editor: Option<PaneId>,
-    /// The CSV grid editor, while editing a CSV file.
+    /// The CSV grid editor, while editing a CSV file, or a spreadsheet shown in the grid read-only.
     grid: Option<grid::Grid>,
+    /// The sheet a spreadsheet's preview shows (`[` and `]`), from 0. Back to 0 for each new file.
+    sheet: usize,
     pub editing: Option<PathBuf>,
     /// The editor or grid was opened from the list, so focus goes back there when it closes.
     edit_from_list: bool,
@@ -222,6 +230,18 @@ fn spawn_worker(id: PaneId, tx: Sender<Ev>, latest: Arc<AtomicU64>) -> Sender<Re
                         let _ = tx.send(Ev::Finder(id, ev));
                     };
                     pdf_job(&req.path, job, req.seq, &latest, &mut docs, &send)
+                }
+                Job::Video => {
+                    let send = |ev| {
+                        let _ = tx.send(Ev::Finder(id, ev));
+                    };
+                    video_job(&req, &latest, &send)
+                }
+                Job::Sheet(index) => {
+                    let preview = finder_core::sheet::read(&req.path, index, Limits::default().max_rows)
+                        .map_or_else(Preview::Error, Preview::Sheet);
+                    let view = view::build(preview, &req.kind, req.size, req.width);
+                    Some(FinderEvent::View { path: req.path, width: req.width, view })
                 }
             };
             if let Some(ev) = ev
@@ -299,6 +319,28 @@ fn pdf_job(
     Some(event(Some(info), result))
 }
 
+/// Reads a video's facts with ffprobe and sends them (the body says it's loading the frame), then returns the
+/// view with the frame. Returns `None` if a newer request stopped it.
+fn video_job(req: &Request, latest: &AtomicU64, send: &dyn Fn(FinderEvent)) -> Option<FinderEvent> {
+    let cancel = || latest.load(Ordering::Relaxed) != req.seq;
+    let view = |preview| FinderEvent::View {
+        path: req.path.clone(),
+        width: req.width,
+        view: view::build(preview, &Kind::Video, req.size, req.width),
+    };
+    let info = match finder_core::video::info(&req.path, &cancel) {
+        Ok(info) => info,
+        Err(ToolError::Cancelled) => return None,
+        Err(e) => return Some(view(Preview::Error(e.to_string()))),
+    };
+    send(view(Preview::Video { info: info.clone(), frame: None }));
+    let frame = match finder_core::video::frame(&req.path, &info, &Limits::default(), &cancel) {
+        Err(ToolError::Cancelled) => return None,
+        other => other.map_err(|e| e.to_string()),
+    };
+    Some(view(Preview::Video { info, frame: Some(frame) }))
+}
+
 fn watcher(id: PaneId, tx: Sender<Ev>) -> Option<notify::RecommendedWatcher> {
     notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(ev) = res else { return };
@@ -363,6 +405,7 @@ impl Finder {
             seq: seq.clone(),
             editor: None,
             grid: None,
+            sheet: 0,
             editing: None,
             edit_from_list: false,
             list_rect: rect,
@@ -565,6 +608,7 @@ impl Finder {
         if self.preview_path.as_ref() != Some(&entry.path) {
             self.scroll = 0;
             self.view = None;
+            self.sheet = 0;
         }
         let kind = if entry.is_dir { Kind::Dir } else { finder_core::detect(&entry.path) };
         self.preview_path = Some(entry.path.clone());
@@ -579,7 +623,11 @@ impl Finder {
         self.pdf = None;
         let size = (!entry.is_dir).then_some(entry.size);
         let seq = self.next_seq();
-        let job = Job::Preview { show_hidden: self.show_hidden };
+        let job = match kind {
+            Kind::Video => Job::Video,
+            Kind::Sheet(_) => Job::Sheet(self.sheet),
+            _ => Job::Preview { show_hidden: self.show_hidden },
+        };
         let _ = self.requests.send(Request { path: entry.path, kind, size, width, job, seq });
     }
 
@@ -776,22 +824,77 @@ impl Finder {
         (!entry.is_dir && finder_core::detect(&entry.path).is_editable()).then(|| entry.path.clone())
     }
 
-    /// Enter / double-click: open a folder, edit a file, or look at anything else.
+    /// Enter / double-click: open a folder, edit a file, play a video, or look at anything else.
     fn activate(&mut self) -> Action {
         let Some(entry) = self.current().cloned() else { return Action::None };
         if entry.is_dir {
             self.cd(entry.path, None);
             return Action::None;
         }
-        if self.editable().is_some() {
+        if self.editable().is_some() || self.selected_sheet().is_some() {
             return self.edit_current(true);
         }
+        if finder_core::detect(&entry.path) == Kind::Video {
+            return Action::Play(entry.path);
+        }
         Action::FocusPreview
+    }
+
+    /// The selected file, if it's a spreadsheet.
+    fn selected_sheet(&self) -> Option<PathBuf> {
+        let entry = self.current().filter(|e| !e.is_dir)?;
+        matches!(finder_core::detect(&entry.path), Kind::Sheet(_)).then(|| entry.path.clone())
+    }
+
+    /// The spreadsheet preview's sheet and sheet count, once it has loaded.
+    fn sheet_view(&self) -> Option<(usize, usize)> {
+        self.view.as_ref().and_then(|v| v.sheets).filter(|_| matches!(self.preview_kind, Some(Kind::Sheet(_))))
+    }
+
+    /// `[` and `]` in a spreadsheet's preview: the previous or next sheet.
+    fn switch_sheet(&mut self, forward: bool) -> Action {
+        let Some((current, count)) = self.sheet_view() else { return Action::None };
+        let next = if forward { current + 1 } else { current.wrapping_sub(1) };
+        if next >= count {
+            return Action::Flash(format!("{} sheet", if forward { "last" } else { "first" }));
+        }
+        self.sheet = next;
+        self.scroll = 0;
+        self.request_preview(true);
+        Action::None
+    }
+
+    /// Opens sheet `index` of a spreadsheet in the grid, read-only, keeping the place in `keep`'s grid.
+    fn open_sheet(&mut self, path: &Path, index: usize, keep: Option<&grid::Grid>) -> Action {
+        match finder_core::sheet::read(path, index, grid::MAX_ROWS) {
+            Ok(sheet) => {
+                self.sheet = sheet.current;
+                let mut g = grid::Grid::from_sheet(path, sheet);
+                let body = self.body_rect();
+                g.resize(body.width, body.height);
+                if let Some(old) = keep {
+                    g.keep_place(old);
+                }
+                self.grid = Some(g);
+                Action::FocusPreview
+            }
+            Err(e) => Action::Flash(format!("can't open it: {e}")),
+        }
+    }
+
+    /// The video being previewed, if it is one.
+    fn previewed_video(&self) -> Option<&PathBuf> {
+        self.preview_path.as_ref().filter(|_| self.preview_kind == Some(Kind::Video))
     }
 
     /// Edits the selected file: CSV and TSV in the grid, other text in Neovim. Both show in the preview pane,
     /// which gets focus. `from_list` says focus goes back to the list afterwards.
     fn edit_current(&mut self, from_list: bool) -> Action {
+        if let Some(path) = self.selected_sheet() {
+            self.edit_from_list = from_list;
+            let index = if self.preview_path.as_ref() == Some(&path) { self.sheet } else { 0 };
+            return self.open_sheet(&path, index, None);
+        }
         let Some(path) = self.editable() else { return Action::None };
         self.edit_from_list = from_list;
         let finder_core::Kind::Csv { delimiter } = finder_core::detect(&path) else {
@@ -888,12 +991,25 @@ impl Finder {
 
     fn handle_key_inner(&mut self, key: &KeyEvent, preview: bool) -> Action {
         if let Some(g) = self.grid.as_mut() {
-            if let grid::Outcome::Close = g.handle_key(key) {
-                self.grid = None;
-                self.reload();
-                self.request_preview(true);
-                if self.edit_from_list {
-                    return Action::FocusFiles;
+            match g.handle_key(key) {
+                grid::Outcome::Stay => {}
+                grid::Outcome::Close => {
+                    self.grid = None;
+                    self.reload();
+                    self.request_preview(true);
+                    if self.edit_from_list {
+                        return Action::FocusFiles;
+                    }
+                }
+                grid::Outcome::Sheet(index) => {
+                    let old = self.grid.take();
+                    let path = old.as_ref().map(|g| g.path.clone()).unwrap_or_default();
+                    let action = self.open_sheet(&path, index, old.as_ref());
+                    if self.grid.is_none() {
+                        // It couldn't be read; keep the sheet that was there.
+                        self.grid = old;
+                    }
+                    return action;
                 }
             }
             return Action::None;
@@ -947,6 +1063,8 @@ impl Finder {
             match key.code {
                 KeyCode::Char(']') if self.pdf.is_some() => self.pdf_text_jump(true),
                 KeyCode::Char('[') if self.pdf.is_some() => self.pdf_text_jump(false),
+                KeyCode::Char(']') if self.sheet_view().is_some() => return self.switch_sheet(true),
+                KeyCode::Char('[') if self.sheet_view().is_some() => return self.switch_sheet(false),
                 KeyCode::Char('j') | KeyCode::Down => self.scroll_by(1),
                 KeyCode::Char('k') | KeyCode::Up => self.scroll_by(-1),
                 KeyCode::Char('d') if ctrl => self.scroll_by(page / 2),
@@ -957,6 +1075,9 @@ impl Finder {
                 KeyCode::Char('g') => self.pending_g = true,
                 KeyCode::Home => self.scroll = 0,
                 KeyCode::Char('G') | KeyCode::End => self.scroll_by(isize::MAX / 2),
+                KeyCode::Enter if self.previewed_video().is_some() => {
+                    return self.previewed_video().cloned().map_or(Action::None, Action::Play);
+                }
                 KeyCode::Enter | KeyCode::Char('e') => return self.edit_current(false),
                 KeyCode::Char('h' | 'q') | KeyCode::Left | KeyCode::Esc | KeyCode::Tab => return Action::FocusFiles,
                 _ => {}
@@ -1084,12 +1205,20 @@ impl Finder {
             "pdf · j/k scroll · [ ] page · +/- zoom · t text · h back"
         } else if preview && self.pdf.is_some() {
             "pdf · j/k scroll · [ ] page · t pages · h back"
+        } else if preview && self.previewed_video().is_some() {
+            "video · Enter play · h back"
+        } else if preview && self.sheet_view().is_some() {
+            "spreadsheet · j/k scroll · [ ] sheet · Enter grid · h back"
         } else if preview && !self.history.is_empty() {
             "preview · Backspace previous file · j/k scroll · Enter edit · h back"
         } else if preview {
             "preview · j/k scroll · Space/b page · Enter edit · h back"
         } else if self.pdf.is_some() {
             "j/k move · l preview · t text/pages · h up · / filter · . hidden · m menu"
+        } else if self.previewed_video().is_some() {
+            "j/k move · Enter play · l preview · h up · / filter · . hidden · m menu"
+        } else if matches!(self.preview_kind, Some(Kind::Sheet(_))) {
+            "j/k move · Enter grid (read-only) · l preview · h up · / filter · . hidden · m menu"
         } else {
             "j/k move · Enter open/edit · l preview · h up · / filter · . hidden · m menu"
         }
@@ -1172,16 +1301,19 @@ impl Finder {
         let pdf_info = self.pdf.as_ref().map(|p| {
             let size =
                 self.current().filter(|e| Some(&e.path) == self.preview_path.as_ref()).map(|e| human_size(e.size));
-            let info = p.header(self.pdf_pages, self.pdf_zoom, self.text_top(), &size.unwrap_or_default());
-            // A frame drops a label that doesn't fit, so cut it (the title is last) to keep the rest.
-            let max = usize::from(preview.width.saturating_sub(12)).max(1);
-            if self.frames && info.chars().count() > max {
-                format!("{}…", info.chars().take(max - 1).collect::<String>())
-            } else {
-                info
-            }
+            p.header(self.pdf_pages, self.pdf_zoom, self.text_top(), &size.unwrap_or_default())
         });
-        let info = pdf_info.as_deref().or(self.view.as_ref().map(|v| v.info.as_str())).unwrap_or_default();
+        let info = pdf_info.or_else(|| self.view.as_ref().map(|v| v.info.clone())).unwrap_or_default();
+        // A frame drops a label that doesn't fit, so cut it to keep its start (the kind, the page or the sheet),
+        // leaving room for the name, or 20 columns of it.
+        let name_room = name.chars().count().min(20) as u16;
+        let max = usize::from(preview.width.saturating_sub(12 + name_room)).max(8);
+        let info = if self.frames && info.chars().count() > max {
+            format!("{}…", info.chars().take(max - 1).collect::<String>())
+        } else {
+            info
+        };
+        let info = info.as_str();
         if self.frames {
             draw_frame(buf, preview, &name, info, frame_style(preview_active));
         } else {

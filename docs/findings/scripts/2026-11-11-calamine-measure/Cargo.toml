@@ -1,0 +1,13 @@
+# Measures calamine for docs/findings/2026-11-11-calamine.md. Its own workspace, so it isn't part of termos's.
+#
+#   CARGO_TARGET_DIR=/tmp/calamine-measure cargo run --offline --release -- FILE...
+[package]
+name = "calamine-measure"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+calamine = "=0.38.0"
+
+[workspace]

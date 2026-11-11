@@ -33,8 +33,8 @@ curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.s
 - **Upgrading:** `tos update`. Each version lives in `~/.local/share/termos/versions/`, `~/.local/bin/tos`
   links to the current one, and the one before is kept. Sessions show a note in the status bar when a newer
   release is out (at most one check a day; `TOS_NO_UPDATE_CHECK=1` turns it off).
-- **Optional programs:** Neovim, poppler (PDF), ffmpeg (video) and gio or trash. `tos` names the package when
-  one is missing.
+- **Optional programs:** Neovim, poppler (PDF), ffmpeg (video previews), mpv (playing videos) and gio or trash.
+  `tos` names the package when one is missing.
 
 ```bash
 tos               # attach to session "main", starting it if needed
@@ -102,6 +102,17 @@ opens any text file in Neovim.
 
 **PDFs** in the finder show their text; `t` shows the pages (`+`/`-` zoom, `0` fit width, `[` `]` page). This
 needs poppler (`sudo apt install poppler-utils`, or `brew install poppler` on macOS).
+
+**Videos** show their length, size and a frame from 10% of the way in, which needs ffmpeg
+(`sudo apt install ffmpeg`, or `brew install ffmpeg`). `Enter` plays one in a window with mpv
+(`sudo apt install mpv`, or `brew install mpv`), or with ffplay if mpv isn't installed. It opens on the screen
+of the terminal you pressed Enter in; attached over SSH without X forwarding, there's nowhere to show it.
+
+**Spreadsheets** (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods`) show their first sheet as a table, with formulas'
+last values and dates as `2026-11-07`; `[` `]` in the preview change sheet. `Enter` opens the sheet in the grid,
+**read-only**: `tos` can't save these formats. **Word** (`.docx`) and **PowerPoint** (`.pptx`) files show as
+Markdown: headings, lists, tables, bold and italic, and a section per slide. Old `.doc` and `.ppt` files aren't
+read.
 
 **Links** in a Markdown preview can be clicked: the finder shows the linked file, and `Backspace` goes back.
 
