@@ -260,3 +260,8 @@ Both were answered on 2026-11-11, when you asked for the plan to be built as wri
     `office.html` is the docx's source.
   - **A frame cuts any preview's header with `…`** instead of dropping it when it doesn't fit, as it already did
     for PDFs: a spreadsheet's header (`xlsx · sheet 1/2 Budget · 3 rows · 6.6 KB`) is long.
+- **2026-11-11 (later):** follow-up plans. Until they're built, spreadsheets stay read-only as above.
+  - Copying a range from the grid, and `o` to open any file in its default app:
+    [grid copy and open in app](2026-11-11-grid-copy-and-open-in-app.md). It also makes Enter only edit in tos,
+    so Enter will no longer play a video; `o` opens it in the default video player instead.
+  - Editing xlsx values, and docx and pptx text: [editing xlsx, docx and pptx](2026-11-11-office-editing.md).
