@@ -1,6 +1,6 @@
 # Plan: copy a range in the grid, `o` to open files in their app, Enter only for editing in tos, and shorter captions
 
-**Status:** planned, not built · **Date:** 2026-11-11 · **Related:**
+**Status:** built (2026-11-12); the check by hand (H) is yours · **Date:** 2026-11-11 · **Related:**
 [editing xlsx, docx and pptx](2026-11-11-office-editing.md) (moved out of this plan; it makes Enter edit docx and
 pptx), [video and Office previews](2026-11-07-video-and-office-previews.md) (Enter on a video changes here),
 [rebuild plan](2026-11-03-rebuild-plan.md) (finder and previews) · **Findings:**
@@ -302,27 +302,27 @@ From 141 columns, the list's whole 47-character caption shows (93 + 1 + 47).
 
 ### Range copy
 
-- [ ] **R1. Selection** (`server/finder/grid.rs`): an anchor cell (`Option<(row, col)>`) and a whole-rows flag; `v`,
+- [x] **R1. Selection** (`server/finder/grid.rs`): an anchor cell (`Option<(row, col)>`) and a whole-rows flag; `v`,
   `V`, `y` and `Esc`; moving keeps the anchor. Draw the range with a background colour, and keep the cursor
   reversed. The hint line gains `v select · y copy`.
-- [ ] **R2. Mouse:** `Down(Left)` sets the anchor; `Drag(Left)` moves the cursor to the cell under the pointer, and
+- [x] **R2. Mouse:** `Down(Left)` sets the anchor; `Drag(Left)` moves the cursor to the cell under the pointer, and
   scrolls at the top and bottom rows; `Up(Left)` after a drag copies.
-- [ ] **R3. Copy:** the range's text (tabs, newlines, Excel quoting, no newline at the end), and the 1 MB limit.
+- [x] **R3. Copy:** the range's text (tabs, newlines, Excel quoting, no newline at the end), and the 1 MB limit.
   `grid::Outcome::Copy { text, what }` becomes `Action::Copy`, which gains a label for the status bar, so it can
   say `copied 3 rows × 2 columns` instead of quoting the whole text.
-- [ ] **R4. Tests:**
+- [x] **R4. Tests:**
   - **Unit:** the text of a range (quoting, ragged CSV rows, `V`); dragging from cell to cell.
   - **End to end:** select a range with `v` and keys, press `y`, and find the OSC 52 sequence in the output, as
     `select_mode_search_and_osc52` does.
 
 ### Open in app
 
-- [ ] **O1. Launcher:** `server/player.rs` becomes a launcher module: keep `no_screen` and `start`, drop the player
+- [x] **O1. Launcher:** `server/player.rs` becomes a launcher module: keep `no_screen` and `start`, drop the player
   list, and add `open_in_app(path, display)`: `xdg-open` on Linux, `open` on macOS. On Linux, use `xdg-open` by
   name, because `open` is not the same program on every Linux system.
-- [ ] **O2. Keys:** `o` in the list, preview and grid becomes `Action::OpenApp(path)` (replacing `Action::Play`); add
+- [x] **O2. Keys:** `o` in the list, preview and grid becomes `Action::OpenApp(path)` (replacing `Action::Play`); add
   the menu item. Refuse in a grid with unsaved changes.
-- [ ] **O3. Tests:**
+- [x] **O3. Tests:**
   - **Unit:** the messages for no display and for a missing `xdg-open`.
   - **End to end:** a fake `xdg-open` on `PATH` (as `fake_player` fakes mpv now) records the file it was given.
   - **Video tests:** `video_preview_and_play` and `video_without_ffmpeg_mpv_or_a_display` press `o` and use the fake
@@ -330,19 +330,19 @@ From 141 columns, the list's whole 47-character caption shows (93 + 1 + 47).
 
 ### Enter and captions
 
-- [ ] **E1. Enter:**
+- [x] **E1. Enter:**
   - **In the list,** `activate` opens a folder and focuses the preview for any file. This also covers a
     double-click.
   - **In the preview,** Enter edits in tos, as in the table above. Video Enter goes.
   Enter in the preview on anything else flashes `tos can't edit .EXT; o opens it in its default app`. A
   double-click in the list still focuses the preview.
-- [ ] **E2. Captions** (`finder/mod.rs:1196–1225`): the preview and list captions per kind, as in the tables above,
+- [x] **E2. Captions** (`finder/mod.rs:1196–1225`): the preview and list captions per kind, as in the tables above,
   trimmed as in **K**. Also the menu's caption (`finder/menu.rs:257`).
-- [ ] **K1. `[ ]` pages:** in the preview's keys (`finder/mod.rs:1064–1073`), after the PDF and spreadsheet cases,
+- [x] **K1. `[ ]` pages:** in the preview's keys (`finder/mod.rs:1064–1073`), after the PDF and spreadsheet cases,
   `]` and `[` scroll by a page, as `Space` and `b` do.
-- [ ] **K2. Sheet ends:** `switch_sheet` (`finder/mod.rs:855`) and the grid's `[ ]` (`finder/grid.rs:397–402`) do
+- [x] **K2. Sheet ends:** `switch_sheet` (`finder/mod.rs:855`) and the grid's `[ ]` (`finder/grid.rs:397–402`) do
   nothing past the first or last sheet, with no message.
-- [ ] **E3. Tests:**
+- [x] **E3. Tests:**
   - **End to end:**
     - Enter on `office.docx` in the preview shows the message and starts nothing.
     - **Captions:**
@@ -365,7 +365,7 @@ From 141 columns, the list's whole 47-character caption shows (93 + 1 + 47).
 
 ### Last
 
-- [ ] **D. Docs:**
+- [x] **D. Docs:**
   - **README:** the grid's `v` `V` `y`; `o`; what Enter does; videos open with `o`; `[ ]` pages every preview.
   - **[Video and Office plan](2026-11-07-video-and-office-previews.md):** a change-log line saying Enter no longer
     plays videos.
@@ -414,3 +414,23 @@ Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspa
   - **`[ ]` past the first or last sheet says nothing,** so its message can't take the caption's place. You reported
     the caption lost for good; I could only reproduce it gone for 3 seconds
     ([finding](../findings/2026-11-11-sheet-ends-caption.md)).
+- **2026-11-12:** built, all but H (the check by hand, yours). Where it differs from the text above:
+  - **The copy action:** a second finder action, `Action::CopyCells { text, what }`, instead of a label on
+    `Action::Copy`. The menu's Copy name and Copy path stay as they were.
+  - **`player.rs` is now `launch.rs`,** holding only `open_in_app`. On macOS, if `open` were missing, it says
+    `o needs macOS's open command, which isn't on PATH`.
+  - **The grid's captions** are trimmed the same way:
+    - Spreadsheet: `v select · y copy · o app · [ ] sheet · g/G top/bottom · q close`. No `read-only ·` (the
+      title says it) and no `arrows move`.
+    - CSV: `e edit · v select · y copy · a/A add row/column · d/D delete · u undo · Alt+s save · o app · q close`.
+    - While a range is selected: `y copy · Esc cancel`.
+    - A spreadsheet's editing keys now say `read-only: tos can't save .xlsx; o opens it in its default app`.
+  - **Editing keys end a selection:** `e`, `Enter`, `a`, `A`, `d`, `D` and `u` drop a selected range first.
+  - **The menu:** `Open in app` (`o`) goes before `Delete`, and the box is two columns wider to fit it.
+  - **End-to-end tests at 100–120 columns** check only the hints that fit there. For example, `csv_grid_editing`
+    sees just `y copy` while a range is selected.
+  - **New and renamed tests:**
+    - **New:** `finder_arrows_pages_and_captions` covers `←→`, `↓↑`, `[ ]` and the 130-column caption.
+    - **Renamed:** `video_preview_and_open` (was `video_preview_and_play`) and
+      `video_without_ffmpeg_an_opener_or_a_display`.
+    - **Grown:** `spreadsheets_word_and_powerpoint` now checks the silent sheet end and Enter on a docx.

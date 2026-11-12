@@ -90,29 +90,35 @@ panes, swap layouts, pane groups and zellij's plugins.
 
 ## Finder
 
-- **Moving and editing:** `j`/`k` move, `Enter` edits in Neovim (`Alt+s` save, `Alt+q` close), `/` filters, `.` hides
-  hidden files (shown by default). Right-click a file, or press `m`, to rename it, copy its name or path, or
+- **Moving:** the arrows move; `←` and `→` move focus between the file list and the preview, and up and into
+  folders. `Enter` in the list does what `→` does. `[` `]` page through a preview. `/` filters, `.` hides hidden
+  files (shown by default).
+- **Editing:** `Enter` in the preview edits in tos: Neovim for text (`Alt+s` save, `Alt+q` close), the grid for
+  CSV and spreadsheets. Where tos can't edit a file, the caption doesn't offer `Enter`.
+- **Opening in an app:** `o` opens any file or folder in its default app (`xdg-open`, or `open` on macOS), on the
+  screen of the terminal you pressed it in.
+- **The menu:** right-click a file, or press `m`, to rename it, copy its name or path, open it in its app, or
   delete it (to the trash; where there's no trash it asks first).
 
 **Images** show for real in terminals that support kitty, iTerm2 or sixel images (Ghostty, kitty,
 WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one with
-`TOS_IMAGES=kitty|iterm2|sixel|blocks`. Enter on a `.csv`/`.tsv` opens a **grid editor**: arrows move, `e`
-edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Alt+s` saves and `q` closes. `E`
-opens any text file in Neovim.
+`TOS_IMAGES=kitty|iterm2|sixel|blocks`. Enter in a `.csv`/`.tsv` preview opens a **grid editor**: arrows move,
+`e` edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Alt+s` saves and `q` closes.
+`v` (or `V` for whole rows, or a mouse drag) selects a range of cells, and `y` copies it as tab-separated text,
+which spreadsheet apps paste as cells. `E` opens any text file in Neovim.
 
 **PDFs** in the finder show their text; `t` shows the pages (`+`/`-` zoom, `0` fit width, `[` `]` page). This
 needs poppler (`sudo apt install poppler-utils`, or `brew install poppler` on macOS).
 
 **Videos** show their length, size and a frame from 10% of the way in, which needs ffmpeg
-(`sudo apt install ffmpeg`, or `brew install ffmpeg`). `Enter` plays one in a window with mpv
-(`sudo apt install mpv`, or `brew install mpv`), or with ffplay if mpv isn't installed. It opens on the screen
-of the terminal you pressed Enter in; attached over SSH without X forwarding, there's nowhere to show it.
+(`sudo apt install ffmpeg`, or `brew install ffmpeg`). `o` plays one in your default video player, as it opens
+any file; attached over SSH without X forwarding, there's nowhere to show it.
 
 **Spreadsheets** (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods`) show their first sheet as a table, with formulas'
-last values and dates as `2026-11-07`; `[` `]` in the preview change sheet. `Enter` opens the sheet in the grid,
-**read-only**: `tos` can't save these formats. **Word** (`.docx`) and **PowerPoint** (`.pptx`) files show as
-Markdown: headings, lists, tables, bold and italic, and a section per slide. Old `.doc` and `.ppt` files aren't
-read.
+last values and dates as `2026-11-07`; `[` `]` in the preview change sheet. `Enter` in the preview opens the
+sheet in the grid, **read-only** (`tos` can't save these formats), where you can select and copy cells.
+**Word** (`.docx`) and **PowerPoint** (`.pptx`) files show as Markdown: headings, lists, tables, bold and italic,
+and a section per slide. Old `.doc` and `.ppt` files aren't read.
 
 **Links** in a Markdown preview can be clicked: the finder shows the linked file, and `Backspace` goes back.
 

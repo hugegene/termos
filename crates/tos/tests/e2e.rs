@@ -350,7 +350,12 @@ fn finder_previews_and_edits() {
     assert!(!text.contains("# Notes"), "headings are rendered, not raw:\n{text}");
     assert!(text.contains("• one"), "list bullets:\n{text}");
 
-    // Enter opens the editor inside the finder; when it exits, the preview shows the change.
+    // Enter in the list focuses the preview, whose caption says what Enter does there (the rest of it doesn't
+    // fit beside the key list at 120 columns).
+    s.send(b"\r");
+    s.wait_for("Enter edit · o app");
+    assert!(!s.text().contains("EDITING"), "Enter in the list started the editor");
+    // Enter in the preview opens the editor inside the finder; when it exits, the preview shows the change.
     s.send(b"\r");
     s.wait_for("EDITING");
     s.wait_for("✎ notes.md");
@@ -359,7 +364,9 @@ fn finder_previews_and_edits() {
     s.wait_until("editor closed", |t| !t.contains("EDITING"));
     assert!(fs::read_to_string(files.join("notes.md")).unwrap().ends_with("added by the editor\n"));
 
-    // Filter: / then letters narrows the list.
+    // ← back to the list. Filter: / then letters narrows the list.
+    s.send(b"\x1b[D");
+    s.wait_until("the list's caption", |t| t.lines().last().is_some_and(|l| l.ends_with("o app · ←→ focus")));
     s.send(b"/csv");
     let text = s.wait_for("/csv");
     assert!(text.contains("data.csv") && !text.contains("code.rs"), "filtered list:\n{text}");
@@ -553,7 +560,7 @@ fn finder_follows_markdown_links() {
     s.send(&click(x + 2, y));
     let text = s.wait_for("Bee Title");
     assert!(text.contains("l/sub"), "the list shows sub/:\n{text}");
-    s.wait_for("Backspace previous file");
+    s.wait_for("Backspace back · ←→ focus");
 
     // Backspace (the click focused the preview) goes back to a.md.
     s.send(b"\x7f");
@@ -1489,8 +1496,11 @@ fn open_finder(env: &Env, dir: &Path) {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
-/// Writes a stand-in for a video player into `bin`: it writes its arguments and `DISPLAY` to `<bin>/<name>.out`.
-fn fake_player(bin: &Path, name: &str) -> PathBuf {
+/// The program `o` runs to open a file in its default app.
+const OPENER: &str = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+
+/// Writes a stand-in for a program into `bin`: it writes its arguments and `DISPLAY` to `<bin>/<name>.out`.
+fn fake_program(bin: &Path, name: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let out = bin.join(format!("{name}.out"));
     // Only shell built-ins, as the test's PATH may hold nothing else.
@@ -1502,13 +1512,13 @@ fn fake_player(bin: &Path, name: &str) -> PathBuf {
     out
 }
 
-/// What a fake player wrote, once it has run.
-fn played(out: &Path) -> String {
-    wait("the player to run", || fs::read_to_string(out).ok().filter(|t| t.contains("DISPLAY=")))
+/// What a fake program wrote, once it has run.
+fn ran(out: &Path) -> String {
+    wait("the program to run", || fs::read_to_string(out).ok().filter(|t| t.contains("DISPLAY=")))
 }
 
 #[test]
-fn video_preview_and_play() {
+fn video_preview_and_open() {
     // Like finder-core's video tests, this needs ffmpeg.
     if Command::new("ffprobe").arg("-version").output().is_err() {
         eprintln!("skipped: ffmpeg isn't installed");
@@ -1519,11 +1529,11 @@ fn video_preview_and_play() {
     let files = env.root.join("clips");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(&files).unwrap();
-    let mpv = fake_player(&bin, "mpv");
+    let opener = fake_program(&bin, OPENER);
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../finder-core/tests/data");
     fs::copy(data.join("two-seconds.mp4"), files.join("clip.mp4")).unwrap();
     env.set("PATH", &format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
-    // The server starts with one display; the client that presses Enter has another.
+    // The server starts with one display; the client that presses o has another.
     env.set("DISPLAY", ":41");
     env.tos(&["start"]);
     open_finder(&env, &files);
@@ -1534,11 +1544,15 @@ fn video_preview_and_play() {
     s.wait_for("video · 0:02 · 64×48 · h264");
     s.wait_until("the frame drawn", |t| t.contains('▀') && !t.contains("loading frame"));
 
-    // Enter plays it in mpv, on the client's display.
+    // Enter only focuses the preview; it plays and opens nothing.
     s.send(b"\r");
-    s.wait_for("playing in mpv");
+    sleep(Duration::from_millis(300));
+    assert!(!opener.exists() && !s.text().contains("opening"), "{}", s.text());
+    // o opens it in the default app, on the client's display.
+    s.send(b"o");
+    s.wait_for("opening clip.mp4 in its default app");
     let clip = files.join("clip.mp4");
-    assert_eq!(played(&mpv), format!("--force-window=immediate\n--\n{}\nDISPLAY=:42\n", clip.display()));
+    assert_eq!(ran(&opener), format!("{}\nDISPLAY=:42\n", clip.display()));
 }
 
 #[test]
@@ -1561,6 +1575,11 @@ fn spreadsheets_word_and_powerpoint() {
     s.send(b"l]");
     s.wait_for("sheet 2/2 Notes");
     s.wait_for("Second sheet");
+    // Past the last sheet nothing happens, and no message takes the caption's place.
+    s.send(b"]");
+    sleep(Duration::from_millis(200));
+    let bar = s.text().lines().last().unwrap_or_default().to_owned();
+    assert!(bar.ends_with("Enter grid · o app · [ ] sheet · ←→ focus"), "status bar: {bar}");
 
     // Enter opens that sheet in the grid, read-only; [ goes back a sheet there too.
     s.send(b"\r");
@@ -1576,44 +1595,53 @@ fn spreadsheets_word_and_powerpoint() {
     // Word and PowerPoint as Markdown.
     s.send(b"hj");
     s.wait_until("the docx", |t| t.contains("Trip report") && t.contains("We went to Lisbon"));
-    s.send(b"j");
+    // tos can't edit a docx: its preview's caption has no Enter, and Enter there says so.
+    s.send(b"\r");
+    s.wait_for("o app · [ ] page · ←→ focus");
+    assert!(!s.text().lines().last().unwrap_or_default().contains("Enter"), "{}", s.text());
+    s.send(b"\r");
+    s.wait_for("tos can't edit .docx; o opens it in its default app");
+    // ← back to the list, and on to the pptx.
+    s.send(b"\x1b[Dj");
     s.wait_for("pptx · 3 slides");
     s.wait_for("2 · Results");
     s.wait_for("Mostly in Europe");
 }
 
 #[test]
-fn video_without_ffmpeg_mpv_or_a_display() {
+fn video_without_ffmpeg_an_opener_or_a_display() {
     let mut env = Env::new("e2e-video-none");
     let bin = env.root.join("bin");
     let files = env.root.join("clips");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(&files).unwrap();
-    let ffplay = fake_player(&bin, "ffplay");
     fs::write(files.join("clip.mp4"), "not really a video").unwrap();
-    // Nothing on PATH but the fake ffplay: no ffmpeg, no mpv.
+    // Nothing on PATH: no ffmpeg, and nothing to open files with.
     env.set("PATH", bin.to_str().unwrap());
     env.set("DISPLAY", ":42");
     env.tos(&["start"]);
     open_finder(&env, &files);
     let s = env.attach(100, 30);
     s.wait_for("video preview needs ffmpeg");
-
-    // Without mpv, ffplay plays it.
-    s.send(b"\r");
-    s.wait_for("playing in ffplay (install mpv for a better player)");
-    assert!(played(&ffplay).starts_with("-autoexit\n"), "{}", played(&ffplay));
+    s.send(b"o");
+    let missing = if cfg!(target_os = "macos") {
+        "o needs macOS's open command, which isn't on PATH"
+    } else {
+        "o needs xdg-open (package xdg-utils)"
+    };
+    s.wait_for(missing);
 
     // A client logged in over SSH, without X forwarding, has nowhere to show it.
-    fs::remove_file(&ffplay).unwrap();
+    let opened = fake_program(&bin, OPENER);
     env.set("DISPLAY", "");
     env.set("WAYLAND_DISPLAY", "");
     env.set("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.1 22");
     let ssh = env.attach(100, 30);
     ssh.wait_for("video preview needs ffmpeg");
-    ssh.send(b"\r");
-    ssh.wait_for("no display to play on: you're attached over SSH");
-    assert!(!ffplay.exists(), "ffplay ran");
+    ssh.send(b"o");
+    ssh.wait_for("no display to open it on: you're attached over SSH");
+    sleep(Duration::from_millis(200));
+    assert!(!opened.exists(), "the opener ran");
 }
 
 /// The finder's file list and preview are two real panes: borders drag, the preview goes fullscreen, closing
@@ -1723,10 +1751,20 @@ fn csv_grid_editing() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let s = env.attach(100, 30);
     s.wait_for("data.csv");
-    // Enter opens the grid.
-    s.send(b"\r");
+    // Enter focuses the preview; Enter there opens the grid.
+    s.send(b"\r\r");
     s.wait_for("▦ data.csv");
     s.wait_for("row 0/2");
+    // v starts a range at apple; down and right stretch it to pear's qty; y copies it as tab-separated text.
+    s.send(b"jvjl");
+    // At 100 columns only the caption's first hint fits beside the key list.
+    s.wait_until("the range's caption", |t| t.lines().last().is_some_and(|l| l.ends_with(" y copy")));
+    s.send(b"y");
+    let clip = wait("clipboard", || s.proxy.clipboard.lock().unwrap().last().cloned());
+    assert_eq!(clip, "apple\t3\npear\t10");
+    s.wait_for("copied 2 rows × 2 columns");
+    // Back to the top left.
+    s.send(b"g0");
     // Change apple's qty from 3 to 5.
     s.send(b"jle\x7f5\r");
     s.wait_for("● unsaved");
@@ -1738,6 +1776,52 @@ fn csv_grid_editing() {
     assert_eq!(fs::read_to_string(files.join("data.csv")).unwrap(), "name,qty\napple,5\nkiwi,\npear,10\n");
     s.send(b"q");
     s.wait_until("grid closed", |t| !t.contains("▦ data.csv"));
+}
+
+/// ← and → move focus (and up and into folders), ↓ ↑ move and scroll, [ ] page, and the captions say so in the
+/// room a 130-column status bar leaves.
+#[test]
+fn finder_arrows_pages_and_captions() {
+    let env = Env::new("e2e-arrows");
+    let files = env.root.join("files");
+    fs::create_dir_all(files.join("sub")).unwrap();
+    fs::write(files.join("sub/inner.txt"), "inside the folder\n").unwrap();
+    let long: String = (1..=300).map(|i| format!("line {i}\n")).collect();
+    fs::write(files.join("a-long.txt"), long).unwrap();
+    fs::write(files.join("b-page.html"), "<h1>Hello page</h1><p>Some words.</p>").unwrap();
+    env.tos(&["start"]);
+    open_finder(&env, &files);
+    let s = env.attach(130, 30);
+    let bar = |s: &Screen| s.text().lines().last().unwrap_or_default().to_owned();
+    let shows = |t: &str, line: &str| t.lines().any(|l| unframe(l).ends_with(line));
+
+    // sub/ comes first. → goes into it, ← comes back up.
+    s.wait_for("inner.txt");
+    s.send(b"\x1b[C");
+    s.wait_until("inside sub/", |t| t.contains("files/sub") && t.contains("inside the folder"));
+    s.send(b"\x1b[D");
+    s.wait_until("back up", |t| t.contains("a-long.txt"));
+
+    // ↓ to the long file; → focuses its preview, where ↓ scrolls and ] and [ page.
+    s.send(b"\x1b[B");
+    s.wait_until("the long file", |t| shows(t, "line 1"));
+    s.send(b"\x1b[C");
+    s.wait_until("the preview's caption", |_| bar(&s).ends_with("Enter edit · o app · [ ] page"));
+    s.send(b"\x1b[B\x1b[B\x1b[B");
+    s.wait_until("scrolled 3 lines", |t| shows(t, "line 4") && !shows(t, "line 3"));
+    s.send(b"]");
+    s.wait_until("a page down", |t| !shows(t, "line 4") && shows(t, "line 40"));
+    s.send(b"[");
+    s.wait_until("a page up", |t| shows(t, "line 4") && !shows(t, "line 3"));
+    // ↑ scrolls back; ← returns to the list.
+    s.send(b"\x1b[A");
+    s.wait_until("scrolled up", |t| shows(t, "line 3"));
+    s.send(b"\x1b[D");
+
+    // At 130 columns the list's caption keeps its first hints, Enter-less.
+    s.send(b"\x1b[B");
+    s.wait_for("Hello page");
+    s.wait_until("the list's caption", |_| bar(&s).ends_with("o app · ←→ focus · / filter"));
 }
 
 /// Prints what a split session and the finder look like. Run with:
@@ -1782,7 +1866,7 @@ fn show_screens() {
         .unwrap();
     assert!(out.status.success());
     s.wait_for("fruit.csv");
-    s.send(b"\rjl");
+    s.send(b"\r\rjl");
     sleep(Duration::from_millis(300));
     println!("{}\n{}", "=".repeat(110), s.text());
 }
@@ -1807,7 +1891,7 @@ fn real_neovim() {
     assert!(out.status.success());
     let s = env.attach(110, 26);
     s.wait_for("a.md");
-    s.send(b"\r");
+    s.send(b"\r\r");
     s.wait_for("Alt+s save");
     s.send(b"typed in nvim");
     s.wait_for("typed in nvim");

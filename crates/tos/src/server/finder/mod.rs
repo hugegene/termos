@@ -114,8 +114,13 @@ pub enum Action {
     FocusFiles,
     /// Copy this text to the clipboard (the menu's Copy name and Copy path).
     Copy(String),
-    /// Play this video in a window, on the screen of the client whose key it was.
-    Play(PathBuf),
+    /// Copy cells from the grid; `what` says how many, for the status bar ("3 rows × 2 columns").
+    CopyCells {
+        text: String,
+        what: String,
+    },
+    /// Open this file or folder in its default app, on the screen of the client whose key it was.
+    OpenApp(PathBuf),
 }
 
 struct Request {
@@ -824,20 +829,24 @@ impl Finder {
         (!entry.is_dir && finder_core::detect(&entry.path).is_editable()).then(|| entry.path.clone())
     }
 
-    /// Enter / double-click: open a folder, edit a file, play a video, or look at anything else.
+    /// Enter / double-click in the list goes in, as `→` does: it opens a folder, or focuses a file's preview.
+    /// Editing is Enter in the preview (`edit_current`).
     fn activate(&mut self) -> Action {
         let Some(entry) = self.current().cloned() else { return Action::None };
         if entry.is_dir {
             self.cd(entry.path, None);
             return Action::None;
         }
-        if self.editable().is_some() || self.selected_sheet().is_some() {
-            return self.edit_current(true);
-        }
-        if finder_core::detect(&entry.path) == Kind::Video {
-            return Action::Play(entry.path);
-        }
         Action::FocusPreview
+    }
+
+    /// `o`: the file the preview shows (or, in the list, the selected entry) in its default app.
+    fn open_in_app(&self, preview: bool) -> Action {
+        let path = if preview { self.preview_path.clone() } else { None };
+        match path.or_else(|| self.current().map(|e| e.path.clone())) {
+            Some(path) => Action::OpenApp(path),
+            None => Action::None,
+        }
     }
 
     /// The selected file, if it's a spreadsheet.
@@ -855,8 +864,9 @@ impl Finder {
     fn switch_sheet(&mut self, forward: bool) -> Action {
         let Some((current, count)) = self.sheet_view() else { return Action::None };
         let next = if forward { current + 1 } else { current.wrapping_sub(1) };
+        // Past the first or last sheet nothing happens, as at a PDF's ends: the title already says `sheet 2/2`.
         if next >= count {
-            return Action::Flash(format!("{} sheet", if forward { "last" } else { "first" }));
+            return Action::None;
         }
         self.sheet = next;
         self.scroll = 0;
@@ -882,11 +892,6 @@ impl Finder {
         }
     }
 
-    /// The video being previewed, if it is one.
-    fn previewed_video(&self) -> Option<&PathBuf> {
-        self.preview_path.as_ref().filter(|_| self.preview_kind == Some(Kind::Video))
-    }
-
     /// Edits the selected file: CSV and TSV in the grid, other text in Neovim. Both show in the preview pane,
     /// which gets focus. `from_list` says focus goes back to the list afterwards.
     fn edit_current(&mut self, from_list: bool) -> Action {
@@ -895,7 +900,7 @@ impl Finder {
             let index = if self.preview_path.as_ref() == Some(&path) { self.sheet } else { 0 };
             return self.open_sheet(&path, index, None);
         }
-        let Some(path) = self.editable() else { return Action::None };
+        let Some(path) = self.editable() else { return self.cant_edit() };
         self.edit_from_list = from_list;
         let finder_core::Kind::Csv { delimiter } = finder_core::detect(&path) else {
             return Action::OpenEditor(path);
@@ -911,6 +916,16 @@ impl Finder {
             }
             Err(e) => Action::Flash(e),
         }
+    }
+
+    /// Enter on a file tos can't edit: say so, and point to `o`.
+    fn cant_edit(&self) -> Action {
+        let Some(entry) = self.current().filter(|e| !e.is_dir) else { return Action::None };
+        let what = match entry.path.extension() {
+            Some(ext) => format!(".{}", ext.to_string_lossy()),
+            None => entry.name.clone(),
+        };
+        Action::Flash(format!("tos can't edit {what}; o opens it in its default app"))
     }
 
     // ----- links -----
@@ -1011,6 +1026,8 @@ impl Finder {
                     }
                     return action;
                 }
+                grid::Outcome::Copy { text, what } => return Action::CopyCells { text, what },
+                grid::Outcome::OpenApp(path) => return Action::OpenApp(path),
             }
             return Action::None;
         }
@@ -1049,6 +1066,9 @@ impl Finder {
             }
             return Action::None;
         }
+        if key.code == KeyCode::Char('o') && key.modifiers.is_empty() {
+            return self.open_in_app(preview);
+        }
         if key.code == KeyCode::Char('t') && !ctrl && self.pdf.is_some() {
             return self.toggle_pdf_view();
         }
@@ -1065,6 +1085,9 @@ impl Finder {
                 KeyCode::Char('[') if self.pdf.is_some() => self.pdf_text_jump(false),
                 KeyCode::Char(']') if self.sheet_view().is_some() => return self.switch_sheet(true),
                 KeyCode::Char('[') if self.sheet_view().is_some() => return self.switch_sheet(false),
+                // Everywhere else, [ ] page, as they turn a PDF's pages.
+                KeyCode::Char(']') => self.scroll_by(page),
+                KeyCode::Char('[') => self.scroll_by(-page),
                 KeyCode::Char('j') | KeyCode::Down => self.scroll_by(1),
                 KeyCode::Char('k') | KeyCode::Up => self.scroll_by(-1),
                 KeyCode::Char('d') if ctrl => self.scroll_by(page / 2),
@@ -1075,9 +1098,6 @@ impl Finder {
                 KeyCode::Char('g') => self.pending_g = true,
                 KeyCode::Home => self.scroll = 0,
                 KeyCode::Char('G') | KeyCode::End => self.scroll_by(isize::MAX / 2),
-                KeyCode::Enter if self.previewed_video().is_some() => {
-                    return self.previewed_video().cloned().map_or(Action::None, Action::Play);
-                }
                 KeyCode::Enter | KeyCode::Char('e') => return self.edit_current(false),
                 KeyCode::Char('h' | 'q') | KeyCode::Left | KeyCode::Esc | KeyCode::Tab => return Action::FocusFiles,
                 _ => {}
@@ -1149,8 +1169,9 @@ impl Finder {
             let body = self.body_rect();
             if let Some(g) = self.grid.as_mut()
                 && preview
+                && let grid::Outcome::Copy { text, what } = g.handle_mouse(ev, body)
             {
-                g.handle_mouse(ev, body);
+                return Action::CopyCells { text, what };
             }
             return Action::None;
         }
@@ -1191,36 +1212,50 @@ impl Finder {
         Action::None
     }
 
-    /// One line of key hints for the status bar, for the file list or (with `preview`) the preview pane.
+    /// The status bar's caption, for the file list or (with `preview`) the preview pane. Only keys that work here, the most useful first, as the status bar drops hints
+    /// from the end when there isn't room. No label, and nothing for keys every list and viewer has (arrows to move
+    /// and scroll). Plan: docs/plans/2026-11-11-grid-copy-and-open-in-app.md (E, K).
     pub fn hint(&self, preview: bool) -> &'static str {
         if let Some(h) = self.popup_hint() {
-            h
+            return h;
         } else if let Some(g) = &self.grid {
-            g.hint()
+            return g.hint();
         } else if self.editor.is_some() {
-            "editing · Alt+s save · Alt+q close"
+            return "editing · Alt+s save · Alt+q close";
         } else if self.filtering {
-            "filter: type to narrow · Enter keep · Esc clear"
-        } else if preview && self.pdf_pages_view() {
-            "pdf · j/k scroll · [ ] page · +/- zoom · t text · h back"
-        } else if preview && self.pdf.is_some() {
-            "pdf · j/k scroll · [ ] page · t pages · h back"
-        } else if preview && self.previewed_video().is_some() {
-            "video · Enter play · h back"
-        } else if preview && self.sheet_view().is_some() {
-            "spreadsheet · j/k scroll · [ ] sheet · Enter grid · h back"
-        } else if preview && !self.history.is_empty() {
-            "preview · Backspace previous file · j/k scroll · Enter edit · h back"
-        } else if preview {
-            "preview · j/k scroll · Space/b page · Enter edit · h back"
-        } else if self.pdf.is_some() {
-            "j/k move · l preview · t text/pages · h up · / filter · . hidden · m menu"
-        } else if self.previewed_video().is_some() {
-            "j/k move · Enter play · l preview · h up · / filter · . hidden · m menu"
-        } else if matches!(self.preview_kind, Some(Kind::Sheet(_))) {
-            "j/k move · Enter grid (read-only) · l preview · h up · / filter · . hidden · m menu"
-        } else {
-            "j/k move · Enter open/edit · l preview · h up · / filter · . hidden · m menu"
+            return "filter: type to narrow · Enter keep · Esc clear";
+        } else if !preview {
+            return "o app · ←→ focus · / filter · . hidden · m menu";
+        }
+        let back = !self.history.is_empty();
+        if self.pdf_pages_view() {
+            let pans = self.pdf.as_ref().is_some_and(|p| p.pans(self.viewport_px().0));
+            return if pans {
+                "o app · [ ] page · +/- zoom · t text · ←→ pan"
+            } else {
+                "o app · [ ] page · +/- zoom · t text · ←→ focus"
+            };
+        }
+        if self.pdf.is_some() {
+            return "o app · [ ] page · t pages · ←→ focus";
+        }
+        if self.sheet_view().is_some() {
+            return "Enter grid · o app · [ ] sheet · ←→ focus";
+        }
+        if self.editable().is_some() {
+            return if back {
+                "Enter edit · o app · [ ] page · Backspace back · ←→ focus"
+            } else {
+                "Enter edit · o app · [ ] page · ←→ focus"
+            };
+        }
+        // Text to scroll, or a picture, a video or nothing much.
+        let pages = matches!(self.preview_kind, Some(Kind::Docx | Kind::Pptx | Kind::Dir));
+        match (pages, back) {
+            (true, false) => "o app · [ ] page · ←→ focus",
+            (true, true) => "o app · [ ] page · Backspace back · ←→ focus",
+            (false, false) => "o app · ←→ focus",
+            (false, true) => "o app · Backspace back · ←→ focus",
         }
     }
 

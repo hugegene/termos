@@ -265,3 +265,8 @@ Both were answered on 2026-11-11, when you asked for the plan to be built as wri
     [grid copy and open in app](2026-11-11-grid-copy-and-open-in-app.md). It also makes Enter only edit in tos,
     so Enter will no longer play a video; `o` opens it in the default video player instead.
   - Editing xlsx values, and docx and pptx text: [editing xlsx, docx and pptx](2026-11-11-office-editing.md).
+- **2026-11-12:** the [grid copy and open in app plan](2026-11-11-grid-copy-and-open-in-app.md) is built.
+  - **Videos:** Enter no longer plays a video in mpv; `o` opens it in the default video player, through
+    `xdg-open` (or `open` on macOS), as it opens any file.
+  - **Spreadsheets:** Enter on a spreadsheet in the list now only focuses the preview, and Enter there opens the
+    grid. `[ ]` past the first or last sheet says nothing.

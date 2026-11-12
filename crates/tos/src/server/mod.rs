@@ -10,10 +10,10 @@ mod finder;
 mod images;
 mod input;
 mod keys;
+mod launch;
 pub mod layout;
 mod pane;
 mod persist;
-mod player;
 mod render;
 mod scroll;
 
@@ -104,7 +104,7 @@ struct Client {
     status_zones: Vec<StatusZone>,
     /// How this client's terminal shows images.
     graphics: protocol::Graphics,
-    /// Where programs this client starts, such as a video player, open their windows.
+    /// Where programs this client starts, such as the app `o` opens a file in, open their windows.
     display: protocol::Display,
     /// The images this client's screen shows now.
     shown: Vec<images::Placed>,
@@ -1454,10 +1454,14 @@ impl Server {
                 self.copy_to_clipboard(None, &text);
                 self.flash(format!("copied '{text}'"));
             }
-            Action::Play(path) => {
+            Action::CopyCells { text, what } => {
+                self.copy_to_clipboard(None, &text);
+                self.flash(format!("copied {what}"));
+            }
+            Action::OpenApp(path) => {
                 // The client whose key this was: a key makes its client the active one.
                 let display = self.active_client.and_then(|c| self.clients.get(&c)).map(|c| c.display.clone());
-                self.flash(player::play(&path, &display.unwrap_or_default()));
+                self.flash(launch::open_in_app(&path, &display.unwrap_or_default()));
             }
         }
     }

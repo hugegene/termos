@@ -3,7 +3,11 @@
 //!
 //! Spreadsheets (xlsx, ods and the like) open in it read-only, a sheet at a time: `tos` can't write them back
 //! without losing their formatting (docs/plans/2026-11-07-video-and-office-previews.md).
+//!
+//! A range of cells can be selected (`v`, `V`, or a mouse drag) and copied with `y`, as tab-separated text that
+//! spreadsheet apps paste as cells (docs/plans/2026-11-11-grid-copy-and-open-in-app.md).
 
+use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +23,8 @@ const MAX_BYTES: u64 = 20 << 20;
 pub const MAX_ROWS: usize = 100_000;
 const MAX_WIDTH: usize = 24;
 const MAX_UNDO: usize = 100;
+/// The most text `y` copies. Terminals limit what OSC 52 carries in different ways; this is an **estimate**.
+const MAX_COPY: usize = 1 << 20;
 
 /// One undoable change.
 enum Change {
@@ -41,6 +47,13 @@ pub enum Outcome {
     Close,
     /// Show this sheet of the spreadsheet instead (0-based).
     Sheet(usize),
+    /// Put this text on the clipboard; `what` says how many cells, for the status bar.
+    Copy {
+        text: String,
+        what: String,
+    },
+    /// Open the file in its default app.
+    OpenApp(PathBuf),
 }
 
 /// The spreadsheet a read-only grid shows a sheet of.
@@ -69,6 +82,11 @@ pub struct Grid {
     top: usize,
     left: usize,
     edit: Option<Edit>,
+    /// Where a selected range starts; it runs to the cursor. `whole_rows` selects every cell of those rows.
+    anchor: Option<(usize, usize)>,
+    whole_rows: bool,
+    /// The cell a left button went down on, while it's held: a drag from there selects.
+    press: Option<(usize, usize)>,
     undo: Vec<Change>,
     pub dirty: bool,
     confirm_close: bool,
@@ -81,6 +99,16 @@ pub struct Grid {
 
 fn width_of(s: &str) -> usize {
     UnicodeWidthStr::width(s)
+}
+
+/// A cell as spreadsheet apps write it to the clipboard: in quotes, with `"` doubled, if it holds a tab, a newline
+/// or a quote.
+fn quote(cell: &str) -> Cow<'_, str> {
+    if cell.contains(['\t', '\n', '\r', '"']) {
+        Cow::Owned(format!("\"{}\"", cell.replace('"', "\"\"")))
+    } else {
+        Cow::Borrowed(cell)
+    }
 }
 
 impl Grid {
@@ -119,6 +147,9 @@ impl Grid {
             top: 1,
             left: 0,
             edit: None,
+            anchor: None,
+            whole_rows: false,
+            press: None,
             undo: Vec::new(),
             dirty: false,
             confirm_close: false,
@@ -149,6 +180,9 @@ impl Grid {
             top: 1,
             left: 0,
             edit: None,
+            anchor: None,
+            whole_rows: false,
+            press: None,
             undo: Vec::new(),
             dirty: false,
             confirm_close: false,
@@ -389,6 +423,25 @@ impl Grid {
             self.edit_key(key);
             return Outcome::Stay;
         }
+        if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() {
+            match key.code {
+                KeyCode::Char('v') => return self.toggle_range(false),
+                KeyCode::Char('V') => return self.toggle_range(true),
+                KeyCode::Char('y') => return self.copy(),
+                KeyCode::Esc if self.anchor.is_some() => {
+                    self.anchor = None;
+                    return Outcome::Stay;
+                }
+                KeyCode::Char('o') if self.dirty => {
+                    self.message = Some("unsaved changes: Alt+s saves them first".into());
+                    return Outcome::Stay;
+                }
+                KeyCode::Char('o') => return Outcome::OpenApp(self.path.clone()),
+                // Changing cells ends a selection.
+                KeyCode::Char('e' | 'a' | 'A' | 'd' | 'D' | 'u') | KeyCode::Enter => self.anchor = None,
+                _ => {}
+            }
+        }
         let (row, col) = (self.row as isize, self.col as isize);
         let page = self.data_rows() as isize;
         if let Some(book) = &self.book {
@@ -396,16 +449,14 @@ impl Grid {
             match key.code {
                 KeyCode::Char(']') if book.current < last => return Outcome::Sheet(book.current + 1),
                 KeyCode::Char('[') if book.current > 0 => return Outcome::Sheet(book.current - 1),
-                KeyCode::Char('[' | ']') => {
-                    self.message = Some(format!("{} sheet", if book.current == 0 { "first" } else { "last" }));
-                    return Outcome::Stay;
-                }
+                // Past the first or last sheet nothing happens; the title says which sheet this is.
+                KeyCode::Char('[' | ']') => return Outcome::Stay,
                 KeyCode::Char('s') if alt => {}
                 KeyCode::Char('e' | 'a' | 'A' | 'd' | 'D' | 'u') | KeyCode::Enter => {}
                 _ => return self.move_key(key, row, col, page, alt),
             }
             let ext = self.path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
-            self.message = Some(format!("read-only: tos can't save .{ext}"));
+            self.message = Some(format!("read-only: tos can't save .{ext}; o opens it in its default app"));
             return Outcome::Stay;
         }
         match key.code {
@@ -481,6 +532,76 @@ impl Grid {
         Outcome::Stay
     }
 
+    // ----- selecting and copying -----
+
+    /// `v` (or `V`, whole rows) starts a range at the cursor; the same key again drops it, the other switches.
+    fn toggle_range(&mut self, whole_rows: bool) -> Outcome {
+        match self.anchor {
+            Some(_) if self.whole_rows == whole_rows => self.anchor = None,
+            Some(_) => self.whole_rows = whole_rows,
+            None => {
+                self.anchor = Some((self.row, self.col));
+                self.whole_rows = whole_rows;
+            }
+        }
+        Outcome::Stay
+    }
+
+    /// The selected rows and columns, inclusive: the range, or just the cursor's cell.
+    fn range(&self) -> (usize, usize, usize, usize) {
+        let Some((row, col)) = self.anchor else { return (self.row, self.row, self.col, self.col) };
+        let (r0, r1) = (row.min(self.row), row.max(self.row));
+        if self.whole_rows {
+            return (r0, r1, 0, self.columns() - 1);
+        }
+        (r0, r1, col.min(self.col), col.max(self.col))
+    }
+
+    fn selected(&self, row: usize, col: usize) -> bool {
+        let (r0, r1, c0, c1) = self.range();
+        self.anchor.is_some() && (r0..=r1).contains(&row) && (c0..=c1).contains(&col)
+    }
+
+    /// The range as spreadsheet apps put cells on the clipboard: a tab between cells, a newline between rows,
+    /// quotes around a cell holding a tab, newline or `"`. No newline at the end, so pasting into a shell runs
+    /// nothing. Whole rows keep each row's own length.
+    fn range_text(&self) -> String {
+        let (r0, r1, c0, c1) = self.range();
+        let whole = self.anchor.is_some() && self.whole_rows;
+        let mut text = String::new();
+        for r in r0..=r1 {
+            if r > r0 {
+                text.push('\n');
+            }
+            let end = if whole { self.rows[r].len() } else { c1 + 1 };
+            for c in c0..end {
+                if c > c0 {
+                    text.push('\t');
+                }
+                text.push_str(&quote(self.cell(r, c)));
+            }
+        }
+        text
+    }
+
+    /// `y`, or letting go after a drag: the range, or the cursor's cell, to the clipboard.
+    fn copy(&mut self) -> Outcome {
+        let text = self.range_text();
+        if text.len() > MAX_COPY {
+            self.message = Some(format!("too big to copy ({:.1} MB)", text.len() as f64 / f64::from(1 << 20)));
+            return Outcome::Stay;
+        }
+        let (r0, r1, c0, c1) = self.range();
+        let count = |n: usize, what: &str| if n == 1 { format!("1 {what}") } else { format!("{n} {what}s") };
+        let what = match (r1 - r0 + 1, c1 - c0 + 1) {
+            (rows, _) if self.anchor.is_some() && self.whole_rows => count(rows, "row"),
+            (1, 1) => "1 cell".to_owned(),
+            (rows, cols) => format!("{} × {}", count(rows, "row"), count(cols, "column")),
+        };
+        self.anchor = None;
+        Outcome::Copy { text, what }
+    }
+
     fn edit_key(&mut self, key: &KeyEvent) {
         let Some(edit) = self.edit.as_mut() else { return };
         let len = edit.text.chars().count();
@@ -517,35 +638,65 @@ impl Grid {
         }
     }
 
-    /// A click picks a cell; the wheel scrolls.
-    pub fn handle_mouse(&mut self, ev: &MouseEvent, body: Rect) {
+    /// The cell at screen cell (`x`, `y`) of the body: None on the rule under the header, or the row numbers.
+    fn cell_at(&self, x: u16, y: u16, body: Rect) -> Option<(usize, usize)> {
+        let row = match y.checked_sub(body.y)? {
+            0 => 0,
+            1 => return None,
+            y => self.top + usize::from(y) - 2,
+        };
+        let mut left = usize::from(x.checked_sub(body.x)?).checked_sub(self.gutter())?;
+        let mut col = self.left;
+        loop {
+            let w = self.widths.get(col).copied().unwrap_or(1) + 3;
+            if left < w || col + 1 >= self.columns() {
+                return Some((row, col));
+            }
+            left -= w;
+            col += 1;
+        }
+    }
+
+    /// A click picks a cell; a drag selects a range, which is copied when the button comes up; the wheel scrolls.
+    pub fn handle_mouse(&mut self, ev: &MouseEvent, body: Rect) -> Outcome {
         let (row, col) = (self.row as isize, self.col as isize);
         match ev.kind {
             MouseEventKind::ScrollDown => self.move_to(row + 3, col),
             MouseEventKind::ScrollUp => self.move_to(row - 3, col),
             MouseEventKind::Down(MouseButton::Left) if self.edit.is_none() => {
-                let y = ev.row.saturating_sub(body.y);
-                let r = match y {
-                    0 => Some(0),
-                    1 => None,
-                    y => Some(self.top + usize::from(y) - 2),
-                };
-                let mut x = usize::from(ev.column.saturating_sub(body.x)).checked_sub(self.gutter());
-                let mut c = self.left;
-                while let Some(left) = x {
-                    let w = self.widths.get(c).copied().unwrap_or(1) + 3;
-                    if left < w || c + 1 >= self.columns() {
-                        break;
-                    }
-                    x = Some(left - w);
-                    c += 1;
-                }
-                if let (Some(r), Some(_)) = (r, x) {
+                self.anchor = None;
+                self.press = None;
+                if let Some((r, c)) = self.cell_at(ev.column, ev.row, body) {
                     self.move_to(r as isize, c as isize);
+                    self.press = Some((self.row, self.col));
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some(press) = self.press else { return Outcome::Stay };
+                let Some((mut r, c)) = self.cell_at(ev.column, ev.row, body) else { return Outcome::Stay };
+                // On the top or bottom data row, reach one further, which scrolls.
+                let y = ev.row - body.y;
+                if y == 2 && r > 1 {
+                    r -= 1;
+                } else if y >= 2 && y + 1 >= body.height {
+                    r += 1;
+                }
+                self.move_to(r as isize, c as isize);
+                if self.anchor.is_none() && (self.row, self.col) != press {
+                    self.anchor = Some(press);
+                    self.whole_rows = false;
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                // The button is up whatever happens; a drag that selected something copies it.
+                let pressed = self.press.take().is_some();
+                if pressed && self.anchor.is_some() {
+                    return self.copy();
                 }
             }
             _ => {}
         }
+        Outcome::Stay
     }
 
     // ----- drawing -----
@@ -555,10 +706,12 @@ impl Grid {
             "unsaved changes: y save and close · n close without saving · Esc stay"
         } else if self.edit.is_some() {
             "editing a cell · Enter keep · Tab keep and move right · Esc cancel"
+        } else if self.anchor.is_some() {
+            "y copy · Esc cancel"
         } else if self.book.is_some() {
-            "read-only · arrows move · [ ] sheet · g/G top/bottom · q close"
+            "v select · y copy · o app · [ ] sheet · g/G top/bottom · q close"
         } else {
-            "e edit · a/A add row/column · d/D delete · u undo · Alt+s save · q close"
+            "e edit · v select · y copy · a/A add row/column · d/D delete · u undo · Alt+s save · o app · q close"
         }
     }
 
@@ -592,6 +745,7 @@ impl Grid {
         } else {
             Style::default().bg(Color::DarkGray)
         };
+        let in_range = Style::default().bg(Color::Blue).fg(Color::White);
         let draw_row = |buf: &mut Buffer, y: u16, row: usize, base: Style| {
             let label = if row == 0 { String::new() } else { row.to_string() };
             put_str(buf, body.x, y, &format!("{label:>w$} ", w = gutter - 1), dim, body.width);
@@ -622,7 +776,13 @@ impl Grid {
                         }
                     }
                 };
-                let style = if is_cell { selected.patch(base) } else { base };
+                let style = if is_cell {
+                    selected.patch(base)
+                } else if self.selected(row, c) {
+                    in_range.patch(base)
+                } else {
+                    base
+                };
                 let room = body.right() - x;
                 fill(buf, Rect::new(x, y, (w as u16 + 2).min(room), 1), " ", style);
                 put_str(buf, x + 1, y, &text, style, room.saturating_sub(1));
@@ -711,6 +871,105 @@ mod tests {
         // q with no changes left closes at once... but undo counts as a change, so it asks.
         assert!(matches!(g.handle_key(&key(KeyCode::Char('q'))), Outcome::Stay));
         assert!(matches!(g.handle_key(&key(KeyCode::Char('n'))), Outcome::Close));
+    }
+
+    fn copied(o: Outcome) -> (String, String) {
+        match o {
+            Outcome::Copy { text, what } => (text, what),
+            _ => panic!("nothing was copied"),
+        }
+    }
+
+    fn csv(text: &str) -> (tempfile::TempDir, Grid) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.csv");
+        fs::write(&path, text).unwrap();
+        let g = Grid::open(&path, b',').unwrap();
+        (dir, g)
+    }
+
+    #[test]
+    fn y_copies_a_cell_or_a_range_as_tab_separated_text() {
+        let (_dir, mut g) = csv("name,qty,note\napple,3,\"crisp, red\"\npear,10,\"say \"\"hi\"\"\"\nfig\n");
+        // One cell: the cursor's.
+        assert_eq!(copied(g.handle_key(&key(KeyCode::Char('y')))), ("name".into(), "1 cell".into()));
+        // v, then moving, stretches a range; y copies it and ends it.
+        g.handle_key(&key(KeyCode::Char('j')));
+        g.handle_key(&key(KeyCode::Char('l')));
+        g.handle_key(&key(KeyCode::Char('v')));
+        g.handle_key(&key(KeyCode::Char('j')));
+        g.handle_key(&key(KeyCode::Char('l')));
+        assert_eq!(g.hint(), "y copy · Esc cancel");
+        let (text, what) = copied(g.handle_key(&key(KeyCode::Char('y'))));
+        // A comma needs no quotes; a quote does, doubled. No newline at the end.
+        assert_eq!(text, "3\tcrisp, red\n10\t\"say \"\"hi\"\"\"");
+        assert_eq!(what, "2 rows × 2 columns");
+        assert!(g.anchor.is_none());
+        // A short row's missing cells copy as empty ones: fig has no note.
+        g.handle_key(&key(KeyCode::Char('v')));
+        g.handle_key(&key(KeyCode::Char('j')));
+        assert_eq!(copied(g.handle_key(&key(KeyCode::Char('y')))).0, "\"say \"\"hi\"\"\"\n");
+        // Esc drops a range.
+        g.handle_key(&key(KeyCode::Char('v')));
+        g.handle_key(&key(KeyCode::Esc));
+        assert!(g.anchor.is_none());
+    }
+
+    #[test]
+    fn whole_rows_keep_their_own_length() {
+        let (_dir, mut g) = csv("a,b,c\n1,2,3\nshort\n");
+        g.handle_key(&key(KeyCode::Char('j')));
+        g.handle_key(&key(KeyCode::Char('V')));
+        g.handle_key(&key(KeyCode::Char('j')));
+        assert_eq!(copied(g.handle_key(&key(KeyCode::Char('y')))), ("1\t2\t3\nshort".into(), "2 rows".into()));
+    }
+
+    #[test]
+    fn a_drag_selects_and_copies_on_release() {
+        let (_dir, mut g) = csv("name,qty\napple,3\npear,10\n");
+        let body = Rect::new(0, 0, 40, 10);
+        g.resize(body.width, body.height);
+        let at = |kind, x, y| MouseEvent { kind, column: x, row: y, modifiers: KeyModifiers::NONE };
+        // Columns start after the 2-column row numbers: "name " is 5 wide plus 3, so qty starts at x 10.
+        let left = MouseButton::Left;
+        assert!(matches!(g.handle_mouse(&at(MouseEventKind::Down(left), 4, 2), body), Outcome::Stay));
+        // A click alone copies nothing.
+        assert!(matches!(g.handle_mouse(&at(MouseEventKind::Up(left), 4, 2), body), Outcome::Stay));
+        assert_eq!((g.row, g.col), (1, 0));
+        g.handle_mouse(&at(MouseEventKind::Down(left), 4, 2), body);
+        g.handle_mouse(&at(MouseEventKind::Drag(left), 11, 2), body);
+        g.handle_mouse(&at(MouseEventKind::Drag(left), 11, 3), body);
+        let (text, what) = copied(g.handle_mouse(&at(MouseEventKind::Up(left), 11, 3), body));
+        assert_eq!((text.as_str(), what.as_str()), ("apple\t3\npear\t10", "2 rows × 2 columns"));
+    }
+
+    #[test]
+    fn o_opens_the_file_unless_there_are_unsaved_changes() {
+        let (_dir, mut g) = csv("a\n1\n");
+        assert!(matches!(g.handle_key(&key(KeyCode::Char('o'))), Outcome::OpenApp(p) if p == g.path));
+        g.handle_key(&key(KeyCode::Char('e')));
+        type_keys(&mut g, "2");
+        g.handle_key(&key(KeyCode::Enter));
+        assert!(matches!(g.handle_key(&key(KeyCode::Char('o'))), Outcome::Stay));
+        assert_eq!(g.message.as_deref(), Some("unsaved changes: Alt+s saves them first"));
+    }
+
+    #[test]
+    fn past_the_first_or_last_sheet_nothing_happens() {
+        let sheet = finder_core::sheet::Sheet {
+            names: vec!["One".into(), "Two".into()],
+            current: 0,
+            rows: vec![vec!["x".into()]],
+            truncated: false,
+        };
+        let mut g = Grid::from_sheet(Path::new("/tmp/book.xlsx"), sheet);
+        assert!(matches!(g.handle_key(&key(KeyCode::Char('['))), Outcome::Stay));
+        assert_eq!(g.message, None);
+        assert!(matches!(g.handle_key(&key(KeyCode::Char(']'))), Outcome::Sheet(1)));
+        // Read-only, but selecting and copying work.
+        g.handle_key(&key(KeyCode::Char('e')));
+        assert!(g.message.as_deref().unwrap().starts_with("read-only: tos can't save .xlsx"));
+        assert_eq!(copied(g.handle_key(&key(KeyCode::Char('y')))).0, "x");
     }
 
     #[test]

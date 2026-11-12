@@ -1,5 +1,5 @@
-//! The file list's menu, opened by a right-click or `m`: rename, copy name, copy path, delete. Also the rename
-//! field and the "delete for good?" question that the menu leads to.
+//! The file list's menu, opened by a right-click or `m`: rename, copy name, copy path, open in app, delete. Also
+//! the rename field and the "delete for good?" question that the menu leads to.
 //! Plan: docs/plans/2026-11-07-finder-menu.md.
 
 use std::io;
@@ -20,19 +20,21 @@ pub enum Item {
     Rename,
     CopyName,
     CopyPath,
+    OpenApp,
     Delete,
 }
 
 /// The menu's items, their labels and their letters.
-const ITEMS: [(Item, &str, char); 4] = [
+const ITEMS: [(Item, &str, char); 5] = [
     (Item::Rename, "Rename", 'r'),
     (Item::CopyName, "Copy name", 'y'),
     (Item::CopyPath, "Copy path", 'p'),
+    (Item::OpenApp, "Open in app", 'o'),
     (Item::Delete, "Delete", 'd'),
 ];
 
-/// The menu box: " Copy name y " inside a frame.
-const MENU_WIDTH: u16 = 15;
+/// The menu box: " Open in app o " inside a frame.
+const MENU_WIDTH: u16 = 17;
 const MENU_HEIGHT: u16 = ITEMS.len() as u16 + 2;
 
 /// The question box is at least this wide, spilling over the preview if the list is narrower.
@@ -254,7 +256,7 @@ impl Finder {
 
     pub(super) fn popup_hint(&self) -> Option<&'static str> {
         Some(match self.popup.as_ref()? {
-            Popup::Menu { .. } => "menu · j/k move · Enter or a letter runs · Esc closes",
+            Popup::Menu { .. } => "Enter or a letter runs · Esc closes",
             Popup::Rename { .. } => "rename · type the new name · Enter renames · Esc cancels",
             Popup::Confirm { .. } => "y deletes for good · any other key keeps it",
         })
@@ -365,6 +367,7 @@ impl Finder {
             }
             Item::CopyName => Action::Copy(name),
             Item::CopyPath => Action::Copy(self.dir.join(&name).display().to_string()),
+            Item::OpenApp => Action::OpenApp(self.dir.join(&name)),
             Item::Delete => self.delete(&name),
         }
     }
@@ -556,9 +559,9 @@ mod tests {
         mouse(&mut f, RIGHT, 4, 2);
         assert_eq!(selected(&f), "b");
         let text = screen(&f);
-        assert!(text.contains("│ Rename    r │") && text.contains("│ Delete    d │"), "{text}");
+        assert!(text.contains("│ Rename      r │") && text.contains("│ Delete      d │"), "{text}");
         assert_eq!(f.popup_rect(), Some(Rect::new(4, 3, MENU_WIDTH, MENU_HEIGHT)));
-        assert!(f.hint(false).starts_with("menu"));
+        assert!(f.hint(false).starts_with("Enter or a letter runs"));
 
         // Esc closes it; so does a click outside, which selects nothing.
         press(&mut f, KeyCode::Esc);
@@ -577,7 +580,7 @@ mod tests {
     fn the_pointer_highlights_and_a_click_runs() {
         let (dir, mut f, _rx) = setup();
         mouse(&mut f, RIGHT, 4, 1);
-        // The menu is at rows 2–7; "Copy path" is its third item, on row 5.
+        // The menu is at rows 2–8; "Copy path" is its third item, on row 5.
         mouse(&mut f, MouseEventKind::Moved, 6, 5);
         assert!(matches!(&f.popup, Some(Popup::Menu { hover: 2, .. })));
         let copied = mouse(&mut f, LEFT, 6, 5);
@@ -595,6 +598,9 @@ mod tests {
         assert!(matches!(press(&mut f, KeyCode::Enter), Action::Copy(n) if n == "b"));
         press(&mut f, KeyCode::Char('m'));
         assert!(matches!(press(&mut f, KeyCode::Char('y')), Action::Copy(n) if n == "b"));
+        // o opens it in its default app.
+        press(&mut f, KeyCode::Char('m'));
+        assert!(matches!(press(&mut f, KeyCode::Char('o')), Action::OpenApp(p) if p.ends_with("b")));
         // Letters that aren't items do nothing, and the list's keys wait.
         press(&mut f, KeyCode::Char('m'));
         press(&mut f, KeyCode::Char('x'));

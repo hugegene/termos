@@ -318,6 +318,11 @@ impl PdfView {
     }
 
     /// Pans sideways by `dx` pixels. Returns false if the page isn't wider than the viewport.
+    /// Whether the page is wider than `viewport_w`, so `←` and `→` pan it.
+    pub fn pans(&self, viewport_w: u32) -> bool {
+        self.current().is_some_and(|img| img.zoom != Zoom::FitPage && img.img.width() > viewport_w)
+    }
+
     pub fn pan(&mut self, dx: i64, viewport_w: u32) -> bool {
         let Some(img) = self.current() else { return false };
         let max_left = img.img.width().saturating_sub(viewport_w);
