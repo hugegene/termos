@@ -159,7 +159,7 @@ pptx. When that plan is built, Enter on a docx or pptx edits it in tos, and its 
   |---|---|---|
   | Markdown, HTML, CSV, text | `Enter edit · o app · [ ] page · ←→ focus` | 40 |
   | spreadsheet | `Enter grid · o app · [ ] sheet · ←→ focus` | 41 |
-  | PDF, text view | `o app · [ ] page · t pages · ←→ focus` | 37 |
+  | PDF, text view | `o app · [ ] page · t image · ←→ focus` (was `t pages` until 2026-11-12) | 37 |
   | PDF, pages view | `o app · [ ] page · +/- zoom · t text · ←→ focus`; on a page zoomed wider than the pane, `←→ pan` instead of `←→ focus`, as now | 47 |
   | docx, pptx, a folder's listing | `o app · [ ] page · ←→ focus` | 27 |
   | images, video, doc, ppt, binary files (nothing to scroll) | `o app · ←→ focus` | 16 |
@@ -444,3 +444,6 @@ Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspa
   `xdg-mime` whether a default is set (10–20 ms per query,
   [finding](../findings/2026-11-12-video-default-app.md)); with none, it plays the video in mpv or ffplay, with
   their old arguments. macOS's `open` always has an app for a video, so nothing changes there.
+- **2026-11-12 (later still):** `t pages` in a PDF's text view became `t image`, your pick from the options I gave:
+  `[ ] page` sits beside it, so "page" meant two things. The other view keeps `t text`. A scanned PDF's header says
+  `no text · showing images` (was `showing pages`).

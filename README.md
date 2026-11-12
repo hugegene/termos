@@ -107,8 +107,9 @@ WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one 
 `v` (or `V` for whole rows, or a mouse drag) selects a range of cells, and `y` copies it as tab-separated text,
 which spreadsheet apps paste as cells. `E` opens any text file in Neovim.
 
-**PDFs** in the finder show their text; `t` shows the pages (`+`/`-` zoom, `0` fit width, `[` `]` page). This
-needs poppler (`sudo apt install poppler-utils`, or `brew install poppler` on macOS).
+**PDFs** in the finder show their text; `t` shows each page as an image (`+`/`-` zoom, `0` fit width), and `t`
+again goes back to the text. `[` `]` page in both. This needs poppler (`sudo apt install poppler-utils`, or
+`brew install poppler` on macOS).
 
 **Videos** show their length, size and a frame from 10% of the way in, which needs ffmpeg
 (`sudo apt install ffmpeg`, or `brew install ffmpeg`). `o` plays one in your default video player, as it opens

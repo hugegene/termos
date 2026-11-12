@@ -1237,7 +1237,7 @@ impl Finder {
             };
         }
         if self.pdf.is_some() {
-            return "o app · [ ] page · t pages · ←→ focus";
+            return "o app · [ ] page · t image · ←→ focus";
         }
         if self.sheet_view().is_some() {
             return "Enter grid · o app · [ ] sheet · ←→ focus";

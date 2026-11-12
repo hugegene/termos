@@ -1450,7 +1450,7 @@ fn pdf_text_pages_and_zoom() {
 
     // A scanned PDF has no text, so it shows its page.
     s.send(b"j");
-    s.wait_for("no text · showing pages");
+    s.wait_for("no text · showing images");
     s.wait_until("the scanned page drawn", |t| t.contains('▀'));
 }
 

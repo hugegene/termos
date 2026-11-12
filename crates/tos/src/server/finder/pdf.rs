@@ -369,7 +369,7 @@ impl PdfView {
         let pages_view = pages_view || self.no_text;
         let mut parts = vec!["pdf".to_owned()];
         if self.no_text {
-            parts.push("no text · showing pages".into());
+            parts.push("no text · showing images".into());
         }
         if let Some(info) = &self.info {
             let page = if pages_view { self.page } else { self.page_at(scroll) };
@@ -563,7 +563,7 @@ mod tests {
             v.wants(false, Zoom::FitWidth, (500, 400), 0, 10, 100),
             Some(PdfJob::Page { page: 1, zoom: Zoom::FitWidth, viewport: (500, 400) })
         );
-        assert!(v.header(false, Zoom::FitWidth, 0, "1 KB").starts_with("pdf · no text · showing pages · page 1/3"));
+        assert!(v.header(false, Zoom::FitWidth, 0, "1 KB").starts_with("pdf · no text · showing images · page 1/3"));
     }
 
     #[test]
