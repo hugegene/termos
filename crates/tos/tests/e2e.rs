@@ -1512,6 +1512,18 @@ fn fake_program(bin: &Path, name: &str) -> PathBuf {
     out
 }
 
+/// Writes a stand-in for `xdg-mime` into `bin`: every file is a `video/mp4`, whose default app is `default`
+/// (none if it's empty).
+fn fake_xdg_mime(bin: &Path, default: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let script = format!(
+        "#!/bin/sh\ncase \"$2\" in\n  filetype) echo video/mp4 ;;\n  default) printf '%s' '{default}' ;;\nesac\n"
+    );
+    let path = bin.join("xdg-mime");
+    fs::write(&path, script).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 /// What a fake program wrote, once it has run.
 fn ran(out: &Path) -> String {
     wait("the program to run", || fs::read_to_string(out).ok().filter(|t| t.contains("DISPLAY=")))
@@ -1530,6 +1542,8 @@ fn video_preview_and_open() {
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(&files).unwrap();
     let opener = fake_program(&bin, OPENER);
+    // A default app is set for videos, so o uses it (macOS has no xdg-mime; its open always has one).
+    fake_xdg_mime(&bin, "org.gnome.Totem.desktop");
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../finder-core/tests/data");
     fs::copy(data.join("two-seconds.mp4"), files.join("clip.mp4")).unwrap();
     env.set("PATH", &format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
@@ -1609,14 +1623,14 @@ fn spreadsheets_word_and_powerpoint() {
 }
 
 #[test]
-fn video_without_ffmpeg_an_opener_or_a_display() {
+fn video_without_ffmpeg_a_default_app_or_a_display() {
     let mut env = Env::new("e2e-video-none");
     let bin = env.root.join("bin");
     let files = env.root.join("clips");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(&files).unwrap();
     fs::write(files.join("clip.mp4"), "not really a video").unwrap();
-    // Nothing on PATH: no ffmpeg, and nothing to open files with.
+    // Nothing on PATH: no ffmpeg, no xdg-utils, no players.
     env.set("PATH", bin.to_str().unwrap());
     env.set("DISPLAY", ":42");
     env.tos(&["start"]);
@@ -1624,12 +1638,23 @@ fn video_without_ffmpeg_an_opener_or_a_display() {
     let s = env.attach(100, 30);
     s.wait_for("video preview needs ffmpeg");
     s.send(b"o");
-    let missing = if cfg!(target_os = "macos") {
-        "o needs macOS's open command, which isn't on PATH"
+    if cfg!(target_os = "macos") {
+        s.wait_for("o needs macOS's open command, which isn't on PATH");
     } else {
-        "o needs xdg-open (package xdg-utils)"
-    };
-    s.wait_for(missing);
+        // No xdg-utils, so no default app, and no player to fall back to.
+        s.wait_for("no app for clip.mp4: set a default video player, or install mpv (package mpv)");
+        // With no default app, ffplay plays it; and mpv, once there is one, before ffplay.
+        fake_xdg_mime(&bin, "");
+        let ffplay = fake_program(&bin, "ffplay");
+        s.send(b"o");
+        s.wait_for("playing clip.mp4 in ffplay (no default app for videos)");
+        let clip = files.join("clip.mp4");
+        assert_eq!(ran(&ffplay), format!("-autoexit\n-loglevel\nerror\n--\n{}\nDISPLAY=:42\n", clip.display()));
+        let mpv = fake_program(&bin, "mpv");
+        s.send(b"o");
+        s.wait_for("playing clip.mp4 in mpv (no default app for videos)");
+        assert_eq!(ran(&mpv), format!("--force-window=immediate\n--\n{}\nDISPLAY=:42\n", clip.display()));
+    }
 
     // A client logged in over SSH, without X forwarding, has nowhere to show it.
     let opened = fake_program(&bin, OPENER);

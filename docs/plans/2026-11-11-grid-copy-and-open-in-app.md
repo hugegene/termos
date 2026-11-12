@@ -80,6 +80,9 @@ pptx. When that plan is built, Enter on a docx or pptx edits it in tos, and its 
 - **Which files:** any, as you chose.
   - **Here:** a spreadsheet opens in LibreOffice Calc (`xdg-mime` says `libreoffice-calc.desktop` for `.xlsx`).
   - **Elsewhere:** a PDF opens in your PDF viewer, a `.docx` in Writer or Word, and a video in your video player.
+  - **A video with no default app** (added 2026-11-12) plays in mpv, or else ffplay, as Enter did before. tos asks
+    `xdg-mime` first: the file's type, then its default app, 10–20 ms each
+    ([finding](../findings/2026-11-12-video-default-app.md)). Here the default is GNOME Videos (Totem).
 - **How:** `xdg-open FILE` on Linux, `open FILE` on macOS. It starts the way the video player does now
   (`server/player.rs`), and that code becomes the shared launcher:
   - on the screen of the client that pressed the key, with that client's display variables
@@ -175,9 +178,12 @@ pptx. When that plan is built, Enter on a docx or pptx edits it in tos, and its 
 - **Videos:**
   - **Before:** Enter plays in mpv, falling back to ffplay, with `Enter plays videos with mpv` when neither is
     installed.
-  - **After:** `o` opens the video in your default video player through `xdg-open`, like any other file.
-  - **What goes:** player.rs's list of players.
-  - **What stays:** its display handling, as the shared launcher.
+  - **After:** `o` opens the video in your default video player through `xdg-open`, like any other file. With no
+    default app set (or no xdg-utils), it plays in mpv, or else ffplay (added 2026-11-12, as you asked).
+  - **What stays:** the player list, only for that fallback, and the display handling, as the shared launcher.
+  - **Messages:**
+    - `playing clip.mp4 in mpv (no default app for videos)`, or the same with `ffplay`
+    - `no app for clip.mp4: set a default video player, or install mpv (package mpv)`
 
 **Example, after:** `office.docx` selected in the list.
 
@@ -432,5 +438,9 @@ Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspa
   - **New and renamed tests:**
     - **New:** `finder_arrows_pages_and_captions` covers `←→`, `↓↑`, `[ ]` and the 130-column caption.
     - **Renamed:** `video_preview_and_open` (was `video_preview_and_play`) and
-      `video_without_ffmpeg_an_opener_or_a_display`.
+      `video_without_ffmpeg_an_opener_or_a_display` (renamed again the same day to `video_without_ffmpeg_a_default_app_or_a_display`, when it gained the mpv and ffplay fallback).
     - **Grown:** `spreadsheets_word_and_powerpoint` now checks the silent sheet end and Enter on a docx.
+- **2026-11-12 (later):** you asked that `o` on a video use the default app, or else mpv, or else ffplay. tos asks
+  `xdg-mime` whether a default is set (10–20 ms per query,
+  [finding](../findings/2026-11-12-video-default-app.md)); with none, it plays the video in mpv or ffplay, with
+  their old arguments. macOS's `open` always has an app for a video, so nothing changes there.

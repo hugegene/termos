@@ -112,7 +112,8 @@ needs poppler (`sudo apt install poppler-utils`, or `brew install poppler` on ma
 
 **Videos** show their length, size and a frame from 10% of the way in, which needs ffmpeg
 (`sudo apt install ffmpeg`, or `brew install ffmpeg`). `o` plays one in your default video player, as it opens
-any file; attached over SSH without X forwarding, there's nowhere to show it.
+any file; with no default set, in mpv (`sudo apt install mpv`), or else ffplay. Attached over SSH without X
+forwarding, there's nowhere to show it.
 
 **Spreadsheets** (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods`) show their first sheet as a table, with formulas'
 last values and dates as `2026-11-07`; `[` `]` in the preview change sheet. `Enter` in the preview opens the
