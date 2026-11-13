@@ -8,6 +8,8 @@
 - the video and picture steps show the user's Ghibli-style video and a generated picture from `~/ghibli-video`,
   and each recording writes both a WebP and a GIF
 - the README shows the GIF, by the user's choice; the WebP stays beside it
+- the same recording also gives a 28 s highlights GIF, `docs/images/demo-short.gif`, for the top of the README;
+  the full tour folds away below it ([README plan](2026-11-13-readme-marketing.md))
 
 **Findings:**
 [recording the finder demo GIF](../findings/2026-11-13-demo-gif-recording.md),

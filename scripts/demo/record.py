@@ -36,6 +36,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -45,7 +46,8 @@ COLS, ROWS = 104, 34  # 8×17-pixel cells: 832×578, about the width GitHub show
 FPS = 15
 CAPTION_H = 40
 CLAUDE_PROMPT = 'Write a simple web server in server.py that says "Hello from the bakery!"'
-CLAUDE_SHOWN = 6.0  # seconds that Claude's work takes in the animation, at most (it's sped up to fit)
+CLAUDE_SHOWN = 6.0  # seconds that Claude's work takes in the full animation, at most (it's sped up to fit)
+CLAUDE_SHOWN_SHORT = 2.0  # and in the short one
 
 # Catppuccin Mocha: background, foreground and the 16 ANSI colours.
 BG, FG = "#1e1e2e", "#cdd6f4"
@@ -67,6 +69,21 @@ class Demo:
         self.captions = []  # (start, text)
         self.fast = []  # (start, end, factor): stretches shown sped up
         self.snaps = []  # (time, weight): frames the GIF's palette is made from
+        self.short = []  # (start, end, factor): the stretches the short animation is cut from, in order
+        self.factors = {"full": 1, "short": 1}  # how much Claude's work is sped up in each, for its caption
+
+    def highlight(self, seconds, factor=1):
+        """Marks the next `seconds` of the recording for the short animation, at `factor` times the speed. The
+        tour goes on as it would; the mark only says what to cut."""
+        start = self.now()
+        self.short.append((start, start + seconds, factor))
+
+    @contextmanager
+    def highlighting(self, factor):
+        """Marks everything done inside the `with` for the short animation, sped up `factor` times."""
+        start = self.now()
+        yield
+        self.short.append((start, self.now(), factor))
 
     def snap(self, weight=1):
         """Marks this moment's frame for the palette: the pictures, so they get colours enough not to band,
@@ -126,10 +143,9 @@ class Demo:
         if "Esc to cancel" in screen:  # a question Claude asks afterwards
             self.key("Escape", wait=0.5)
         took = self.now() - start
-        factor = max(2, round(took / CLAUDE_SHOWN))
-        self.fast.append((start, self.now(), factor))
-        at, text = self.captions[-1]
-        self.captions[-1] = (at, text.replace("{factor}", str(factor)))
+        self.factors = {"full": max(2, round(took / CLAUDE_SHOWN)), "short": max(4, round(took / CLAUDE_SHOWN_SHORT))}
+        self.fast.append((start, self.now(), self.factors["full"]))
+        self.short.append((start, self.now(), self.factors["short"]))
 
 
 def tour(d):
@@ -142,6 +158,7 @@ def tour(d):
     d.type("tos finder")
     d.key("Return", wait=1.2)
 
+    d.highlight(1.8)
     d.caption("`↓` `↑` move through the files · spreadsheets show as a table", pause=0.9)
     d.snap()
     time.sleep(0.9)
@@ -150,23 +167,28 @@ def tour(d):
     d.key("bracketright", wait=1.8)
     d.key("bracketleft", "Left", wait=0.5)
 
+    d.highlight(1.4)
     d.key("Down", wait=0.2)
     d.caption("HTML shows as formatted text", pause=1.8)
-    d.caption("`→` `Enter` edits it in Neovim, inside the preview")
-    d.key("Right", "Return", wait=1.4)
-    d.key(*["Down"] * 10, gap=0.08, wait=0.3)
-    d.key("End", "Return", wait=0.2)
-    d.type("<li>Rye loaf</li>", wait=0.7)
-    d.caption("`Alt+s` saves · `Alt+q` closes · the preview shows the change")
-    d.key("alt+s", wait=0.7)
+    with d.highlighting(3):
+        d.caption("`→` `Enter` edits it in Neovim, inside the preview")
+        d.key("Right", "Return", wait=1.4)
+        d.key(*["Down"] * 10, gap=0.08, wait=0.3)
+        d.key("End", "Return", wait=0.2)
+        d.type("<li>Rye loaf</li>", wait=0.7)
+        d.caption("`Alt+s` saves · `Alt+q` closes · the preview shows the change")
+        d.key("alt+s", wait=0.7)
+    d.highlight(1.6)
     d.key("alt+q", wait=2.2)
     d.key("Left", wait=0.2)
 
+    d.highlight(1.8)
     d.key("Down", wait=0.2)
     d.caption("Videos show their length, size and a frame", pause=1.2)
     d.snap(weight=2)
     time.sleep(1.2)
 
+    d.highlight(1.4)
     d.key("Down", wait=0.2)
     d.caption("Word documents show as Markdown", pause=2.2)
 
@@ -185,6 +207,7 @@ def tour(d):
     d.caption("PDFs show their text", pause=1.8)
     d.caption("`t` shows the pages as images · `]` next page")
     d.key("Right", wait=0.3)
+    d.highlight(2.2)
     d.key("t", wait=1.5)
     d.snap()
     time.sleep(0.9)
@@ -194,19 +217,21 @@ def tour(d):
 
     d.key("Down", wait=0.2)
     d.caption("CSV shows as a table", pause=1.8)
-    d.caption("`→` `Enter` opens the grid editor · `e` edits a cell")
-    d.key("Right", "Return", wait=1.0)
-    d.key(*["Down"] * 12, gap=0.08, wait=0.2)
-    d.key("Right", wait=0.5)
-    d.key("e", wait=0.5)
-    d.key("BackSpace", "BackSpace", "BackSpace", gap=0.15, wait=0.2)
-    d.type("530", wait=0.3)
-    d.key("Return", wait=0.7)
+    with d.highlighting(3):
+        d.caption("`→` `Enter` opens the grid editor · `e` edits a cell")
+        d.key("Right", "Return", wait=1.0)
+        d.key(*["Down"] * 12, gap=0.08, wait=0.2)
+        d.key("Right", wait=0.5)
+        d.key("e", wait=0.5)
+        d.key("BackSpace", "BackSpace", "BackSpace", gap=0.15, wait=0.2)
+        d.type("530", wait=0.3)
+        d.key("Return", wait=0.7)
     d.caption("`Alt+s` saves · `q` closes the grid")
     d.key("alt+s", wait=1.0)
     d.key("q", wait=1.8)
     d.key("Left", wait=0.2)
 
+    d.highlight(2.2)
     d.key("Down", wait=0.2)
     d.caption("Images show for real in kitty, iTerm2, WezTerm, Ghostty or xterm", pause=1.5)
     d.snap(weight=3)
@@ -215,23 +240,27 @@ def tour(d):
 
 def claude(d, folder):
     """A new tab, Claude Code writing server.py there, and back to the finder, still on the picture, which sorts
-    after server.py."""
-    d.caption("`Ctrl+t` `n` opens a new tab")
-    d.key("ctrl+t", gap=0.3, wait=0)
-    d.key("n", wait=1.0)
-    d.caption("Run Claude Code in it", pause=0.3)
-    d.type("claude")
-    d.key("Return", wait=0.5)
-    d.wait_screen(lambda s: "❯" in s, "Claude's prompt", timeout=30)
-    time.sleep(1.2)
-    d.caption("Ask it for a simple web server", pause=0.3)
-    d.type(CLAUDE_PROMPT, wait=0.8)
-    d.key("Return", wait=0)
+    after server.py. A caption's {factor} is filled in for each animation, as each speeds Claude up differently."""
+    with d.highlighting(3):
+        d.caption("`Ctrl+t` `n` opens a new tab")
+        d.key("ctrl+t", gap=0.3, wait=0)
+        d.key("n", wait=1.0)
+        d.caption("Run Claude Code in it", pause=0.3)
+        d.type("claude")
+        d.key("Return", wait=0.5)
+        d.wait_screen(lambda s: "❯" in s, "Claude's prompt", timeout=30)
+        time.sleep(1.2)
+    with d.highlighting(4):
+        d.caption("Ask it for a simple web server", pause=0.3)
+        d.type(CLAUDE_PROMPT, wait=0.8)
+        d.key("Return", wait=0)
     d.caption("Claude writes server.py (sped up {factor}×)", pause=0)
     d.wait_for_claude(folder / "server.py")
+    d.highlight(2.8)
     d.caption("Done: Claude's reply", pause=0.5)
     d.snap()
     time.sleep(4.0)
+    d.highlight(4.0)
     d.caption("`Ctrl+t` `Tab` goes back to the finder, which lists server.py")
     d.key("ctrl+t", gap=0.3, wait=0)
     d.key("Tab", wait=0.2)
@@ -341,6 +370,7 @@ def render_captions(captions, width, out_dir):
 
     sans = ImageFont.truetype("DejaVuSans.ttf", 15)
     mono = ImageFont.truetype("DejaVuSansMono-Bold.ttf", 14)
+    out_dir.mkdir(exist_ok=True)
     paths = []
     for i, (_, text) in enumerate(captions):
         img = Image.new("RGB", (width, CAPTION_H), "#11111b")
@@ -388,25 +418,31 @@ def make_palette(raw, snaps, caption_pngs, work):
     return palette
 
 
-def make_animation(raw, captions, fast, snaps, length, size, out, work):
-    """Writes `out`, a WebP or a GIF by its extension. WebP is lossless, so the pictures keep every colour; a GIF
-    has 256, shared with the text (findings/2026-11-13-demo-webp.md)."""
+def full_cuts(fast, length):
+    """The whole recording, as stretches at normal speed and the sped-up ones between them."""
+    cuts, t = [], 0.0
+    for a, b, factor in fast:
+        cuts += [(t, a, 1), (a, b, factor)]
+        t = b
+    return cuts + [(t, length + 1, 1)]
+
+
+def make_animation(raw, captions, cuts, snaps, length, size, out, work, factor=1):
+    """Writes `out`, a WebP or a GIF by its extension, from the stretches in `cuts` ((start, end, factor), in
+    order). WebP is lossless, so the pictures keep every colour; a GIF has 256, shared with the text
+    (findings/2026-11-13-demo-webp.md)."""
     width, height = size
-    pngs = render_captions(captions, width, work)
+    captions = [(t, text.replace("{factor}", str(factor))) for t, text in captions]
+    pngs = render_captions(captions, width, work / out.name)
     inputs, chain = [], [f"[0]pad=iw:ih+{CAPTION_H}:0:0:color=0x11111b[v0]"]
     for i, (png, (start, _)) in enumerate(zip(pngs, captions)):
         end = captions[i + 1][0] if i + 1 < len(captions) else length + 1
         inputs += ["-i", str(png)]
         chain.append(f"[v{i}][{i + 1}]overlay=0:{height}:enable='between(t,{start:.2f},{end:.2f})'[v{i + 1}]")
     last = f"v{len(pngs)}"
-    if fast:
-        # Cut into stretches at normal speed and sped up, then join them. Captions are already on, at the times
-        # they were recorded with.
-        cuts, t = [], 0.0
-        for a, b, factor in fast:
-            cuts += [(t, a, 1), (a, b, factor)]
-            t = b
-        cuts.append((t, length + 1, 1))
+    if cuts != [(0.0, length + 1, 1)]:
+        # Cut the stretches out, each at its speed, then join them. Captions are already on, at the times they
+        # were recorded with.
         chain.append(f"[{last}]split={len(cuts)}" + "".join(f"[s{i}]" for i in range(len(cuts))))
         for i, (a, b, factor) in enumerate(cuts):
             chain.append(f"[s{i}]trim=start={a:.3f}:end={b:.3f},setpts=(PTS-STARTPTS)/{factor}[g{i}]")
@@ -437,6 +473,9 @@ def main():
     ap.add_argument("--out", action="append",
                     help="an animation to write, .webp (lossless) or .gif; give it again for more "
                          "(default: docs/images/finder-demo.webp and .gif)")
+    ap.add_argument("--short-out", action="append",
+                    help="a short animation of the highlights (about 30 s) to write, .gif or .webp; give it again for "
+                         "more (default, when --out isn't given either: docs/images/demo-short.gif)")
     ap.add_argument("--video", help="a video to show instead of the made-up one")
     ap.add_argument("--image", help="a picture, or a video's frame from 10%% in, to show instead of the made-up one")
     ap.add_argument("--no-claude", action="store_true", help="stop after the finder, without Claude Code")
@@ -445,7 +484,8 @@ def main():
     ap.add_argument("--keep", action="store_true", help="keep the work folder (raw video, captions)")
     args = ap.parse_args()
     outs = [Path(o) for o in args.out or [REPO / "docs/images/finder-demo.webp", REPO / "docs/images/finder-demo.gif"]]
-    for out in outs:
+    short_outs = [Path(o) for o in args.short_out or ([] if args.out else [REPO / "docs/images/demo-short.gif"])]
+    for out in outs + short_outs:
         if out.suffix not in (".webp", ".gif"):
             sys.exit(f"{out}: the name must end in .webp or .gif")
     extra = []
@@ -528,10 +568,12 @@ def main():
             length = time.monotonic() - demo.t0
             rec.communicate(b"q", timeout=30)
 
-        shown = length - sum((b - a) * (1 - 1 / f) for a, b, f in demo.fast)
-        for out in outs:
+        jobs = [(out, full_cuts(demo.fast, length), demo.factors["full"]) for out in outs]
+        jobs += [(out, demo.short, demo.factors["short"]) for out in short_outs]
+        for out, cuts, factor in jobs:
             out.parent.mkdir(parents=True, exist_ok=True)
-            make_animation(raw, demo.captions, demo.fast, demo.snaps, length, size, out, work)
+            make_animation(raw, demo.captions, cuts, demo.snaps, length, size, out, work, factor)
+            shown = sum((min(b, length) - a) / f for a, b, f in cuts)
             print(f"{out}: {out.stat().st_size / 1e6:.1f} MB, {shown:.0f} s ({length:.0f} s recorded), "
                   f"{size[0]}x{size[1] + CAPTION_H}")
         for a, b, f in demo.fast:

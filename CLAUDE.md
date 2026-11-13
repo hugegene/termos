@@ -65,10 +65,11 @@ This applies to answers in chat and to everything in `docs/`.
   - `crates/alacritty_terminal`: our fork, unmodified so far; see its `UPSTREAM.md` and record every change there
   - `scripts/`: `install.sh` (the one-line installer) and `package.sh`, used by `.github/workflows/release.yml`.
     Pushing a tag `v<version>` publishes a release on GitHub (`hugegene/termos`, public, MIT).
-  - `scripts/demo/`: `record.py` records the README's demo as `docs/images/finder-demo.gif` (shown) and `.webp`:
-    attach, the finder, then Claude Code in a new tab. Re-run it after changing what the finder shows or its keys,
-    with the user's media: `python3 scripts/demo/record.py --video
-    ~/ghibli-video/output/full_v5_depth8/babyplayful_ghibli.mp4 --image ~/ghibli-video/output/t2v/flying_baby.mp4`.
+  - `scripts/demo/`: `record.py` records the README's demos: `docs/images/demo-short.gif` (the top),
+    `finder-demo.gif` (the full tour) and `finder-demo.webp`: attach, the finder, then Claude Code in a new tab.
+    Re-run it after changing what the finder shows or its keys, with the user's media:
+    `python3 scripts/demo/record.py --video ~/ghibli-video/output/full_v5_depth8/babyplayful_ghibli.mp4
+    --image ~/ghibli-video/output/t2v/flying_baby.mp4`.
 - **Build and test:** `cargo build`, `cargo test --workspace`,
   `cargo clippy --no-deps -p tos -p finder-core --all-targets -- -D warnings`, `cargo deny check licenses`.
   - Format with `cargo fmt -p tos -p finder-core`, never `cargo fmt --all`: that rewraps the

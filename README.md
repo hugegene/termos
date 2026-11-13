@@ -1,30 +1,73 @@
 # termos
 
-termos is a terminal workspace: our own multiplexer with a file finder built in. It has persistent sessions,
-tabs, split panes, scrolling and search, and mouse support, all in one program, run as `tos`. It works on
-Linux and on Macs with Apple Silicon.
+[![Latest release](https://img.shields.io/github/v/release/hugegene/termos)](https://github.com/hugegene/termos/releases/latest)
+[![MIT license](https://img.shields.io/github/license/hugegene/termos)](LICENSE)
+![Linux and macOS on Apple Silicon](https://img.shields.io/badge/runs%20on-Linux%20%C2%B7%20macOS%20%28Apple%20Silicon%29-blue)
+![Written in Rust](https://img.shields.io/badge/written%20in-Rust-orange)
 
-```
- your terminal window              background (keeps running)
-┌───────────────────┐  1 keys    ┌───────────────────────────────┐
-│ tos (client)      │──────────▶ │ tos server, session "main"     │
-│                   │ ◀──────────│  tab 1: shell │ shell          │
-└───────────────────┘  2 screen  │  tab 2: finder                 │
-                                 └───────────────────────────────┘
- close the window or detach: the server keeps your shells running; `tos` reconnects
+**Drop all desktop apps, use `tos`.**
+
+termos (`tos`) is a terminal workspace that does the jobs of your file manager, your file viewers and tmux.
+Browse, preview and edit files, keep sessions alive through reboots, and run AI coding agents side by side, all
+in one program.
+
+![tos in 30 seconds: the finder showing a spreadsheet, editing a web page in Neovim, a video, a Word document, a PDF page, editing a CSV, and a picture; then Claude Code in a new tab writing server.py, which the finder lists](docs/images/demo-short.gif)
+
+```bash
+curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
+tos                  # start a session, or go back to the one running
+tos finder ~/docs    # a finder tab on a folder: previews, editing, open in an app
 ```
 
-In the demo below, `tos attach` starts a session, and the finder previews and edits files inside the terminal.
-It edits HTML, Markdown and CSV, and previews spreadsheets, videos, Word documents, PDFs and images. Then a new
-tab runs Claude Code, which writes a small web server, and the finder lists it:
+<details>
+<summary><b>Watch the full tour</b> (90 seconds, with every key shown)</summary>
 
 ![tos: attaching from a shell; the finder previewing a spreadsheet, editing HTML and Markdown in Neovim, a video frame, a Word document, a PDF's text and pages, editing a CSV in the grid, and an image; then Claude Code in a new tab writing server.py, which the finder shows highlighted](docs/images/finder-demo.gif)
+
+</details>
+
+## Instead of…
+
+| Instead of | In `tos` |
+|---|---|
+| Finder, Files or Explorer | `tos finder`: browse, filter, rename, copy a path, move to the trash, `o` opens in its app |
+| A PDF reader | a PDF's text, or its pages as images, with zoom |
+| An image viewer | real images in Ghostty, kitty, WezTerm, iTerm2 and xterm (with sixel) |
+| A video player, for a look | its length, size and a frame; `o` plays it |
+| A text editor, for quick edits | Neovim inside the preview, `Alt+s` saves |
+| Excel or Numbers, for a quick look | spreadsheets as tables, and CSV edited in a grid |
+| Word or PowerPoint, for reading | documents and slides shown as Markdown |
+| tmux or zellij | tabs, splits and sessions that come back after a reboot, with zellij's keys and tmux's |
+
+Some jobs still need the app: `tos` can't save spreadsheets or Word files, and `o` opens them there.
+
+## Why termos?
+
+termos began as zellij, yazi and a preview script glued together. It's now one program with one set of keys
+(zellij's): the multiplexer and the finder share a session, so your tabs, splits and the finder's folder come
+back after a reboot. Everything is scriptable through one command line, so extensions are plain programs in any
+language.
+
+## AI agents side by side
+
+Run Claude Code, Codex or any other agent in a tab, and keep the finder open next to it. The files it writes
+appear in the finder straight away, previewed and ready to edit. Sessions keep running when you close the
+window, so an agent can work while you're away, and `tos` takes you back to it.
+
+[prbot](https://github.com/hugegene/prbot) goes further: it opens a Claude tab for each GitHub PR that needs
+you (see [Extending](#extending)).
 
 ## Install
 
 ```bash
 curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
 ```
+
+It installs `tos` for you alone, without sudo, on Linux (x86_64 or arm64) and on Macs with Apple Silicon.
+Upgrade with `tos update`.
+
+<details>
+<summary><b>Details:</b> where it runs, what it changes, upgrading, optional programs</summary>
 
 - **Where it runs:** Linux on x86_64 or arm64 with glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+, RHEL 9+),
   and Macs with Apple Silicon.
@@ -40,13 +83,19 @@ curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.s
 - **Optional programs:** Neovim, poppler (PDF), ffmpeg (video previews), mpv (playing videos) and gio or trash.
   `tos` names the package when one is missing.
 
-```bash
-tos               # attach to session "main", starting it if needed
-tos finder ~/docs # open a finder tab
-tos ls            # list sessions;  tos kill  ends one (attach again to restore it)
-```
+</details>
 
 ## Sessions
+
+```
+ your terminal window              background (keeps running)
+┌───────────────────┐  1 keys    ┌───────────────────────────────┐
+│ tos (client)      │──────────▶ │ tos server, session "main"     │
+│                   │ ◀──────────│  tab 1: shell │ shell          │
+└───────────────────┘  2 screen  │  tab 2: finder                 │
+                                 └───────────────────────────────┘
+ close the window or detach: the server keeps your shells running; `tos` reconnects
+```
 
 Session commands are **zellij's**, with the same names, aliases and flags:
 
@@ -153,10 +202,10 @@ changing `zellij` to `tos` and `ZELLIJ_*` to `TOS_*`.
 ## Development
 
 - **Build:** `cargo build --release` gives `target/release/tos`. `CLAUDE.md` lists the tests and checks.
-- **Demo:** `python3 scripts/demo/record.py` records `docs/images/finder-demo.gif` (shown above) and
-  `finder-demo.webp` again, on a virtual display. `--video` and `--image` choose what the video and picture steps
-  show. The Claude part needs Claude Code signed in; `--no-claude` leaves it out. See
-  `docs/plans/2026-11-13-finder-demo-gif.md` for what else it needs.
+- **Demo:** `python3 scripts/demo/record.py` records the GIFs above again, on a virtual display: the short
+  `docs/images/demo-short.gif`, the full tour `finder-demo.gif`, and `finder-demo.webp`. `--video` and `--image`
+  choose what the video and picture steps show. The Claude part needs Claude Code signed in; `--no-claude` leaves
+  it out. See `docs/plans/2026-11-13-finder-demo-gif.md` for what else it needs.
 - **Release:** set `version` in `Cargo.toml`, commit, then push a tag `v<version>`.
   `.github/workflows/release.yml` builds each target with `scripts/package.sh` and publishes the release
   with `scripts/install.sh`. See `docs/plans/2026-11-09-distribution.md`.
