@@ -9,8 +9,8 @@ By default it writes docs/images/finder-demo.webp (lossless) and docs/images/fin
 pictures band a little), from one recording. --video and --image show your own video and picture instead of the
 made-up ones (see make_files.py); the README's demo uses a video and a frame from ~/ghibli-video.
 
-The tour: `tos attach` from a plain shell, the finder through eight kinds of file, then a new tab where Claude
-Code writes a small web server, and back to the finder, which lists it. `--no-claude` stops after the finder.
+The tour: `tos attach` from a plain shell and a finder tab; a new tab where Claude Code writes a small web
+server; back in the finder, `/` finds it; then a walk through every kind of file. `--no-claude` leaves Claude out.
 
 Needs Xvfb, Ghostty (or xterm with sixel, as Ubuntu's is), xdotool, ffmpeg, LibreOffice and Python with Pillow,
 openpyxl and matplotlib; for the Claude part, Claude Code signed in. Nothing touches your own sessions or files:
@@ -148,16 +148,22 @@ class Demo:
         self.short.append((start, self.now(), self.factors["short"]))
 
 
-def tour(d):
-    """The finder part. The folder lists budget.xlsx, index.html, the video (mandelbrot.mp4 or movie.mp4),
-    notes.docx, README.md, report.pdf, sales.csv and the picture (sunset.png or snapshot.png), in that order."""
+def start(d):
+    """`tos attach` from a plain shell, then a finder tab on the sample folder."""
     d.caption("In your terminal, `tos attach` starts a session, or goes back to the one running", pause=1.0)
     d.type("tos attach")
     d.key("Return", wait=1.4)
-    d.caption("`tos finder` opens a finder tab", pause=0.4)
+    d.caption("`tos finder` opens a finder tab on this folder", pause=0.4)
     d.type("tos finder")
-    d.key("Return", wait=1.2)
+    d.key("Return", wait=0.6)
+    d.highlight(1.6)
+    time.sleep(1.6)
 
+
+def tour(d, server):
+    """A walk through every file, from the top. The folder lists budget.xlsx, index.html, the video (mandelbrot.mp4
+    or movie.mp4), notes.docx, README.md, report.pdf, sales.csv, server.py (when Claude wrote it) and the picture
+    (sunset.png or snapshot.png), in that order."""
     d.highlight(1.8)
     d.caption("`↓` `↑` move through the files · spreadsheets show as a table", pause=0.9)
     d.snap()
@@ -231,6 +237,10 @@ def tour(d):
     d.key("ctrl+e", wait=1.8)
     d.key("Left", wait=0.2)
 
+    if server:
+        d.key("Down", wait=0.2)
+        d.caption("Code shows highlighted: Claude's server.py", pause=1.4)
+
     d.highlight(2.2)
     d.key("Down", wait=0.2)
     d.caption("Images show for real in kitty, iTerm2, WezTerm, Ghostty or xterm", pause=1.5)
@@ -239,8 +249,9 @@ def tour(d):
 
 
 def claude(d, folder):
-    """A new tab, Claude Code writing server.py there, and back to the finder, still on the picture, which sorts
-    after server.py. A caption's {factor} is filled in for each animation, as each speeds Claude up differently."""
+    """A new tab, Claude Code writing server.py there, then back to the finder, where `/` finds server.py and Esc
+    clears the filter, leaving the first file selected for the tour. A caption's {factor} is filled in for each
+    animation, as each speeds Claude up differently."""
     with d.highlighting(3):
         d.caption("`Ctrl+t` `n` opens a new tab")
         d.key("ctrl+t", gap=0.3, wait=0)
@@ -260,15 +271,20 @@ def claude(d, folder):
     d.caption("Done: Claude's reply", pause=0.5)
     d.snap()
     time.sleep(4.0)
-    d.highlight(4.0)
-    d.caption("`Ctrl+t` `Tab` goes back to the finder, which lists server.py")
+    d.highlight(2.6)
+    d.caption("`Ctrl+t` `Tab` goes back to the finder")
     d.key("ctrl+t", gap=0.3, wait=0)
     d.key("Tab", wait=0.2)
-    d.key("Escape", wait=1.2)
-    d.key("Up", wait=0.2)
-    d.caption("Code shows highlighted, ready to edit with `→` `Enter`", pause=1.0)
+    d.key("Escape", wait=1.4)
+    with d.highlighting(2):
+        d.caption("`/` filters: type part of a name", pause=0.3)
+        d.type("/server", wait=0.6)
+        d.key("Return", wait=0.3)
+    d.highlight(3.2)
+    d.caption("There's server.py, highlighted · `Esc` clears the filter", pause=1.0)
     d.snap()
-    time.sleep(3.0)
+    time.sleep(2.6)
+    d.key("Escape", wait=0.8)
 
 
 def free_display():
@@ -561,9 +577,10 @@ def main():
         time.sleep(0.5)
         demo = Demo(env, t0, tos)
         try:
-            tour(demo)
+            start(demo)
             if not args.no_claude:
                 claude(demo, folder)
+            tour(demo, server=not args.no_claude)
         finally:
             length = time.monotonic() - demo.t0
             rec.communicate(b"q", timeout=30)

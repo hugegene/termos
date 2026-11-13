@@ -10,6 +10,9 @@
 - the README shows the GIF, by the user's choice; the WebP stays beside it
 - the same recording also gives a 28 s highlights GIF, `docs/images/demo-short.gif`, for the top of the README;
   the full tour folds away below it ([README plan](2026-11-13-readme-marketing.md))
+- the order is now: `tos attach`, a finder tab, Claude Code in a new tab writing `server.py`, back to the
+  finder where `/server` finds it, then the walk through every file (the user's request). Recorded at 99 s (WebP
+  1.5 MB, GIF 1.2 MB) and 33 s for the short GIF (0.8 MB); Claude's 12 s plays at 2× and 6×
 
 **Findings:**
 [recording the finder demo GIF](../findings/2026-11-13-demo-gif-recording.md),

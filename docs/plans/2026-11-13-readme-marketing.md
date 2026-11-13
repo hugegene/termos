@@ -81,7 +81,8 @@ none of GitHub's top 100 for any of them, nor for "termos", which is Portuguese 
 - **Releases:** `release.yml` titles them "termos X: a terminal OS". v0.4.3 was retitled to match and given notes.
 - **Social preview:** `docs/images/social-preview.png` now has "a terminal OS". The user uploads it by hand.
 
-**Not done (the user's part):**
+**Not done:** launching and the rest now live in [the marketing plan](2026-11-13-marketing.md). Kept below as
+written on the day:
 - **Stars and links:** a Show HN post, Reddit (r/commandline, r/rust, r/linux), lobste.rs, awesome lists
   (awesome-tuis, awesome-cli-apps, awesome-rust, awesome-claude-code), and a Homebrew tap and an AUR package.
 - **Optional:** a GitHub Pages site set as the homepage.
