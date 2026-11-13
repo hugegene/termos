@@ -1935,38 +1935,97 @@ fn real_neovim() {
     println!("{}", s.text());
 }
 
-/// Without Neovim, Enter opens `$VISUAL` (or `$EDITOR`, or vi), the editor's frame names its keys instead of
-/// Ctrl+s and Ctrl+e, and a tip says once how to get Neovim. Plan: docs/plans/2026-11-13-editor-save-keys.md.
-#[test]
-fn editing_without_neovim_names_the_editor() {
-    if ["/usr/bin/nvim", "/bin/nvim"].iter().any(|p| Path::new(p).exists()) {
-        eprintln!("skipped: Neovim is installed where this test's PATH can't leave it out");
-        return;
-    }
-    let mut env = Env::new("e2e-nonvim");
-    // No Neovim: a PATH without it, and a HOME without ~/.local/bin/nvim.
-    env.set("PATH", "/usr/bin:/bin");
+/// An Env without Neovim: `PATH` is `bin` (made empty, for stand-ins), and `HOME` has no `~/.local/bin/nvim`.
+fn env_without_neovim(session: &str) -> (Env, PathBuf) {
+    let mut env = Env::new(session);
+    let bin = env.root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    env.set("PATH", &bin.display().to_string());
     let home = env.root.display().to_string();
     env.set("HOME", &home);
-    // A stand-in editor: says which file it got and waits for a line.
-    let editor = env.root.join("ed");
-    fs::write(&editor, "#!/bin/sh\necho \"EDITING $1\"\nread line\n").unwrap();
-    Command::new("chmod").arg("755").arg(&editor).status().unwrap();
-    env.set("VISUAL", &editor.display().to_string());
+    (env, bin)
+}
+
+/// A stand-in editor at `path`: says which file it got and waits for a line.
+fn stand_in_editor(path: &Path) {
+    fs::write(path, "#!/bin/sh\necho \"EDITING $1\"\nread line\n").unwrap();
+    Command::new("chmod").arg("755").arg(path).status().unwrap();
+}
+
+/// Opens `a.md` from the finder in `env` and waits for the stand-in editor.
+fn edit_from_finder(env: &Env) -> Screen {
     let files = env.root.join("f");
     fs::create_dir_all(&files).unwrap();
     fs::write(files.join("a.md"), "# Hi\n").unwrap();
     env.tos(&["start"]);
-    open_finder(&env, &files);
+    open_finder(env, &files);
     let s = env.attach(130, 30);
     s.wait_for("a.md");
     s.send(b"\r\r");
     s.wait_for("EDITING");
+    s
+}
+
+/// Without Neovim, Enter opens nano, with its own keys: the editor's frame names them, and a tip says once how
+/// to get Neovim. Plan: docs/plans/2026-11-13-editor-save-keys.md ("nano before the default editor").
+#[test]
+fn editing_without_neovim_opens_nano() {
+    let (mut env, bin) = env_without_neovim("e2e-nano");
+    stand_in_editor(&bin.join("nano"));
+    // The default editor comes after nano.
+    let other = env.root.join("ed");
+    stand_in_editor(&other);
+    env.set("VISUAL", &other.display().to_string());
+    let s = edit_from_finder(&env);
+    s.wait_for("editing in nano: Neovim isn't installed");
+    s.wait_for("nano · Ctrl+s save · Ctrl+x close");
+    s.send(b"\r");
+    s.wait_until("the editor closed", |t| !t.contains("EDITING"));
+}
+
+/// Without Neovim or nano, Enter opens `$VISUAL` (or `$EDITOR`, or vi), and the frame says it has its own keys.
+#[test]
+fn editing_without_neovim_or_nano_opens_visual() {
+    let (mut env, _bin) = env_without_neovim("e2e-nonano");
+    let editor = env.root.join("ed");
+    stand_in_editor(&editor);
+    env.set("VISUAL", &editor.display().to_string());
+    let s = edit_from_finder(&env);
     s.wait_for("editing in ed: Neovim isn't installed");
     s.wait_for("ed · its own keys save and close");
     assert!(!s.text().contains("Ctrl+s save · Ctrl+e close"), "{}", s.text());
     s.send(b"\r");
     s.wait_until("the editor closed", |t| !t.contains("EDITING"));
+}
+
+/// Without Neovim, opens a file in the real nano (needs `/usr/bin/nano`, and no `nvim` there): Ctrl+s, handed to
+/// nano by tos, saves, and Ctrl+x closes. Run with:
+/// `cargo test -p tos --test e2e real_nano -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn real_nano() {
+    let (mut env, _bin) = env_without_neovim("e2e-realnano");
+    env.set("PATH", "/usr/bin:/bin");
+    env.set("TERM", "xterm-256color");
+    let files = env.root.join("n");
+    fs::create_dir_all(&files).unwrap();
+    fs::write(files.join("a.txt"), "hello\n").unwrap();
+    env.tos(&["start"]);
+    open_finder(&env, &files);
+    let s = env.attach(110, 26);
+    s.wait_for("a.txt");
+    s.send(b"\r\r");
+    s.wait_for("nano · Ctrl+s save · Ctrl+x close");
+    s.wait_for("GNU nano");
+    s.send(b"more ");
+    s.wait_for("more hello");
+    s.send(b"\x13");
+    wait("Ctrl+s saved the file", || {
+        (fs::read_to_string(files.join("a.txt")).unwrap() == "more hello\n").then_some(())
+    });
+    println!("{}", s.text());
+    s.send(b"\x18");
+    s.wait_until("nano closed", |t| !t.contains("GNU nano"));
 }
 
 /// The target name the installer picks on this machine.

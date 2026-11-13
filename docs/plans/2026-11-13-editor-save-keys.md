@@ -1,8 +1,10 @@
 # Plan: save and close keys that work on Mac and Linux, and editing without Neovim
 
-**Status:** built 2026-11-13 (see **Built**, at the end) · **Date:** 2026-11-13 · **Decided by:** the user chose S, `Ctrl+s` and `Ctrl+e`
+**Status:** built 2026-11-13, with the nano fallback (**Changed: nano before the default editor**, at the end) ·
+**Date:** 2026-11-13 · **Decided by:** the user chose S, `Ctrl+s` and `Ctrl+e`
 (2026-11-13), over A (`Ctrl+k`) and over `Ctrl+s` with `Ctrl+q` · **Finding:**
-[keys for saving and closing in the finder's editor](../findings/2026-11-13-editor-keys.md) · **Related:**
+[keys for saving and closing in the finder's editor](../findings/2026-11-13-editor-keys.md),
+[nano's keys inside tos](../findings/2026-11-13-nano-keys.md) · **Related:**
 [macOS support](2026-11-09-macos-support.md) (its open item "the Option key as Alt")
 
 ## Decision: S
@@ -152,4 +154,69 @@ Neovim isn't shipped: `scripts/install.sh` doesn't install it, and the README li
   - `finder-demo.webp`: 1.4 MB
   - `demo-short.gif`: 0.8 MB, 29 s
 - **Not checked yet:** a real Mac (Terminal.app, iTerm2, Ghostty).
+
+## Changed: nano before the default editor (2026-11-13, the user's choice; built the same day)
+
+**Decision:** when Neovim is missing, `tos` opens **nano**, then the **default editor** (`$VISUAL`, then
+`$EDITOR`), then `vi`. `$TOS_EDITOR` still comes before everything. **nano keeps its own keys and your
+`~/.nanorc`:** `tos` overrides none of them (the user's choice).
+
+```
+$TOS_EDITOR ──▶ Neovim, tos's config ──▶ nano ──▶ $VISUAL ──▶ $EDITOR ──▶ vi
+ your pick       Ctrl+s / Ctrl+e          own keys   your default editor     last resort
+```
+
+**Why nano second:**
+- It's the editor most often already installed: Ubuntu, Debian and Fedora 33+ ship it, and a Mac has pico as
+  `nano`.
+- Its everyday keys work inside `tos` ([finding](../findings/2026-11-13-nano-keys.md)):
+  - `Ctrl+s` reaches it, because `tos` hands `Ctrl+s` to editors it started, and saves.
+  - `Ctrl+x` closes, asking to save; `tos` doesn't use it.
+  - `Ctrl+z` doesn't suspend it.
+- What `tos` hides from it has other keys: help on `F1`, write out on `F3`, the arrows for `^N` `^P` `^B`. The
+  option toggles under Alt are only settings.
+
+**Hints and the tip:**
+
+| Editor | The frame's hint (and the caption, after "editing ·") |
+|---|---|
+| GNU nano | `nano · Ctrl+s save · Ctrl+x close` |
+| a Mac's pico (`nano`'s real path ends in `pico`) | `pico · Ctrl+x close, then y saves`. `^O`, pico's own save, is `tos`'s session key, and pico's `Ctrl+s` isn't checked (an **estimate**) |
+| vi, vim | `vi · Esc :wq saves and closes` (unchanged) |
+| any other default editor | `<name> · its own keys save and close` (unchanged) |
+
+The once-a-session tip that Neovim is missing stays as it is. It names the editor that opened, for example
+"editing in nano: Neovim isn't installed (package neovim); with it, Ctrl+s saves and Ctrl+e closes".
+
+**Example:** on Fedora, without Neovim and with no `$VISUAL` or `$EDITOR` set:
+1. **`Enter` on `notes.md`:** `nano` is on `PATH`, so `tos` opens `nano notes.md` in the preview. The tip
+   flashes once, and the frame says `nano · Ctrl+s save · Ctrl+x close`.
+2. **Type, then `Ctrl+s`:** `tos` sees an editor it started and passes the key on; nano writes the file.
+3. **`Ctrl+x`:** nano closes, and the preview shows the saved file.
+
+**Steps:**
+1. **`editor.rs`:**
+   - after Neovim, look for `nano` on `PATH`
+   - tell pico apart by the real path of `nano` (`fs::canonicalize`; a Mac's `/usr/bin/nano` links to `pico`)
+   - then `$VISUAL`, `$EDITOR` and `vi`
+   - `Editor::keys` gets the nano and pico hints
+   - unit tests for the hints
+2. **End-to-end tests:**
+   - `editing_without_neovim_names_the_editor`: a stand-in `nano` on a `PATH` of its own; the frame names nano's
+     keys
+   - a second case with no nano on `PATH`: `$VISUAL` opens, as now
+3. **README:** the **Without Neovim** line (nano, then `$VISUAL`/`$EDITOR`, then `vi`) and the optional programs.
+4. **Checks:** tests, clippy, fmt. No new demo: it shows Neovim.
+
+**Built (2026-11-13):**
+- **`editor.rs`:** after Neovim, nano from `PATH`. `is_pico` checks `nano`'s real path, and `Editor::keys` names
+  nano's and pico's keys. Unit tests cover both hints and a `nano` symlinked to `pico`.
+- **End-to-end:** each test has a `PATH` and `HOME` of its own, without Neovim.
+  - `editing_without_neovim_opens_nano`: a stand-in `nano` wins over `$VISUAL`; the frame reads
+    `nano · Ctrl+s save · Ctrl+x close`.
+  - `editing_without_neovim_or_nano_opens_visual`: no nano, so `$VISUAL` opens.
+  - `real_nano` (ignored; needs `/usr/bin/nano`) passes with nano 7.2: `Ctrl+s`, sent through `tos` as from a
+    keyboard, wrote the file ("[ Wrote 1 line ]"), and `Ctrl+x` closed.
+  - While nano edits, its lock file (`.a.txt.swp`) shows in the finder's list; nano removes it when it closes.
+- **Checks:** all tests, clippy and fmt pass. Not checked: a Mac's pico.
 

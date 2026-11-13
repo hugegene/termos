@@ -1,6 +1,6 @@
-//! Which editor the finder opens: `$TOS_EDITOR` if set, else Neovim with our notepad-style config, else
-//! `$VISUAL`/`$EDITOR`/`vi`. It also says which it picked, so hints name the right keys. Plan:
-//! docs/plans/2026-11-13-editor-save-keys.md.
+//! Which editor the finder opens: `$TOS_EDITOR` if set, else Neovim with our notepad-style config, else nano
+//! (with its own keys), else `$VISUAL`/`$EDITOR`/`vi`. It also says which it picked, so hints name the right keys.
+//! Plan: docs/plans/2026-11-13-editor-save-keys.md (and its "nano before the default editor").
 
 use std::collections::HashMap;
 use std::env;
@@ -26,7 +26,7 @@ pub enum Editor {
     Ours,
     /// `$TOS_EDITOR`, by its program's name, with its own keys.
     Chosen(String),
-    /// Neovim isn't installed: `$VISUAL`, `$EDITOR` or vi, by name, with its own keys.
+    /// Neovim isn't installed: nano (or a Mac's pico), `$VISUAL`, `$EDITOR` or vi, by name, with its own keys.
     Fallback(String),
 }
 
@@ -35,6 +35,14 @@ impl Editor {
     pub fn keys(&self) -> String {
         match self {
             Editor::Ours => "Ctrl+s save · Ctrl+e close".into(),
+            // tos hands Ctrl+s to the editors it starts, so nano's own Ctrl+s works (findings/2026-11-13-nano-keys.md).
+            Editor::Chosen(name) | Editor::Fallback(name) if name == "nano" => {
+                "nano · Ctrl+s save · Ctrl+x close".into()
+            }
+            // pico's own save, Ctrl+o, is tos's session key; Ctrl+x asks whether to save.
+            Editor::Chosen(name) | Editor::Fallback(name) if name == "pico" => {
+                "pico · Ctrl+x close, then y saves".into()
+            }
             Editor::Chosen(name) | Editor::Fallback(name) if is_vi(name) => {
                 format!("{name} · Esc :wq saves and closes")
             }
@@ -51,6 +59,11 @@ fn is_vi(name: &str) -> bool {
 /// The tip shown once when Neovim is missing and `fallback` opened instead.
 pub fn missing_neovim(fallback: &str) -> String {
     format!("editing in {fallback}: Neovim isn't installed ({INSTALL_NEOVIM}); with it, Ctrl+s saves and Ctrl+e closes")
+}
+
+/// A Mac's `nano` is pico since macOS 12.3: `/usr/bin/nano` links to `pico`.
+fn is_pico(nano: &Path) -> bool {
+    fs::canonicalize(nano).is_ok_and(|p| p.file_name().is_some_and(|n| n == "pico"))
 }
 
 /// A command's program name, without its folder: `/usr/bin/vim -p` is `vim`.
@@ -99,6 +112,12 @@ pub fn command(file: &Path) -> (SpawnOptions, Editor) {
         let command = vec![nvim.to_string_lossy().into_owned(), "-u".into(), init.to_string_lossy().into_owned(), file];
         return (SpawnOptions { cwd, command, env }, Editor::Ours);
     }
+    // Then nano, the editor most systems have, with its own keys and the user's nanorc.
+    if let Some(nano) = find_in_path("nano") {
+        let name = if is_pico(&nano) { "pico" } else { "nano" };
+        let command = vec![nano.to_string_lossy().into_owned(), file];
+        return (SpawnOptions { cwd, command, env: HashMap::new() }, Editor::Fallback(name.into()));
+    }
     let editor = env::var("VISUAL").or_else(|_| env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
     let mut command: Vec<String> = editor.split_whitespace().map(str::to_owned).collect();
     let name = program_name(&command);
@@ -115,7 +134,19 @@ mod tests {
         assert_eq!(Editor::Ours.keys(), "Ctrl+s save · Ctrl+e close");
         assert_eq!(Editor::Fallback("vi".into()).keys(), "vi · Esc :wq saves and closes");
         assert_eq!(Editor::Chosen("micro".into()).keys(), "micro · its own keys save and close");
+        assert_eq!(Editor::Fallback("nano".into()).keys(), "nano · Ctrl+s save · Ctrl+x close");
+        assert_eq!(Editor::Fallback("pico".into()).keys(), "pico · Ctrl+x close, then y saves");
         assert!(missing_neovim("vi").starts_with("editing in vi: Neovim isn't installed ("));
+    }
+
+    #[test]
+    fn a_nano_that_links_to_pico_is_pico() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("pico"), "").unwrap();
+        std::os::unix::fs::symlink("pico", dir.path().join("nano")).unwrap();
+        assert!(is_pico(&dir.path().join("nano")));
+        fs::write(dir.path().join("real-nano"), "").unwrap();
+        assert!(!is_pico(&dir.path().join("real-nano")));
     }
 
     #[test]

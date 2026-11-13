@@ -80,8 +80,8 @@ Upgrade with `tos update`.
 - **Upgrading:** `tos update`. Each version lives in `~/.local/share/termos/versions/`, `~/.local/bin/tos`
   links to the current one, and the one before is kept. Sessions show a note in the status bar when a newer
   release is out (at most one check a day; `TOS_NO_UPDATE_CHECK=1` turns it off).
-- **Optional programs:** Neovim (editing text), poppler (PDF), ffmpeg (video previews), mpv (playing videos) and
-  gio or trash.
+- **Optional programs:** Neovim (editing text; without it, nano), poppler (PDF), ffmpeg (video previews), mpv
+  (playing videos) and gio or trash.
   `tos` names the package when one is missing.
 
 </details>
@@ -150,8 +150,9 @@ panes, swap layouts, pane groups and zellij's plugins.
 - **Editing:** `Enter` in the preview edits in tos: Neovim for text, the grid for CSV and spreadsheets. In both,
   `Ctrl+s` saves and `Ctrl+e` closes, the same on Mac and Linux (`Alt+s` and `Alt+q` work too, but on a Mac they
   need the terminal's Option-as-Alt setting). Where tos can't edit a file, the caption doesn't offer `Enter`.
-- **Without Neovim:** `Enter` opens `$VISUAL`, `$EDITOR` or `vi` instead, with its own keys (for vi, `Esc` `:wq`),
-  and tos says once how to install Neovim. `TOS_EDITOR` picks any editor.
+- **Without Neovim:** `Enter` opens nano instead (`Ctrl+s` saves, `Ctrl+x` closes), or without nano your
+  `$VISUAL` or `$EDITOR`, else `vi` (`Esc` `:wq`), each with its own keys. tos says once how to install Neovim.
+  `TOS_EDITOR` picks any editor.
 - **Opening in an app:** `o` opens any file or folder in its default app (`xdg-open`, or `open` on macOS), on the
   screen of the terminal you pressed it in.
 - **The menu:** right-click a file, or press `m`, to rename it, copy its name or path, open it in its app, or
