@@ -37,6 +37,15 @@ links to the repo.
 
 The site is also set as the repo's homepage.
 
+**Changed 2026-11-13 (the user's request):**
+- **A light page:** Catppuccin Latte, the light version of the terminal's Mocha colours. The install box stays
+  dark (Mocha), like a terminal, so it stands out as the thing to copy. The demo GIFs sit in dark frames with a
+  soft shadow.
+- **prbot:** a section "Extend it: prbot, a pull-request poller". It says extensions are ordinary programs that
+  drive tos through its CLI, and shows prbot's demo GIF, loaded from
+  `raw.githubusercontent.com/hugegene/prbot/main/docs/demo.gif` (as the README does), so it follows prbot's
+  repo. It links to prbot and to `docs/cli.md`. The "AI agents" card links to the section.
+
 ## Options considered
 
 - **Pages from `/docs` on `main`:** no workflow needed, but it would publish all of `docs/` (plans, findings, CLI

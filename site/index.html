@@ -14,7 +14,7 @@
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#1e1e2e">
+<meta name="theme-color" content="#eff1f5">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231e1e2e'/%3E%3Ctext x='10' y='44' font-family='monospace' font-size='34' font-weight='bold' fill='%23a6e3a1'%3E%3E_%3C/text%3E%3C/svg%3E">
 <script type="application/ld+json">
 {
@@ -32,10 +32,13 @@
 }
 </script>
 <style>
+  /* Catppuccin Latte for the page; the install box keeps Mocha, so it looks like a terminal. */
   :root {
-    --base: #1e1e2e; --mantle: #181825; --crust: #11111b; --surface0: #313244; --surface1: #45475a;
-    --text: #cdd6f4; --subtext: #a6adc8; --overlay: #7f849c;
-    --yellow: #f9e2af; --green: #a6e3a1; --blue: #89b4fa; --mauve: #cba6f7; --peach: #fab387;
+    --base: #eff1f5; --mantle: #e6e9ef; --crust: #dce0e8; --surface0: #ccd0da; --surface1: #bcc0cc;
+    --text: #4c4f69; --subtext: #5c5f77; --muted: #6c6f85;
+    --mauve: #8839ef; --blue: #1e66f5; --green: #40a02b;
+    --term-bg: #1e1e2e; --term-border: #45475a; --term-text: #cdd6f4; --term-muted: #7f849c;
+    --term-button: #313244; --term-button-hover: #45475a; --term-green: #a6e3a1;
     --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif;
   }
@@ -45,68 +48,69 @@
   a { color: var(--blue); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .wrap { max-width: 920px; margin: 0 auto; padding: 0 20px; }
+  code { font-family: var(--mono); }
 
   header.hero { padding-top: 64px; padding-bottom: 28px; text-align: center; }
   .name { font: 700 clamp(44px, 9vw, 76px)/1 var(--mono); letter-spacing: -1px; margin: 0; }
   .name .prompt { color: var(--green); }
-  .kind { color: var(--yellow); font: 700 clamp(22px, 4.5vw, 32px)/1.2 var(--sans); margin: 14px 0 6px; }
+  .kind { color: var(--mauve); font: 700 clamp(22px, 4.5vw, 32px)/1.2 var(--sans); margin: 14px 0 6px; }
   .tagline { color: var(--subtext); font-size: clamp(17px, 3vw, 20px); margin: 0 0 30px; }
 
   .install { max-width: 880px; margin: 0 auto; text-align: left; }
   .install label { display: block; color: var(--subtext); font-size: 14px; margin: 0 0 8px 4px; }
-  .cmd { display: flex; align-items: stretch; background: var(--crust); border: 1px solid var(--surface1);
-         border-radius: 10px; overflow: hidden; }
-  .cmd code { flex: 1; min-width: 0; padding: 16px 18px; font: 14px/1.5 var(--mono); color: var(--text);
+  .cmd { display: flex; align-items: stretch; background: var(--term-bg); border: 1px solid var(--term-border);
+         border-radius: 10px; overflow: hidden; box-shadow: 0 6px 20px rgba(76, 79, 105, 0.18); }
+  .cmd code { flex: 1; min-width: 0; padding: 16px 18px; font: 14px/1.5 var(--mono); color: var(--term-text);
               white-space: nowrap; overflow-x: auto; }
-  .cmd code .dollar { color: var(--overlay); user-select: none; }
-  .cmd button { flex: none; border: 0; border-left: 1px solid var(--surface1); background: var(--surface0);
-                color: var(--text); font: 600 15px var(--sans); padding: 0 20px; cursor: pointer; }
-  .cmd button:hover { background: var(--surface1); }
-  .cmd button.done { color: var(--green); }
+  .cmd code .dollar { color: var(--term-muted); user-select: none; }
+  .cmd button { flex: none; border: 0; border-left: 1px solid var(--term-border); background: var(--term-button);
+                color: var(--term-text); font: 600 15px var(--sans); padding: 0 20px; cursor: pointer; }
+  .cmd button:hover { background: var(--term-button-hover); }
+  .cmd button.done { color: var(--term-green); }
   .then { color: var(--subtext); font-size: 15px; margin: 12px 4px 0; }
-  .then code { font-family: var(--mono); color: var(--text); background: var(--surface0); padding: 1px 6px;
-               border-radius: 5px; white-space: nowrap; }
-  .systems { color: var(--overlay); font-size: 14px; margin: 6px 4px 0; }
+  .systems { color: var(--muted); font-size: 14px; margin: 6px 4px 0; }
   .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 28px; }
   .buttons a { padding: 10px 18px; border-radius: 8px; border: 1px solid var(--surface1); color: var(--text);
-               font-weight: 600; }
-  .buttons a.primary { background: var(--blue); border-color: var(--blue); color: var(--crust); }
-  .buttons a:hover { text-decoration: none; filter: brightness(1.08); }
+               font-weight: 600; background: #fff; }
+  .buttons a.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .buttons a:hover { text-decoration: none; filter: brightness(1.05); }
 
-  .demo { margin: 36px auto 8px; text-align: center; }
-  .demo img { width: 100%; max-width: 832px; height: auto; border-radius: 10px; border: 1px solid var(--surface1);
-              background: var(--crust); }
-  .demo p { color: var(--overlay); font-size: 14px; margin: 8px 0 0; }
+  .shot { margin: 36px auto 8px; text-align: center; }
+  .shot img { width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--surface1);
+              background: var(--term-bg); box-shadow: 0 10px 30px rgba(76, 79, 105, 0.22); }
+  .shot p { color: var(--muted); font-size: 14px; margin: 10px 0 0; }
 
   section { padding: 34px 0 6px; }
-  h2 { font-size: 26px; margin: 0 0 16px; }
+  h2 { font-size: 26px; margin: 0 0 16px; color: var(--text); }
+  .lead { color: var(--subtext); margin: -6px 0 18px; }
   .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-  .card { background: var(--mantle); border: 1px solid var(--surface0); border-radius: 10px; padding: 18px; }
-  .card h3 { margin: 0 0 8px; font-size: 18px; color: var(--yellow); }
+  .card { background: #fff; border: 1px solid var(--surface0); border-radius: 10px; padding: 18px; }
+  .card h3 { margin: 0 0 8px; font-size: 18px; color: var(--mauve); }
   .card p { margin: 0; color: var(--subtext); font-size: 15px; }
-  .card code, td code, li code { font-family: var(--mono); font-size: 0.92em; color: var(--text);
-                                 background: var(--surface0); padding: 1px 5px; border-radius: 4px; }
+  .then code, .card code, td code, li code, .lead code, .note code {
+    font-size: 0.92em; color: var(--text); background: var(--crust); padding: 1px 6px; border-radius: 5px;
+    white-space: nowrap; }
 
   .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 15px; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--surface0); vertical-align: top; }
-  th { color: var(--subtext); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; background: #fff; border-radius: 10px;
+          overflow: hidden; border: 1px solid var(--surface0); }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--mantle); vertical-align: top; }
+  th { color: var(--subtext); font-weight: 600; background: var(--mantle); }
   td:first-child { color: var(--subtext); white-space: nowrap; }
-  .note { color: var(--overlay); font-size: 14px; margin-top: 10px; }
+  .note { color: var(--muted); font-size: 14px; margin-top: 10px; }
 
   ol.start { padding-left: 22px; color: var(--subtext); }
   ol.start li { margin: 6px 0; }
-  ol.start b { color: var(--text); }
 
-  footer { margin-top: 48px; padding-top: 26px; padding-bottom: 40px; border-top: 1px solid var(--surface0); color: var(--overlay);
-           font-size: 14px; text-align: center; }
+  footer { margin-top: 48px; padding-top: 26px; padding-bottom: 40px; border-top: 1px solid var(--surface0);
+           color: var(--muted); font-size: 14px; text-align: center; }
   footer a { color: var(--subtext); }
   @media (max-width: 560px) {
     header.hero { padding-top: 40px; }
     .wrap { padding-left: 16px; padding-right: 16px; }
     .cmd { flex-direction: column; }
     .cmd code { white-space: pre-wrap; word-break: break-all; }
-    .cmd button { border-left: 0; border-top: 1px solid var(--surface1); padding: 10px; }
+    .cmd button { border-left: 0; border-top: 1px solid var(--term-border); padding: 10px; }
     td:first-child { white-space: normal; }
   }
 </style>
@@ -115,7 +119,7 @@
 <header class="hero wrap">
   <h1 class="name"><span class="prompt">&gt;_</span> termos</h1>
   <p class="kind">a terminal OS</p>
-  <p class="tagline">Drop all desktop apps, use <code style="font-family:var(--mono)">tos</code>. A terminal workspace with a terminal file finder built in.</p>
+  <p class="tagline">Drop all desktop apps, use <code>tos</code>. A terminal workspace with a terminal file finder built in.</p>
 
   <div class="install">
     <label for="install-cmd">Install in one line, without sudo</label>
@@ -135,7 +139,7 @@
 </header>
 
 <main class="wrap">
-  <div class="demo">
+  <div class="shot">
     <img src="demo-short.gif" width="832" height="618" loading="eager"
          alt="termos in 30 seconds: a finder tab; Claude Code in a new tab writing server.py; back in the finder, / finds server.py; then a spreadsheet, a web page edited in Neovim, a video, a Word document, a PDF page, a CSV edited in the grid, and a picture">
     <p>tos attach, the finder, Claude Code writing a server in a new tab, then every kind of file.</p>
@@ -154,7 +158,7 @@
       </div>
       <div class="card">
         <h3>AI agents side by side</h3>
-        <p>Run Claude Code or any agent in a tab, with the finder next to it. Its files show up straight away. <a href="https://github.com/hugegene/prbot">prbot</a> opens a Claude tab for each pull request that needs you.</p>
+        <p>Run Claude Code or any agent in a tab, with the finder next to it. Its files show up straight away. <a href="#prbot">prbot</a> opens a Claude tab for each pull request that needs you.</p>
       </div>
     </div>
   </section>
@@ -162,11 +166,24 @@
   <section>
     <h2>Quick start</h2>
     <ol class="start">
-      <li><b><code>tos</code></b> starts a session, or goes back to the one running.</li>
-      <li><b><code>Ctrl+t</code> <code>f</code></b> opens the finder on the folder you're in. The arrows move; <code>→</code> focuses the preview.</li>
-      <li><b><code>Enter</code></b> in the preview edits: <code>Ctrl+s</code> saves, <code>Ctrl+e</code> closes. <code>o</code> opens any file in its app.</li>
-      <li><b><code>Ctrl+t</code> <code>n</code></b> opens a new tab, for a shell, Claude Code or anything else.</li>
+      <li><code>tos</code> starts a session, or goes back to the one running.</li>
+      <li><code>Ctrl+t</code> <code>f</code> opens the finder on the folder you're in. The arrows move; <code>→</code> focuses the preview.</li>
+      <li><code>Enter</code> in the preview edits: <code>Ctrl+s</code> saves, <code>Ctrl+e</code> closes. <code>o</code> opens any file in its app.</li>
+      <li><code>Ctrl+t</code> <code>n</code> opens a new tab, for a shell, Claude Code or anything else.</li>
     </ol>
+  </section>
+
+  <section id="prbot">
+    <h2>Extend it: prbot, a pull-request poller</h2>
+    <p class="lead">Extensions are ordinary programs, in any language, that drive tos through its command line: no plugins.
+      <a href="https://github.com/hugegene/prbot">prbot</a> watches GitHub every minute. When a pull request needs you, it opens a tos tab with
+      Claude Code in your clone of the repo and gives it a one-line instruction, such as <code>/review</code>. Claude waits for you before posting.</p>
+    <div class="shot">
+      <a href="https://github.com/hugegene/prbot"><img src="https://raw.githubusercontent.com/hugegene/prbot/main/docs/demo.gif" width="1196" height="696" loading="lazy"
+         alt="prbot picks up a review request, opens a rev-2 tab, and Claude reviews the PR, then waits before posting"></a>
+      <p><a href="https://github.com/hugegene/prbot">github.com/hugegene/prbot</a> · build your own with
+         <a href="https://github.com/hugegene/termos/blob/main/docs/cli.md">the tos CLI</a></p>
+    </div>
   </section>
 
   <section>
@@ -186,7 +203,7 @@
       </tbody>
     </table>
     </div>
-    <p class="note">Some jobs still need the app: tos can't save spreadsheets or Word files, and <code style="font-family:var(--mono)">o</code> opens them there.</p>
+    <p class="note">Some jobs still need the app: tos can't save spreadsheets or Word files, and <code>o</code> opens them there.</p>
   </section>
 </main>
 
