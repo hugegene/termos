@@ -14,7 +14,11 @@ Linux and on Macs with Apple Silicon.
  close the window or detach: the server keeps your shells running; `tos` reconnects
 ```
 
-The zellij prototype that termos grew from now lives in its own folder, `~/tfinder`.
+In the demo below, `tos attach` starts a session, and the finder previews and edits files inside the terminal.
+It edits HTML, Markdown and CSV, and previews spreadsheets, videos, Word documents, PDFs and images. Then a new
+tab runs Claude Code, which writes a small web server, and the finder lists it:
+
+![tos: attaching from a shell; the finder previewing a spreadsheet, editing HTML and Markdown in Neovim, a video frame, a Word document, a PDF's text and pages, editing a CSV in the grid, and an image; then Claude Code in a new tab writing server.py, which the finder shows highlighted](docs/images/finder-demo.gif)
 
 ## Install
 
@@ -128,8 +132,11 @@ and a section per slide. Old `.doc` and `.ppt` files aren't read.
 
 **Extending `tos`** works through the same command line, from any language; there are no plugins. See
 [docs/cli.md](docs/cli.md) for the overview and [docs/cli/](docs/cli/README.md) for a page per command.
-[prbot](https://github.com/hugegene/prbot) is a full-size example: it opens a Claude tab for each GitHub PR that
-needs you.
+
+**Example: prbot** ([github.com/hugegene/prbot](https://github.com/hugegene/prbot)) is a full-size extension. It
+opens a Claude tab for each GitHub PR that needs you:
+
+[![prbot picks up a review request, opens a rev-2 tab, and Claude reviews the PR, then waits before posting](https://raw.githubusercontent.com/hugegene/prbot/main/docs/demo.gif)](https://github.com/hugegene/prbot)
 
 ```bash
 tos action new-pane -d right -- make test    # zellij's actions, names and flags; prints terminal_7
@@ -146,6 +153,10 @@ changing `zellij` to `tos` and `ZELLIJ_*` to `TOS_*`.
 ## Development
 
 - **Build:** `cargo build --release` gives `target/release/tos`. `CLAUDE.md` lists the tests and checks.
+- **Demo:** `python3 scripts/demo/record.py` records `docs/images/finder-demo.gif` (shown above) and
+  `finder-demo.webp` again, on a virtual display. `--video` and `--image` choose what the video and picture steps
+  show. The Claude part needs Claude Code signed in; `--no-claude` leaves it out. See
+  `docs/plans/2026-11-13-finder-demo-gif.md` for what else it needs.
 - **Release:** set `version` in `Cargo.toml`, commit, then push a tag `v<version>`.
   `.github/workflows/release.yml` builds each target with `scripts/package.sh` and publishes the release
   with `scripts/install.sh`. See `docs/plans/2026-11-09-distribution.md`.
