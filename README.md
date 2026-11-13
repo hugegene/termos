@@ -16,6 +16,7 @@ in one program.
 ```bash
 curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
 tos                  # start a session, or go back to the one running
+                     # then Ctrl+t, f opens the finder on the folder you're in
 ```
 
 <details>
