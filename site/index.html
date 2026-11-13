@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>termos: a terminal OS and terminal workspace</title>
+<meta name="description" content="termos (tos) is a terminal OS: a terminal workspace with sessions, tabs and splits, and a terminal file finder that previews and edits PDFs, images, videos, Office files and CSV. One line to install on Linux and macOS.">
+<link rel="canonical" href="https://hugegene.github.io/termos/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://hugegene.github.io/termos/">
+<meta property="og:title" content="termos: a terminal OS">
+<meta property="og:description" content="Drop all desktop apps, use tos. A terminal workspace with a terminal file finder that previews and edits your files.">
+<meta property="og:image" content="https://hugegene.github.io/termos/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#1e1e2e">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231e1e2e'/%3E%3Ctext x='10' y='44' font-family='monospace' font-size='34' font-weight='bold' fill='%23a6e3a1'%3E%3E_%3C/text%3E%3C/svg%3E">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "termos",
+  "alternateName": "tos",
+  "description": "A terminal OS: a terminal workspace with sessions, tabs and splits, and a terminal file finder that previews and edits files.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux, macOS",
+  "url": "https://hugegene.github.io/termos/",
+  "downloadUrl": "https://github.com/hugegene/termos/releases/latest",
+  "license": "https://opensource.org/licenses/MIT",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<style>
+  :root {
+    --base: #1e1e2e; --mantle: #181825; --crust: #11111b; --surface0: #313244; --surface1: #45475a;
+    --text: #cdd6f4; --subtext: #a6adc8; --overlay: #7f849c;
+    --yellow: #f9e2af; --green: #a6e3a1; --blue: #89b4fa; --mauve: #cba6f7; --peach: #fab387;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--base); }
+  body { margin: 0; background: var(--base); color: var(--text); font: 17px/1.6 var(--sans); }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 20px; }
+
+  header.hero { padding-top: 64px; padding-bottom: 28px; text-align: center; }
+  .name { font: 700 clamp(44px, 9vw, 76px)/1 var(--mono); letter-spacing: -1px; margin: 0; }
+  .name .prompt { color: var(--green); }
+  .kind { color: var(--yellow); font: 700 clamp(22px, 4.5vw, 32px)/1.2 var(--sans); margin: 14px 0 6px; }
+  .tagline { color: var(--subtext); font-size: clamp(17px, 3vw, 20px); margin: 0 0 30px; }
+
+  .install { max-width: 880px; margin: 0 auto; text-align: left; }
+  .install label { display: block; color: var(--subtext); font-size: 14px; margin: 0 0 8px 4px; }
+  .cmd { display: flex; align-items: stretch; background: var(--crust); border: 1px solid var(--surface1);
+         border-radius: 10px; overflow: hidden; }
+  .cmd code { flex: 1; min-width: 0; padding: 16px 18px; font: 14px/1.5 var(--mono); color: var(--text);
+              white-space: nowrap; overflow-x: auto; }
+  .cmd code .dollar { color: var(--overlay); user-select: none; }
+  .cmd button { flex: none; border: 0; border-left: 1px solid var(--surface1); background: var(--surface0);
+                color: var(--text); font: 600 15px var(--sans); padding: 0 20px; cursor: pointer; }
+  .cmd button:hover { background: var(--surface1); }
+  .cmd button.done { color: var(--green); }
+  .then { color: var(--subtext); font-size: 15px; margin: 12px 4px 0; }
+  .then code { font-family: var(--mono); color: var(--text); background: var(--surface0); padding: 1px 6px;
+               border-radius: 5px; white-space: nowrap; }
+  .systems { color: var(--overlay); font-size: 14px; margin: 6px 4px 0; }
+  .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 28px; }
+  .buttons a { padding: 10px 18px; border-radius: 8px; border: 1px solid var(--surface1); color: var(--text);
+               font-weight: 600; }
+  .buttons a.primary { background: var(--blue); border-color: var(--blue); color: var(--crust); }
+  .buttons a:hover { text-decoration: none; filter: brightness(1.08); }
+
+  .demo { margin: 36px auto 8px; text-align: center; }
+  .demo img { width: 100%; max-width: 832px; height: auto; border-radius: 10px; border: 1px solid var(--surface1);
+              background: var(--crust); }
+  .demo p { color: var(--overlay); font-size: 14px; margin: 8px 0 0; }
+
+  section { padding: 34px 0 6px; }
+  h2 { font-size: 26px; margin: 0 0 16px; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--mantle); border: 1px solid var(--surface0); border-radius: 10px; padding: 18px; }
+  .card h3 { margin: 0 0 8px; font-size: 18px; color: var(--yellow); }
+  .card p { margin: 0; color: var(--subtext); font-size: 15px; }
+  .card code, td code, li code { font-family: var(--mono); font-size: 0.92em; color: var(--text);
+                                 background: var(--surface0); padding: 1px 5px; border-radius: 4px; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--surface0); vertical-align: top; }
+  th { color: var(--subtext); font-weight: 600; }
+  td:first-child { color: var(--subtext); white-space: nowrap; }
+  .note { color: var(--overlay); font-size: 14px; margin-top: 10px; }
+
+  ol.start { padding-left: 22px; color: var(--subtext); }
+  ol.start li { margin: 6px 0; }
+  ol.start b { color: var(--text); }
+
+  footer { margin-top: 48px; padding-top: 26px; padding-bottom: 40px; border-top: 1px solid var(--surface0); color: var(--overlay);
+           font-size: 14px; text-align: center; }
+  footer a { color: var(--subtext); }
+  @media (max-width: 560px) {
+    header.hero { padding-top: 40px; }
+    .wrap { padding-left: 16px; padding-right: 16px; }
+    .cmd { flex-direction: column; }
+    .cmd code { white-space: pre-wrap; word-break: break-all; }
+    .cmd button { border-left: 0; border-top: 1px solid var(--surface1); padding: 10px; }
+    td:first-child { white-space: normal; }
+  }
+</style>
+</head>
+<body>
+<header class="hero wrap">
+  <h1 class="name"><span class="prompt">&gt;_</span> termos</h1>
+  <p class="kind">a terminal OS</p>
+  <p class="tagline">Drop all desktop apps, use <code style="font-family:var(--mono)">tos</code>. A terminal workspace with a terminal file finder built in.</p>
+
+  <div class="install">
+    <label for="install-cmd">Install in one line, without sudo</label>
+    <div class="cmd">
+      <code id="install-cmd"><span class="dollar">$ </span>curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh</code>
+      <button type="button" id="copy" aria-label="Copy the install command">Copy</button>
+    </div>
+    <p class="then">Then run <code>tos</code>. Upgrade later with <code>tos update</code>.</p>
+    <p class="systems">Linux on x86_64 or arm64 (glibc 2.34+: Ubuntu 22.04+, Debian 12+, RHEL 9+) · macOS on Apple Silicon · MIT licence</p>
+  </div>
+
+  <div class="buttons">
+    <a class="primary" href="https://github.com/hugegene/termos">View on GitHub</a>
+    <a href="https://github.com/hugegene/termos/releases/latest">Latest release</a>
+    <a href="https://github.com/hugegene/termos#readme">Read the docs</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="demo">
+    <img src="demo-short.gif" width="832" height="618" loading="eager"
+         alt="termos in 30 seconds: a finder tab; Claude Code in a new tab writing server.py; back in the finder, / finds server.py; then a spreadsheet, a web page edited in Neovim, a video, a Word document, a PDF page, a CSV edited in the grid, and a picture">
+    <p>tos attach, the finder, Claude Code writing a server in a new tab, then every kind of file.</p>
+  </div>
+
+  <section>
+    <h2>What it does</h2>
+    <div class="features">
+      <div class="card">
+        <h3>Sessions that come back</h3>
+        <p>Tabs, split panes, scrolling and search, with zellij's keys and tmux's. Close the window or reboot: <code>tos</code> brings back the layout, the folders and the finder.</p>
+      </div>
+      <div class="card">
+        <h3>A terminal file finder</h3>
+        <p>Previews PDFs, images, video frames, Word, PowerPoint, spreadsheets, Markdown and HTML, right in the terminal. Edits text in Neovim and CSV in a grid.</p>
+      </div>
+      <div class="card">
+        <h3>AI agents side by side</h3>
+        <p>Run Claude Code or any agent in a tab, with the finder next to it. Its files show up straight away. <a href="https://github.com/hugegene/prbot">prbot</a> opens a Claude tab for each pull request that needs you.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Quick start</h2>
+    <ol class="start">
+      <li><b><code>tos</code></b> starts a session, or goes back to the one running.</li>
+      <li><b><code>Ctrl+t</code> <code>f</code></b> opens the finder on the folder you're in. The arrows move; <code>→</code> focuses the preview.</li>
+      <li><b><code>Enter</code></b> in the preview edits: <code>Ctrl+s</code> saves, <code>Ctrl+e</code> closes. <code>o</code> opens any file in its app.</li>
+      <li><b><code>Ctrl+t</code> <code>n</code></b> opens a new tab, for a shell, Claude Code or anything else.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Instead of…</h2>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Instead of</th><th>In tos</th></tr></thead>
+      <tbody>
+        <tr><td>Finder, Files or Explorer</td><td>browse, filter, rename, copy a path, move to the trash, open in its app</td></tr>
+        <tr><td>A PDF reader</td><td>a PDF's text, or its pages as images, with zoom</td></tr>
+        <tr><td>An image viewer</td><td>real images in Ghostty, kitty, WezTerm, iTerm2 and xterm (with sixel)</td></tr>
+        <tr><td>A video player, for a look</td><td>its length, size and a frame; <code>o</code> plays it</td></tr>
+        <tr><td>A text editor, for quick edits</td><td>Neovim inside the preview: <code>Ctrl+s</code> saves, <code>Ctrl+e</code> closes (nano without Neovim)</td></tr>
+        <tr><td>Excel or Numbers, for a quick look</td><td>spreadsheets as tables, and CSV edited in a grid</td></tr>
+        <tr><td>Word or PowerPoint, for reading</td><td>documents and slides shown as Markdown</td></tr>
+        <tr><td>tmux or zellij</td><td>tabs, splits and sessions that come back after a reboot, with zellij's keys and tmux's</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="note">Some jobs still need the app: tos can't save spreadsheets or Word files, and <code style="font-family:var(--mono)">o</code> opens them there.</p>
+  </section>
+</main>
+
+<footer class="wrap">
+  <p><a href="https://github.com/hugegene/termos">github.com/hugegene/termos</a> ·
+     <a href="https://github.com/hugegene/termos/blob/main/docs/cli/README.md">Command docs</a> ·
+     <a href="https://github.com/hugegene/termos/releases">Releases</a> ·
+     <a href="https://github.com/hugegene/prbot">prbot</a></p>
+  <p>termos is MIT licensed. Its terminal engine is a fork of Alacritty's, under Apache-2.0.</p>
+</footer>
+
+<script>
+  const button = document.getElementById("copy");
+  const command = "curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh";
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      button.textContent = "Copied";
+      button.classList.add("done");
+    } catch (e) {
+      // No clipboard access (an old browser, or not https): select the text instead.
+      const range = document.createRange();
+      range.selectNodeContents(document.getElementById("install-cmd"));
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      button.textContent = "Selected";
+    }
+    setTimeout(() => { button.textContent = "Copy"; button.classList.remove("done"); }, 2000);
+  });
+</script>
+</body>
+</html>

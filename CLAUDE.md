@@ -65,6 +65,8 @@ This applies to answers in chat and to everything in `docs/`.
   - `crates/alacritty_terminal`: our fork, unmodified so far; see its `UPSTREAM.md` and record every change there
   - `scripts/`: `install.sh` (the one-line installer) and `package.sh`, used by `.github/workflows/release.yml`.
     Pushing a tag `v<version>` publishes a release on GitHub (`hugegene/termos`, public, MIT).
+  - `site/`: the GitHub Pages site (`https://hugegene.github.io/termos/`), one page with the one-line install.
+    `.github/workflows/pages.yml` deploys it, copying in `docs/images/demo-short.gif` and `social-preview.png`.
   - `scripts/demo/`: `record.py` records the README's demos: `docs/images/demo-short.gif` (the top),
     `finder-demo.gif` (the full tour) and `finder-demo.webp`: attach, the finder, then Claude Code in a new tab.
     Re-run it after changing what the finder shows or its keys, with the user's media:

@@ -113,11 +113,13 @@ readers.
 
 ## Steps
 
-1. *(user)* Upload the social preview. *(Claude)* Check `og:image`, and refresh Telegram's preview through
-   @WebpageBot.
+1. ~~*(user)* Upload the social preview. *(Claude)* Check `og:image`.~~ **Done 2026-11-13:** GitHub's `og:image` (asked
+   as Slack's and Telegram's link bots) is now `repository-images.githubusercontent.com/…`, byte-for-byte
+   `docs/images/social-preview.png`. Refresh old previews with Telegram's @WebpageBot where the link was shared before.
 2. *(Claude, on request)* Draft the Show HN comment, the Reddit posts and the awesome-list lines.
 3. *(user)* Show HN, then one Reddit post a day, as in the example.
 4. *(Claude)* After two days, re-run the search baseline; a new finding.
 5. *(user)* Awesome-list pull requests and terminal.guide; pin the repo.
 6. *(Claude, with the user's go-ahead)* The Homebrew tap; then the Pages site, and *(user)* Search Console.
+   *2026-11-13:* the Pages site is being built, at the user's request ([plan](2026-11-13-github-pages.md)).
 7. *(Claude)* A month on, re-run the search baseline again; a new finding. Then decide on the AUR and crates.io.
