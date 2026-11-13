@@ -121,5 +121,6 @@ readers.
 4. *(Claude)* After two days, re-run the search baseline; a new finding.
 5. *(user)* Awesome-list pull requests and terminal.guide; pin the repo.
 6. *(Claude, with the user's go-ahead)* The Homebrew tap; then the Pages site, and *(user)* Search Console.
-   *2026-11-13:* the Pages site is being built, at the user's request ([plan](2026-11-13-github-pages.md)).
+   *2026-11-13:* the Pages site is live at https://hugegene.github.io/termos/, and it's the repo's homepage
+   ([plan](2026-11-13-github-pages.md)). Search Console is still to do (user).
 7. *(Claude)* A month on, re-run the search baseline again; a new finding. Then decide on the AUR and crates.io.

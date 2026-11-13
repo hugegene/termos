@@ -1,6 +1,6 @@
 # Plan: a GitHub Pages site for termos, featuring the one-line install
 
-**Status:** in progress · **Date:** 2026-11-13 · **Asked by:** the user ("create a github page, feature the one
+**Status:** done, live at https://hugegene.github.io/termos/ (see **Built**, at the end) · **Date:** 2026-11-13 · **Asked by:** the user ("create a github page, feature the one
 liner download") · **Part of:** [the marketing plan](2026-11-13-marketing.md) (layer 3, "stay findable")
 
 ## Decision
@@ -59,3 +59,28 @@ The site is also set as the repo's homepage.
 5. Set the repo's homepage to the site (`gh repo edit --homepage`), which shows beside the description.
 6. *(user, optional)* Add the site to Google Search Console and submit `sitemap.xml`.
 7. `CLAUDE.md`: add `site/` to the layout.
+
+## Built (2026-11-13)
+
+- **Turned on:** Pages with the "GitHub Actions" source (`gh api -X POST repos/hugegene/termos/pages -f
+  build_type=workflow`, as `hugegene`).
+- **Deployed:** pushing `3333ee5` ran the `Pages` workflow; its `deploy` job succeeded.
+- **Checked:** the live site, with curl:
+
+  ```
+  200 text/html 12767B          /termos/        <title>termos: a terminal OS and terminal workspace</title>
+  200 image/gif 784214B         /termos/demo-short.gif
+  200 image/png 220014B         /termos/social-preview.png   (the og:image)
+  200 text/plain 78B            /termos/robots.txt
+  200 application/xml 213B      /termos/sitemap.xml
+  ```
+
+  The page contains the install line, `…/releases/latest/download/install.sh | sh`.
+- **Layout:** checked in headless Chrome at 1280 and 390 pixels wide.
+  - The first try cut off `| sh` on desktop and touched the screen edges on a phone, because the hero's
+    `padding` shorthand cancelled the page container's side padding.
+  - Fixed: the box is wider, with 14 px text; on a phone the command wraps and the margins are 16 px.
+- **The repo's homepage** is set to the site.
+- **Not done (user):** Google Search Console and submitting `sitemap.xml`. Not checked: the copy button in a real
+  browser; headless Chrome can't use the clipboard.
+
