@@ -1,4 +1,4 @@
-# termos
+# termos: a terminal OS
 
 [![Latest release](https://img.shields.io/github/v/release/hugegene/termos)](https://github.com/hugegene/termos/releases/latest)
 [![MIT license](https://img.shields.io/github/license/hugegene/termos)](LICENSE)
@@ -7,9 +7,9 @@
 
 **Drop all desktop apps, use `tos`.**
 
-termos (`tos`) is a terminal workspace that does the jobs of your file manager, your file viewers and tmux.
-Browse, preview and edit files, keep sessions alive through reboots, and run AI coding agents side by side, all
-in one program.
+termos (`tos`), short for terminal OS, is a terminal workspace with a terminal file finder built in. It does the
+jobs of your file manager, your file viewers and tmux: browse, preview and edit files, keep sessions alive through
+reboots, and run AI coding agents side by side, all in one program.
 
 ![tos in 30 seconds: the finder showing a spreadsheet, editing a web page in Neovim, a video, a Word document, a PDF page, editing a CSV, and a picture; then Claude Code in a new tab writing server.py, which the finder lists](docs/images/demo-short.gif)
 
@@ -142,7 +142,7 @@ panes, swap layouts, pane groups and zellij's plugins.
 - **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to
   select and copy (OSC 52).
 
-## Finder
+## Terminal file finder
 
 - **Moving:** the arrows move; `←` and `→` move focus between the file list and the preview, and up and into
   folders. `Enter` in the list does what `→` does. `[` `]` page through a preview. `/` filters, `.` hides hidden

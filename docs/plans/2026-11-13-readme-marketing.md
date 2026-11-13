@@ -61,3 +61,31 @@ install it, and why to switch. Everything a visitor needs only once they're inte
    `GH_TOKEN=$(gh auth token --user hugegene) gh repo edit …`. The active `gh` account is the work one; don't
    switch it.
 6. The user uploads the social preview in Settings → General → Social preview.
+
+## Changed: found by "terminal OS", "terminal workspace" and "terminal file finder" (2026-11-13)
+
+**Asked by the user:** people searching for these three phrases should find the repo. **Baseline:** termos was in
+none of GitHub's top 100 for any of them, nor for "termos", which is Portuguese for "terms"
+([finding](../findings/2026-11-13-search-baseline.md)).
+
+**Done:** each phrase is placed once, where search engines read it, with no stuffing.
+- **The repo's description (GitHub, as `hugegene`):** "termos: a terminal OS and terminal workspace. Sessions,
+  tabs and splits, with a terminal file finder that previews and edits PDFs, images, videos, Office files and
+  CSV. Drop all desktop apps." GitHub search matches it, and it's Google's page title.
+- **Topics:** added `terminal-os`, `terminal-workspace`, `file-finder`, `terminal-file-manager`, `productivity`,
+  `developer-tools`, `ai-agents` and `workspace`, which makes 18.
+- **README:**
+  - the heading is `# termos: a terminal OS`
+  - the pitch says "short for terminal OS, is a terminal workspace with a terminal file finder built in"
+  - `## Finder` is now `## Terminal file finder`
+- **Releases:** `release.yml` titles them "termos X: a terminal OS". v0.4.3 was retitled to match and given notes.
+- **Social preview:** `docs/images/social-preview.png` now has "a terminal OS". The user uploads it by hand.
+
+**Not done (the user's part):**
+- **Stars and links:** a Show HN post, Reddit (r/commandline, r/rust, r/linux), lobste.rs, awesome lists
+  (awesome-tuis, awesome-cli-apps, awesome-rust, awesome-claude-code), and a Homebrew tap and an AUR package.
+- **Optional:** a GitHub Pages site set as the homepage.
+
+**To check:** re-run the baseline's searches in a day or two, and again after any launch, and record a new
+finding. **Estimate:** "terminal file finder" should reach the first page at once; "terminal OS" needs some
+stars (the leaders have 39–276); "terminal workspace" is led by zellij, with 36 thousand.
