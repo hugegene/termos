@@ -61,6 +61,9 @@ impl Server {
                     self.send_key(&key);
                 }
             }
+            // Ctrl+s saves in an editor tos started, and in the finder's grid; everywhere else it starts scroll
+            // mode, as in zellij. Plan: docs/plans/2026-11-13-editor-save-keys.md.
+            Mode::Modal(Modal::Normal) if ctrl(&key, 's') && self.focused_is_editor() => self.send_key(&key),
             Mode::Modal(m) => {
                 if !self.global_key(m, &key) {
                     self.mode_key(client, m, &key);

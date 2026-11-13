@@ -16,6 +16,7 @@ use alacritty_terminal::term::{Config, Term};
 use alacritty_terminal::tty;
 
 use super::Ev;
+use super::editor::Editor;
 use crate::os;
 use crate::protocol::PaneId;
 
@@ -73,6 +74,9 @@ pub struct TermPane {
     /// Cell size in pixels, from the attached terminal (8×16 if it's unknown). Programs that size images
     /// (chafa, zellij, yazi) read it from the PTY and from `CSI 14 t` / `CSI 16 t`.
     pub cell: (u16, u16),
+    /// Which editor this is, when tos started one here (the finder's, `tos edit`, a scrollback): Ctrl+s goes to
+    /// it rather than starting scroll mode.
+    pub editor: Option<Editor>,
 }
 
 fn window_size(cols: u16, rows: u16, cell: (u16, u16)) -> WindowSize {
@@ -113,7 +117,7 @@ impl TermPane {
         let sender = event_loop.channel();
         // Detached: when the loop ends, the PTY is dropped on its own thread (that drop waits for the child).
         drop(event_loop.spawn());
-        Ok(TermPane { term, sender, master, pid, command, title: None, cols, rows, cell })
+        Ok(TermPane { term, sender, master, pid, command, title: None, cols, rows, cell, editor: None })
     }
 
     pub fn write(&self, bytes: Vec<u8>) {

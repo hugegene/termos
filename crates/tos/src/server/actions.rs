@@ -194,7 +194,7 @@ impl Server {
                 pane_ref("terminal", id)
             }
             CliAction::Edit { file, line, dir, cwd } => {
-                let mut opts = editor::command(&file);
+                let (mut opts, kind) = editor::command(&file);
                 if let Some(line) = line {
                     // `+N file` opens at line N in Neovim, Vim, vi, nano, Emacs and most others.
                     let at = opts.command.len().saturating_sub(1);
@@ -204,6 +204,7 @@ impl Server {
                     opts.cwd = cwd;
                 }
                 let id = self.open_pane(dir, opts)?;
+                self.mark_editor(id, kind);
                 pane_ref("terminal", id)
             }
             CliAction::ClosePane { pane } => {

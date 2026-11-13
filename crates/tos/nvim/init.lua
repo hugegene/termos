@@ -2,7 +2,9 @@
 -- writes it to its data folder and runs: NVIM_APPNAME=tfinder-nvim nvim -u <that copy> <file>
 -- It began as the zellij prototype's config (now ~/tfinder/nvim/init.lua); the two can change separately.
 -- Goal: notepad-like. Opens ready to type; markdown stays rendered while you edit.
--- zellij owns Ctrl+S (scroll) and Ctrl+Q (quit zellij!), so saving/closing use Alt.
+-- Ctrl+S saves and Ctrl+E closes, the same on Mac and Linux: tos hands Ctrl+S to the editor it started (it
+-- starts scroll mode elsewhere, as in zellij), and nothing else takes Ctrl+E. Alt+S and Alt+Q still work, but
+-- need a Mac terminal's Option-as-Alt setting. Plan: docs/plans/2026-11-13-editor-save-keys.md.
 
 local o = vim.opt
 o.number = true
@@ -17,9 +19,11 @@ o.confirm = true          -- ask "save changes?" instead of refusing to quit
 o.undofile = true         -- undo survives closing the file
 o.showmode = true
 o.laststatus = 2
-o.statusline = " %f %m%r%=  Alt+s save  ·  Alt+q close  ·  Ctrl+z undo  %l:%c "
+o.statusline = " %f %m%r%=  Ctrl+s save  ·  Ctrl+e close  ·  Ctrl+z undo  %l:%c "
 
 local map = vim.keymap.set
+map({ "n", "i", "v" }, "<C-s>", "<Cmd>write<CR>", { desc = "Save" })
+map({ "n", "i", "v" }, "<C-e>", "<Cmd>confirm quitall<CR>", { desc = "Close (asks to save)" })
 map({ "n", "i", "v" }, "<M-s>", "<Cmd>write<CR>", { desc = "Save" })
 map({ "n", "i", "v" }, "<M-q>", "<Cmd>confirm quitall<CR>", { desc = "Close (asks to save)" })
 -- Ctrl+z would suspend Neovim and freeze the preview pane; make it undo instead.

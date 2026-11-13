@@ -1795,11 +1795,11 @@ fn csv_grid_editing() {
     s.wait_for("● unsaved");
     // Add a row under apple and name it kiwi.
     s.send(b"a0ekiwi\r");
-    // Alt+s saves; q closes.
-    s.send(b"\x1bs");
+    // Ctrl+s saves: tos hands it to the grid instead of starting scroll mode. Ctrl+e closes.
+    s.send(b"\x13");
     s.wait_for("saved ");
     assert_eq!(fs::read_to_string(files.join("data.csv")).unwrap(), "name,qty\napple,5\nkiwi,\npear,10\n");
-    s.send(b"q");
+    s.send(b"\x05");
     s.wait_until("grid closed", |t| !t.contains("▦ data.csv"));
 }
 
@@ -1917,17 +1917,56 @@ fn real_neovim() {
     let s = env.attach(110, 26);
     s.wait_for("a.md");
     s.send(b"\r\r");
-    s.wait_for("Alt+s save");
-    s.send(b"typed in nvim");
-    s.wait_for("typed in nvim");
+    s.wait_for("Ctrl+s save");
+    // Ctrl+s saves: tos hands it to Neovim instead of starting scroll mode.
+    s.send(b"saved line\x13");
+    wait("Ctrl+s saved the file", || {
+        fs::read_to_string(files.join("a.md")).unwrap().contains("saved line").then_some(())
+    });
+    s.send(b" more");
+    s.wait_for("saved line more");
     println!("{}", s.text());
-    // Alt+q asks to save; answer No.
-    s.send(b"\x1bq");
+    // Ctrl+e asks to save the rest; answer No.
+    s.send(b"\x05");
     s.wait_for("Save changes");
     s.send(b"n");
-    s.wait_until("nvim closed", |t| !t.contains("Alt+s save"));
-    assert_eq!(fs::read_to_string(files.join("a.md")).unwrap(), "# Hello\n");
+    s.wait_until("nvim closed", |t| !t.contains("Ctrl+s save"));
+    assert_eq!(fs::read_to_string(files.join("a.md")).unwrap(), "saved line# Hello\n");
     println!("{}", s.text());
+}
+
+/// Without Neovim, Enter opens `$VISUAL` (or `$EDITOR`, or vi), the editor's frame names its keys instead of
+/// Ctrl+s and Ctrl+e, and a tip says once how to get Neovim. Plan: docs/plans/2026-11-13-editor-save-keys.md.
+#[test]
+fn editing_without_neovim_names_the_editor() {
+    if ["/usr/bin/nvim", "/bin/nvim"].iter().any(|p| Path::new(p).exists()) {
+        eprintln!("skipped: Neovim is installed where this test's PATH can't leave it out");
+        return;
+    }
+    let mut env = Env::new("e2e-nonvim");
+    // No Neovim: a PATH without it, and a HOME without ~/.local/bin/nvim.
+    env.set("PATH", "/usr/bin:/bin");
+    let home = env.root.display().to_string();
+    env.set("HOME", &home);
+    // A stand-in editor: says which file it got and waits for a line.
+    let editor = env.root.join("ed");
+    fs::write(&editor, "#!/bin/sh\necho \"EDITING $1\"\nread line\n").unwrap();
+    Command::new("chmod").arg("755").arg(&editor).status().unwrap();
+    env.set("VISUAL", &editor.display().to_string());
+    let files = env.root.join("f");
+    fs::create_dir_all(&files).unwrap();
+    fs::write(files.join("a.md"), "# Hi\n").unwrap();
+    env.tos(&["start"]);
+    open_finder(&env, &files);
+    let s = env.attach(130, 30);
+    s.wait_for("a.md");
+    s.send(b"\r\r");
+    s.wait_for("EDITING");
+    s.wait_for("editing in ed: Neovim isn't installed");
+    s.wait_for("ed · its own keys save and close");
+    assert!(!s.text().contains("Ctrl+s save · Ctrl+e close"), "{}", s.text());
+    s.send(b"\r");
+    s.wait_until("the editor closed", |t| !t.contains("EDITING"));
 }
 
 /// The target name the installer picks on this machine.

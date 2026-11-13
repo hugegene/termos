@@ -41,6 +41,21 @@ enum Change {
     DeleteCol(usize, Vec<Option<String>>),
 }
 
+/// Ctrl+s (or Alt+s, which on a Mac needs the terminal's Option-as-Alt setting) saves.
+/// Plan: docs/plans/2026-11-13-editor-save-keys.md.
+fn is_save(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('s') && key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+}
+
+/// Ctrl+e (or Alt+q) closes; so does a plain q outside a cell being edited.
+fn is_close(key: &KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char('e') => key.modifiers.contains(KeyModifiers::CONTROL),
+        KeyCode::Char('q') => key.modifiers.contains(KeyModifiers::ALT),
+        _ => false,
+    }
+}
+
 /// What the finder should do after a key in the grid.
 pub enum Outcome {
     Stay,
@@ -115,10 +130,10 @@ impl Grid {
     pub fn open(path: &Path, delimiter: u8) -> Result<Grid, String> {
         let size = fs::metadata(path).map_err(|e| e.to_string())?.len();
         if size > MAX_BYTES {
-            return Err(format!("too big to edit as a grid ({} MB); E opens it in Neovim", size >> 20));
+            return Err(format!("too big to edit as a grid ({} MB); E opens it in your editor", size >> 20));
         }
         let bytes = fs::read(path).map_err(|e| e.to_string())?;
-        let text = String::from_utf8(bytes).map_err(|_| "not UTF-8 text; E opens it in Neovim".to_owned())?;
+        let text = String::from_utf8(bytes).map_err(|_| "not UTF-8 text; E opens it in your editor".to_owned())?;
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(delimiter)
             .has_headers(false)
@@ -129,7 +144,7 @@ impl Grid {
             let record = record.map_err(|e| format!("can't read it as CSV: {e}"))?;
             rows.push(record.iter().map(str::to_owned).collect::<Vec<_>>());
             if rows.len() > MAX_ROWS {
-                return Err(format!("more than {MAX_ROWS} rows; E opens it in Neovim"));
+                return Err(format!("more than {MAX_ROWS} rows; E opens it in your editor"));
             }
         }
         if rows.is_empty() {
@@ -419,9 +434,28 @@ impl Grid {
                 _ => Outcome::Stay,
             };
         }
+        let (save, close) = (is_save(key), is_close(key));
         if self.edit.is_some() {
-            self.edit_key(key);
+            if !save && !close {
+                self.edit_key(key);
+                return Outcome::Stay;
+            }
+            // Saving or closing keeps the cell being edited first.
+            self.keep_edit();
+        }
+        if save {
+            self.message = Some(if self.book.is_some() {
+                self.read_only_message()
+            } else {
+                match self.save() {
+                    Ok(()) => format!("saved {}", self.path.display()),
+                    Err(e) => format!("can't save: {e}"),
+                }
+            });
             return Outcome::Stay;
+        }
+        if close {
+            return self.close();
         }
         if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() {
             match key.code {
@@ -433,7 +467,7 @@ impl Grid {
                     return Outcome::Stay;
                 }
                 KeyCode::Char('o') if self.dirty => {
-                    self.message = Some("unsaved changes: Alt+s saves them first".into());
+                    self.message = Some("unsaved changes: Ctrl+s saves them first".into());
                     return Outcome::Stay;
                 }
                 KeyCode::Char('o') => return Outcome::OpenApp(self.path.clone()),
@@ -451,19 +485,13 @@ impl Grid {
                 KeyCode::Char('[') if book.current > 0 => return Outcome::Sheet(book.current - 1),
                 // Past the first or last sheet nothing happens; the title says which sheet this is.
                 KeyCode::Char('[' | ']') => return Outcome::Stay,
-                KeyCode::Char('s') if alt => {}
                 KeyCode::Char('e' | 'a' | 'A' | 'd' | 'D' | 'u') | KeyCode::Enter => {}
                 _ => return self.move_key(key, row, col, page, alt),
             }
-            let ext = self.path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
-            self.message = Some(format!("read-only: tos can't save .{ext}; o opens it in its default app"));
+            self.message = Some(self.read_only_message());
             return Outcome::Stay;
         }
         match key.code {
-            KeyCode::Char('s') if alt => match self.save() {
-                Ok(()) => self.message = Some(format!("saved {}", self.path.display())),
-                Err(e) => self.message = Some(format!("can't save: {e}")),
-            },
             _ if alt || key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return self.move_key(key, row, col, page, alt);
             }
@@ -509,12 +537,7 @@ impl Grid {
     /// Keys that move around or close, which work read-only too.
     fn move_key(&mut self, key: &KeyEvent, row: isize, col: isize, page: isize, alt: bool) -> Outcome {
         match key.code {
-            KeyCode::Char('q') if alt || key.modifiers.is_empty() => {
-                if !self.dirty {
-                    return Outcome::Close;
-                }
-                self.confirm_close = true;
-            }
+            KeyCode::Char('q') if key.modifiers.is_empty() => return self.close(),
             _ if alt || key.modifiers.contains(KeyModifiers::CONTROL) => {}
             KeyCode::Up | KeyCode::Char('k') => self.move_to(row - 1, col),
             KeyCode::Down | KeyCode::Char('j') => self.move_to(row + 1, col),
@@ -602,15 +625,34 @@ impl Grid {
         Outcome::Copy { text, what }
     }
 
+    /// Closes, or with unsaved changes asks whether to save first.
+    fn close(&mut self) -> Outcome {
+        if !self.dirty {
+            return Outcome::Close;
+        }
+        self.confirm_close = true;
+        Outcome::Stay
+    }
+
+    fn read_only_message(&self) -> String {
+        let ext = self.path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+        format!("read-only: tos can't save .{ext}; o opens it in its default app")
+    }
+
+    /// Ends editing a cell, keeping what was typed.
+    fn keep_edit(&mut self) {
+        if let Some(edit) = self.edit.take() {
+            self.set_cell(self.row, self.col, edit.text);
+        }
+    }
+
     fn edit_key(&mut self, key: &KeyEvent) {
         let Some(edit) = self.edit.as_mut() else { return };
         let len = edit.text.chars().count();
         let byte = |text: &str, i: usize| text.char_indices().nth(i).map_or(text.len(), |(b, _)| b);
         match key.code {
             KeyCode::Enter | KeyCode::Tab => {
-                let text = std::mem::take(&mut edit.text);
-                self.edit = None;
-                self.set_cell(self.row, self.col, text);
+                self.keep_edit();
                 if key.code == KeyCode::Tab {
                     self.move_to(self.row as isize, self.col as isize + 1);
                 }
@@ -711,7 +753,7 @@ impl Grid {
         } else if self.book.is_some() {
             "v select · y copy · o app · [ ] sheet · g/G top/bottom · q close"
         } else {
-            "e edit · v select · y copy · a/A add row/column · d/D delete · u undo · Alt+s save · o app · q close"
+            "e edit · v select · y copy · a/A add row/column · d/D delete · u undo · Ctrl+s save · o app · q close"
         }
     }
 
@@ -951,7 +993,58 @@ mod tests {
         type_keys(&mut g, "2");
         g.handle_key(&key(KeyCode::Enter));
         assert!(matches!(g.handle_key(&key(KeyCode::Char('o'))), Outcome::Stay));
-        assert_eq!(g.message.as_deref(), Some("unsaved changes: Alt+s saves them first"));
+        assert_eq!(g.message.as_deref(), Some("unsaved changes: Ctrl+s saves them first"));
+    }
+
+    fn with(code: char, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(code), modifiers)
+    }
+
+    #[test]
+    fn ctrl_s_saves_and_ctrl_e_closes() {
+        let (dir, mut g) = csv("a,b\n1,2\n");
+        let path = dir.path().join("t.csv");
+        // Ctrl+s while a cell is being edited keeps the cell, then saves.
+        g.handle_key(&key(KeyCode::Char('j')));
+        g.handle_key(&key(KeyCode::Char('e')));
+        type_keys(&mut g, "5");
+        assert!(matches!(g.handle_key(&with('s', KeyModifiers::CONTROL)), Outcome::Stay));
+        assert!(g.edit.is_none());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "a,b\n15,2\n");
+        assert!(g.message.as_deref().unwrap().starts_with("saved "));
+        // Saved, so Ctrl+e closes at once.
+        assert!(matches!(g.handle_key(&with('e', KeyModifiers::CONTROL)), Outcome::Close));
+    }
+
+    #[test]
+    fn ctrl_e_with_unsaved_changes_asks_and_alt_keys_still_work() {
+        let (dir, mut g) = csv("a\n1\n");
+        let path = dir.path().join("t.csv");
+        g.handle_key(&key(KeyCode::Char('j')));
+        g.handle_key(&key(KeyCode::Char('e')));
+        type_keys(&mut g, "2");
+        // Ctrl+e while editing keeps the cell too, and then asks, as there are changes.
+        assert!(matches!(g.handle_key(&with('e', KeyModifiers::CONTROL)), Outcome::Stay));
+        assert!(g.confirm_close);
+        assert!(matches!(g.handle_key(&key(KeyCode::Esc)), Outcome::Stay));
+        // Alt+s saves and Alt+q closes, as before.
+        g.handle_key(&with('s', KeyModifiers::ALT));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "a\n12\n");
+        assert!(matches!(g.handle_key(&with('q', KeyModifiers::ALT)), Outcome::Close));
+    }
+
+    #[test]
+    fn a_spreadsheet_says_read_only_on_ctrl_s_and_closes_on_ctrl_e() {
+        let sheet = finder_core::sheet::Sheet {
+            names: vec!["One".into()],
+            current: 0,
+            rows: vec![vec!["x".into()]],
+            truncated: false,
+        };
+        let mut g = Grid::from_sheet(Path::new("/tmp/book.xlsx"), sheet);
+        assert!(matches!(g.handle_key(&with('s', KeyModifiers::CONTROL)), Outcome::Stay));
+        assert!(g.message.as_deref().unwrap().starts_with("read-only: tos can't save .xlsx"));
+        assert!(matches!(g.handle_key(&with('e', KeyModifiers::CONTROL)), Outcome::Close));
     }
 
     #[test]

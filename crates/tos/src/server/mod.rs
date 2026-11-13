@@ -212,6 +212,8 @@ pub struct Server {
     quit: bool,
     had_tabs: bool,
     message: Option<(String, Instant)>,
+    /// The tip that Neovim isn't installed has been shown (once a session).
+    told_no_neovim: bool,
     last_click: Option<(Instant, PaneId, Point, u8)>,
     started: Instant,
     /// Draw a box around each pane (zellij's pane frames); off draws separator lines between panes.
@@ -327,6 +329,7 @@ impl Server {
             quit: false,
             had_tabs: false,
             message: None,
+            told_no_neovim: false,
             last_click: None,
             started: Instant::now(),
             frames: true,
@@ -1467,19 +1470,43 @@ impl Server {
     }
 
     fn open_editor(&mut self, finder_id: PaneId, path: PathBuf) {
-        let opts = editor::command(&path);
+        let (opts, kind) = editor::command(&path);
         let id = self.alloc_pane();
         match TermPane::spawn(id, 80, 24, self.cell_px, opts, &self.name, self.tx.clone()) {
             Ok(p) => {
                 self.panes.insert(id, Pane::Term(p));
                 if let Some(Pane::Finder(f)) = self.panes.get_mut(&finder_id) {
-                    f.editor = Some(id);
-                    f.editing = Some(path);
+                    f.editor_opened(id, path, kind.clone());
                 }
+                self.mark_editor(id, kind);
                 self.apply_layout();
             }
             Err(e) => self.flash(format!("can't start the editor: {e}")),
         }
+    }
+
+    /// Notes that pane `id` is an editor tos started, so Ctrl+s goes to it. The first time in a session that
+    /// Neovim was missing, says how to get it.
+    pub(super) fn mark_editor(&mut self, id: PaneId, kind: editor::Editor) {
+        if let editor::Editor::Fallback(name) = &kind
+            && !self.told_no_neovim
+        {
+            self.told_no_neovim = true;
+            self.flash(editor::missing_neovim(name));
+        }
+        if let Some(Pane::Term(p)) = self.panes.get_mut(&id) {
+            p.editor = Some(kind);
+        }
+    }
+
+    /// Ctrl+s goes to the focused pane instead of starting scroll mode: it's an editor tos started, or a finder
+    /// with its editor or grid open.
+    pub(super) fn focused_is_editor(&self) -> bool {
+        let Some(id) = self.focused_pane() else { return false };
+        if let Some((fid, _)) = self.finder_of(id) {
+            return matches!(self.panes.get(&fid), Some(Pane::Finder(f)) if f.is_editing());
+        }
+        matches!(self.panes.get(&id), Some(Pane::Term(p)) if p.editor.is_some())
     }
 
     fn pane_event(&mut self, id: PaneId, event: TermEvent) {

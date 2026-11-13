@@ -165,7 +165,7 @@ impl Server {
             self.flash(format!("can't write the scrollback: {e}"));
             return;
         }
-        let mut opts = editor::command(&path);
+        let (mut opts, kind) = editor::command(&path);
         opts.cwd = opts.cwd.or(cwd);
         let editor = match self.spawn_term(opts) {
             Ok(e) => e,
@@ -181,6 +181,7 @@ impl Server {
                 tab.focus = editor;
             }
         }
+        self.mark_editor(editor, kind);
         self.pane_names.insert(editor, "scrollback".into());
         self.scrollback.insert(editor, (id, path));
         self.focus_changed(Some(id), Some(editor));

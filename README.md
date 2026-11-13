@@ -34,7 +34,7 @@ tos                  # start a session, or go back to the one running
 | A PDF reader | a PDF's text, or its pages as images, with zoom |
 | An image viewer | real images in Ghostty, kitty, WezTerm, iTerm2 and xterm (with sixel) |
 | A video player, for a look | its length, size and a frame; `o` plays it |
-| A text editor, for quick edits | Neovim inside the preview, `Alt+s` saves |
+| A text editor, for quick edits | Neovim inside the preview: `Ctrl+s` saves, `Ctrl+e` closes |
 | Excel or Numbers, for a quick look | spreadsheets as tables, and CSV edited in a grid |
 | Word or PowerPoint, for reading | documents and slides shown as Markdown |
 | tmux or zellij | tabs, splits and sessions that come back after a reboot, with zellij's keys and tmux's |
@@ -80,7 +80,8 @@ Upgrade with `tos update`.
 - **Upgrading:** `tos update`. Each version lives in `~/.local/share/termos/versions/`, `~/.local/bin/tos`
   links to the current one, and the one before is kept. Sessions show a note in the status bar when a newer
   release is out (at most one check a day; `TOS_NO_UPDATE_CHECK=1` turns it off).
-- **Optional programs:** Neovim, poppler (PDF), ffmpeg (video previews), mpv (playing videos) and gio or trash.
+- **Optional programs:** Neovim (editing text), poppler (PDF), ffmpeg (video previews), mpv (playing videos) and
+  gio or trash.
   `tos` names the package when one is missing.
 
 </details>
@@ -128,7 +129,7 @@ frame like zellij's:
 | `Ctrl+t` | **tab:** arrows switch, `n` new, `x` close, `r` rename, `1`–`9`, `Tab` last, `s` sync, `b` break out, `f` finder |
 | `Ctrl+n` | **resize:** arrows/`hjkl` grow that side, `HJKL` shrink it, `+` `-` |
 | `Ctrl+h` | **move:** arrows/`hjkl` swap the pane with its neighbour, `n` `p` |
-| `Ctrl+s` | **scroll:** `↓↑` `d` `u` `PgDn` `PgUp`, `s` search (`n` `p` `c` `w` `o`), `e` edit in the editor, `v` select with vi keys |
+| `Ctrl+s` | **scroll:** `↓↑` `d` `u` `PgDn` `PgUp`, `s` search (`n` `p` `c` `w` `o`), `e` edit in the editor, `v` select with vi keys. In an editor tos started, `Ctrl+s` saves instead |
 | `Ctrl+o` | **session:** `d` detach |
 | `Ctrl+b` | **tmux keys:** `c` `%` `"` `,` `[` `o` `n` `p` `z` `x` `d`, plus `f` finder |
 | `Ctrl+g` | **lock:** all keys go to the program until `Ctrl+g` again |
@@ -146,8 +147,11 @@ panes, swap layouts, pane groups and zellij's plugins.
 - **Moving:** the arrows move; `←` and `→` move focus between the file list and the preview, and up and into
   folders. `Enter` in the list does what `→` does. `[` `]` page through a preview. `/` filters, `.` hides hidden
   files (shown by default).
-- **Editing:** `Enter` in the preview edits in tos: Neovim for text (`Alt+s` save, `Alt+q` close), the grid for
-  CSV and spreadsheets. Where tos can't edit a file, the caption doesn't offer `Enter`.
+- **Editing:** `Enter` in the preview edits in tos: Neovim for text, the grid for CSV and spreadsheets. In both,
+  `Ctrl+s` saves and `Ctrl+e` closes, the same on Mac and Linux (`Alt+s` and `Alt+q` work too, but on a Mac they
+  need the terminal's Option-as-Alt setting). Where tos can't edit a file, the caption doesn't offer `Enter`.
+- **Without Neovim:** `Enter` opens `$VISUAL`, `$EDITOR` or `vi` instead, with its own keys (for vi, `Esc` `:wq`),
+  and tos says once how to install Neovim. `TOS_EDITOR` picks any editor.
 - **Opening in an app:** `o` opens any file or folder in its default app (`xdg-open`, or `open` on macOS), on the
   screen of the terminal you pressed it in.
 - **The menu:** right-click a file, or press `m`, to rename it, copy its name or path, open it in its app, or
@@ -156,7 +160,7 @@ panes, swap layouts, pane groups and zellij's plugins.
 **Images** show for real in terminals that support kitty, iTerm2 or sixel images (Ghostty, kitty,
 WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one with
 `TOS_IMAGES=kitty|iterm2|sixel|blocks`. Enter in a `.csv`/`.tsv` preview opens a **grid editor**: arrows move,
-`e` edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Alt+s` saves and `q` closes.
+`e` edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Ctrl+s` saves and `q` or `Ctrl+e` closes.
 `v` (or `V` for whole rows, or a mouse drag) selects a range of cells, and `y` copies it as tab-separated text,
 which spreadsheet apps paste as cells. `E` opens any text file in Neovim.
 

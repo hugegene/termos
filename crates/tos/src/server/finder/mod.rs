@@ -30,6 +30,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
 use super::Ev;
+use super::editor::Editor;
 use super::layout::inner;
 use super::pane::TermPane;
 use super::render::{Cursor, TermDecor, draw_frame, draw_term, fill, frame_title_room, put_str};
@@ -176,6 +177,9 @@ pub struct Finder {
     seq: Arc<AtomicU64>,
     /// The embedded editor's pane, while editing.
     pub editor: Option<PaneId>,
+    /// Which editor that is, and the caption naming its keys ("editing · Ctrl+s save · Ctrl+e close").
+    editor_kind: Option<Editor>,
+    editor_caption: String,
     /// The CSV grid editor, while editing a CSV file, or a spreadsheet shown in the grid read-only.
     grid: Option<grid::Grid>,
     /// The sheet a spreadsheet's preview shows (`[` and `]`), from 0. Back to 0 for each new file.
@@ -409,6 +413,8 @@ impl Finder {
             cell_px: super::images::DEFAULT_CELL,
             seq: seq.clone(),
             editor: None,
+            editor_kind: None,
+            editor_caption: String::new(),
             grid: None,
             sheet: 0,
             editing: None,
@@ -801,9 +807,23 @@ impl Finder {
         self.edit_from_list
     }
 
+    /// The editor started in pane `id` on `path`; `kind` says which, for the hints.
+    pub fn editor_opened(&mut self, id: PaneId, path: PathBuf, kind: Editor) {
+        self.editor = Some(id);
+        self.editing = Some(path);
+        self.editor_caption = format!("editing · {}", kind.keys());
+        self.editor_kind = Some(kind);
+    }
+
+    /// The editor or the grid is open, so Ctrl+s saves rather than starting scroll mode.
+    pub fn is_editing(&self) -> bool {
+        self.editor.is_some() || self.grid.is_some()
+    }
+
     /// The editor closed: show the (possibly changed) file again.
     pub fn editor_closed(&mut self) {
         self.editor = None;
+        self.editor_kind = None;
         self.editing = None;
         self.reload();
         self.request_preview(true);
@@ -1215,13 +1235,13 @@ impl Finder {
     /// The status bar's caption, for the file list or (with `preview`) the preview pane. Only keys that work here, the most useful first, as the status bar drops hints
     /// from the end when there isn't room. No label, and nothing for keys every list and viewer has (arrows to move
     /// and scroll). Plan: docs/plans/2026-11-11-grid-copy-and-open-in-app.md (E, K).
-    pub fn hint(&self, preview: bool) -> &'static str {
+    pub fn hint(&self, preview: bool) -> &str {
         if let Some(h) = self.popup_hint() {
             return h;
         } else if let Some(g) = &self.grid {
             return g.hint();
         } else if self.editor.is_some() {
-            return "editing · Alt+s save · Alt+q close";
+            return &self.editor_caption;
         } else if self.filtering {
             return "filter: type to narrow · Enter keep · Esc clear";
         } else if !preview {
@@ -1321,7 +1341,8 @@ impl Finder {
             return None;
         }
         if let Some(editor) = editor {
-            let hint = "Alt+s save · Alt+q close";
+            let hint = self.editor_kind.as_ref().map(Editor::keys).unwrap_or_default();
+            let hint = hint.as_str();
             if self.frames {
                 draw_frame(buf, preview, &format!("✎ {name}"), hint, frame_style(preview_active));
             } else {

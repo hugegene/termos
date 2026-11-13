@@ -98,7 +98,8 @@ Today, step 1 reads `/proc/4242/cwd`, which doesn't exist on macOS. The tab fall
 - [ ] **On the user's Mac, by hand:**
   - Images in iTerm2 and Ghostty: does `poll()` on stdin work for the terminal query (`client.rs:425`)? If not,
     use `select()`.
-  - The Option key as Alt (`Alt+s`, `Alt+q` in the finder).
+  - The Option key as Alt (`Alt+s`, `Alt+q` in the finder). *2026-11-13:* the finder now saves with `Ctrl+s` and
+    closes with `Ctrl+e`, which need no setting ([plan](2026-11-13-editor-save-keys.md)); check those instead.
   - OSC 52 copy in iTerm2.
   - Trash.
   - Tab names follow `cd`.
