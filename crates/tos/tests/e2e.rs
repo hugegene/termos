@@ -70,6 +70,8 @@ struct Env {
     vars: Vec<(String, String)>,
     /// The cell size in pixels that the test terminal reports.
     cell: (u16, u16),
+    /// Whether the test terminal speaks the kitty keyboard protocol, as Ghostty does.
+    kitty_keys: bool,
 }
 
 impl Env {
@@ -90,7 +92,7 @@ impl Env {
             // No requests to GitHub from tests; `update_notice_shows_a_newer_release` turns it back on.
             ("TOS_NO_UPDATE_CHECK".to_owned(), "1".to_owned()),
         ];
-        Env { _dir: dir, root, sock, session: session.to_owned(), vars, cell: (8, 16) }
+        Env { _dir: dir, root, sock, session: session.to_owned(), vars, cell: (8, 16), kitty_keys: false }
     }
 
     fn set(&mut self, key: &str, value: &str) {
@@ -163,7 +165,8 @@ impl Screen {
     fn spawn(env: &Env, args: &[&str], cols: u16, rows: u16) -> Screen {
         let proxy = Proxy::default();
         let size = Size(usize::from(cols), usize::from(rows));
-        let term = Arc::new(FairMutex::new(Term::new(Config::default(), &size, proxy.clone())));
+        let config = Config { kitty_keyboard: env.kitty_keys, ..Config::default() };
+        let term = Arc::new(FairMutex::new(Term::new(config, &size, proxy.clone())));
         let mut vars: HashMap<String, String> = env.vars.iter().cloned().collect();
         vars.insert("TERM".into(), "xterm-256color".into());
         let options = tty::Options {
@@ -865,6 +868,30 @@ fn panes_get_the_terminal_cell_size() {
     // `CSI 14 t` asks for the text area in pixels; the answer comes back as typed input, echoed as `^[[4;…t`.
     s.send(b"printf '\\033[14t'\r");
     s.wait_for(&format!("[4;{};{}t", rows * 21, cols * 10));
+}
+
+/// A program that asks for the kitty keyboard protocol tells Shift+Enter from Enter; without it, Shift+Enter is
+/// an Enter. Plan: docs/plans/2026-11-17-kitty-keys-to-programs.md.
+#[test]
+fn kitty_keys_reach_programs_that_ask() {
+    let mut env = Env::new("e2e-kitty-keys");
+    env.kitty_keys = true;
+    let s = env.attach(100, 30);
+    s.wait_for("$");
+    // The program pushes flag 1, asks for its flags, then shows the next 12 bytes it reads: the answer and the key.
+    // The quotes split `ready` and `got:` so the typed command doesn't match them.
+    s.send(
+        b"stty -icanon -echo -icrnl; printf '\\033[>1u\\033[?u'; echo re''ady; printf 'go''t:'; \
+          dd bs=1 count=12 2>/dev/null | cat -v; echo; printf '\\033[<u'; stty sane\r",
+    );
+    s.wait_for("ready");
+    s.send(b"\x1b[13;2u");
+    s.wait_for("got:^[[?1u^[[13;2u");
+    // The flags were popped above, so Shift+Enter arrives as Enter.
+    s.send(b"stty -icanon -echo -icrnl; echo st''ep2; printf 'go''t2:'; dd bs=1 count=1 2>/dev/null | cat -v; echo; stty sane\r");
+    s.wait_for("step2");
+    s.send(b"\x1b[13;2u");
+    s.wait_for("got2:^M");
 }
 
 #[test]

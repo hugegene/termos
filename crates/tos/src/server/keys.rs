@@ -377,8 +377,9 @@ impl Server {
             return Some(Modal::Normal);
         }
         if ctrl(key, 'b') {
-            if let Some(p) = self.typing_target().and_then(|id| self.term(id)) {
-                p.write(vec![0x02]);
+            // Encoded for the program, which may have asked for the kitty keyboard protocol.
+            if let Some(id) = self.typing_target() {
+                self.type_into(id, key);
             }
             return Some(Modal::Normal);
         }

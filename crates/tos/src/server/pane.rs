@@ -79,6 +79,12 @@ pub struct TermPane {
     pub editor: Option<Editor>,
 }
 
+/// Each pane's terminal. Programs that ask for the kitty keyboard protocol get it, and `input::encode_key`
+/// follows the flags they push. Plan: docs/plans/2026-11-17-kitty-keys-to-programs.md.
+fn term_config() -> Config {
+    Config { kitty_keyboard: true, ..Config::default() }
+}
+
 fn window_size(cols: u16, rows: u16, cell: (u16, u16)) -> WindowSize {
     // Never zero: some programs divide by it.
     WindowSize { num_cols: cols, num_lines: rows, cell_width: cell.0.max(1), cell_height: cell.1.max(1) }
@@ -97,7 +103,7 @@ impl TermPane {
         let (cols, rows) = (cols.max(2), rows.max(1));
         let proxy = EventProxy { id, tx };
         let size = Size { cols: usize::from(cols), lines: usize::from(rows) };
-        let term = Arc::new(FairMutex::new(Term::new(Config::default(), &size, proxy.clone())));
+        let term = Arc::new(FairMutex::new(Term::new(term_config(), &size, proxy.clone())));
 
         let command = opts.command.clone();
         let mut env = opts.env;
@@ -304,4 +310,56 @@ fn sgr_color(c: alacritty_terminal::vte::ansi::Color, base: u8) -> Option<String
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use alacritty_terminal::term::TermMode;
+    use alacritty_terminal::vte::ansi::Processor;
+
+    use super::*;
+
+    /// What the terminal writes back to the program, such as answers to queries.
+    #[derive(Clone, Default)]
+    struct Replies(Arc<Mutex<Vec<String>>>);
+
+    impl EventListener for Replies {
+        fn send_event(&self, event: Event) {
+            if let Event::PtyWrite(text) = event {
+                self.0.lock().unwrap().push(text);
+            }
+        }
+    }
+
+    struct Size;
+
+    impl Dimensions for Size {
+        fn total_lines(&self) -> usize {
+            24
+        }
+        fn screen_lines(&self) -> usize {
+            24
+        }
+        fn columns(&self) -> usize {
+            80
+        }
+    }
+
+    /// A program can turn on the kitty keyboard protocol, read its flags back, and push more often than the
+    /// stack holds.
+    #[test]
+    fn panes_speak_the_kitty_keyboard_protocol() {
+        let replies = Replies::default();
+        let mut term = Term::new(term_config(), &Size, replies.clone());
+        let mut parser: Processor = Processor::new();
+        parser.advance(&mut term, b"\x1b[>1u\x1b[?u");
+        assert!(term.mode().contains(TermMode::DISAMBIGUATE_ESC_CODES));
+        assert_eq!(*replies.0.lock().unwrap(), ["\x1b[?1u"]);
+        // A full stack drops its oldest entry. Upstream panicked here: see the fork's UPSTREAM.md.
+        parser.advance(&mut term, "\x1b[>1u".repeat(4100).as_bytes());
+        parser.advance(&mut term, b"\x1b[<10000u");
+        assert!(!term.mode().intersects(TermMode::KITTY_KEYBOARD_PROTOCOL));
+    }
 }

@@ -19,4 +19,6 @@ This folder is our fork of `alacritty_terminal`, the terminal-emulation library 
 
 ## Changes from upstream
 
-None yet.
+| Date | File | Change | Why |
+|---|---|---|---|
+| 2026-11-17 | `src/term/mod.rs` | `push_keyboard_mode` removes the oldest entry of `keyboard_mode_stack` when the stack is full; upstream removed from `title_stack` | With no title pushed, `title_stack.remove(0)` panics. A program that pushes 4096 keyboard modes would kill its pane's thread. `tos` turns on `kitty_keyboard` from this date, which makes the code reachable. Plan: `docs/plans/2026-11-17-kitty-keys-to-programs.md`. Generic: send upstream |

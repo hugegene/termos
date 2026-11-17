@@ -1,8 +1,9 @@
 //! Turns key, paste, focus and mouse events into the bytes a program in a pane expects.
 //!
-//! This is xterm's legacy encoding: modifier parameters (`CSI 1;5A` for Ctrl+Up), application cursor
-//! keys, bracketed paste, focus reports, and SGR or X10 mouse reports. The kitty keyboard protocol comes
-//! later; until then our terminal engine tells programs it isn't available.
+//! Keys use xterm's legacy encoding: modifier parameters (`CSI 1;5A` for Ctrl+Up) and application cursor
+//! keys. A program that turned on the kitty keyboard protocol gets its encoding instead, so it can tell
+//! Shift+Enter, Ctrl+Enter and Ctrl+Shift+letter apart. Plan: docs/plans/2026-11-17-kitty-keys-to-programs.md.
+//! Also bracketed paste, focus reports, and SGR or X10 mouse reports.
 
 use alacritty_terminal::term::TermMode;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -51,10 +52,93 @@ fn with_alt(alt: bool, mut bytes: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
+/// The kitty protocol's modifier value: 1 + Shift(1) + Alt(2) + Ctrl(4) + Super(8) + Hyper(16) + Meta(32).
+fn kitty_modifiers(m: KeyModifiers) -> u8 {
+    [
+        (KeyModifiers::SHIFT, 1),
+        (KeyModifiers::ALT, 2),
+        (KeyModifiers::CONTROL, 4),
+        (KeyModifiers::SUPER, 8),
+        (KeyModifiers::HYPER, 16),
+        (KeyModifiers::META, 32),
+    ]
+    .iter()
+    .filter(|(flag, _)| m.contains(*flag))
+    .fold(1, |sum, (_, bit)| sum + bit)
+}
+
+/// A key for a program that turned on the kitty keyboard protocol (<https://sw.kovidgoyal.net/kitty/keyboard-protocol/>),
+/// or `None` where the program's flags keep the legacy encoding:
+/// - text typed without Ctrl or Alt, and Enter, Tab and Backspace without modifiers, unless the program asked for
+///   every key as an escape code;
+/// - Shift+Tab (`CSI Z`), arrows, Home/End, PgUp/PgDn, Insert/Delete and the F keys but F3, whose legacy forms
+///   already carry modifiers.
+///
+/// Only presses reach here: `tos` asks its own terminal for disambiguation alone, so it never sees repeats or
+/// releases to report.
+fn kitty_key(key: &KeyEvent, mode: TermMode) -> Option<Vec<u8>> {
+    let all_keys = mode.contains(TermMode::REPORT_ALL_KEYS_AS_ESC);
+    let mut m = key.modifiers;
+    let types_text = !m.intersects(
+        KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META,
+    );
+    let (code, text) = match key.code {
+        KeyCode::Char(c) => {
+            if types_text && !all_keys {
+                return None;
+            }
+            // The key is its unshifted character: Ctrl+Shift+Z is `z` with Shift.
+            let mut lower = c.to_lowercase();
+            let base = match (lower.next(), lower.next()) {
+                (Some(l), None) if l != c => {
+                    m |= KeyModifiers::SHIFT;
+                    l
+                }
+                _ => c,
+            };
+            (base, (types_text && mode.contains(TermMode::REPORT_ASSOCIATED_TEXT)).then_some(c))
+        }
+        KeyCode::Enter | KeyCode::Tab | KeyCode::Backspace if m.is_empty() && !all_keys => return None,
+        KeyCode::BackTab if (m - KeyModifiers::SHIFT).is_empty() && !all_keys => return None,
+        KeyCode::Enter => ('\r', None),
+        KeyCode::Tab => ('\t', None),
+        KeyCode::BackTab => {
+            m |= KeyModifiers::SHIFT;
+            ('\t', None)
+        }
+        KeyCode::Backspace => ('\x7f', None),
+        KeyCode::Esc => ('\x1b', None),
+        // The legacy `CSI 1;<mods>R` would read as a cursor position report.
+        KeyCode::F(3) => return Some(tilde_key(13, kitty_modifiers(m))),
+        _ => return None,
+    };
+    let mods = kitty_modifiers(m);
+    let mut out = format!("\x1b[{}", u32::from(code));
+    if mode.contains(TermMode::REPORT_ALTERNATE_KEYS) && m.contains(KeyModifiers::SHIFT) && code.is_ascii_lowercase() {
+        out += &format!(":{}", u32::from(code.to_ascii_uppercase()));
+    }
+    if mods > 1 || text.is_some() {
+        out.push(';');
+        if mods > 1 {
+            out += &mods.to_string();
+        }
+    }
+    if let Some(t) = text {
+        out += &format!(";{}", u32::from(t));
+    }
+    out.push('u');
+    Some(out.into_bytes())
+}
+
 /// Encodes a key press for a program whose terminal is in `mode`. Releases produce nothing.
 pub fn encode_key(key: &KeyEvent, mode: TermMode) -> Option<Vec<u8>> {
     if key.kind == KeyEventKind::Release {
         return None;
+    }
+    if mode.intersects(TermMode::KITTY_KEYBOARD_PROTOCOL)
+        && let Some(bytes) = kitty_key(key, mode)
+    {
+        return Some(bytes);
     }
     let m = key.modifiers;
     let alt = m.contains(KeyModifiers::ALT);
@@ -213,6 +297,69 @@ mod tests {
         assert_eq!(key(KeyCode::F(1), KeyModifiers::NONE), b"\x1bOP");
         assert_eq!(key(KeyCode::F(5), KeyModifiers::NONE), b"\x1b[15~");
         assert_eq!(key(KeyCode::F(12), KeyModifiers::SHIFT), b"\x1b[24;2~");
+    }
+
+    fn kitty(code: KeyCode, m: KeyModifiers, mode: TermMode) -> Vec<u8> {
+        encode_key(&KeyEvent::new(code, m), mode).unwrap()
+    }
+
+    #[test]
+    fn kitty_flag_1_tells_modified_keys_apart() {
+        let k = |code, m| kitty(code, m, TermMode::DISAMBIGUATE_ESC_CODES);
+        let (none, ctrl, shift, alt) =
+            (KeyModifiers::NONE, KeyModifiers::CONTROL, KeyModifiers::SHIFT, KeyModifiers::ALT);
+        // The rows of docs/findings/2026-11-17-agent-cli-key-clashes.md.
+        assert_eq!(k(KeyCode::Enter, shift), b"\x1b[13;2u");
+        assert_eq!(k(KeyCode::Enter, ctrl), b"\x1b[13;5u");
+        assert_eq!(k(KeyCode::Char('z'), ctrl | shift), b"\x1b[122;6u");
+        assert_eq!(k(KeyCode::Char('Z'), ctrl | shift), b"\x1b[122;6u");
+        assert_eq!(k(KeyCode::Char('b'), ctrl | shift), b"\x1b[98;6u");
+        assert_eq!(k(KeyCode::Backspace, ctrl), b"\x1b[127;5u");
+        assert_eq!(k(KeyCode::Char('m'), ctrl), b"\x1b[109;5u");
+        assert_eq!(k(KeyCode::Char('='), ctrl), b"\x1b[61;5u");
+        // Other keys with Ctrl or Alt, Esc, and F3.
+        assert_eq!(k(KeyCode::Char('c'), ctrl), b"\x1b[99;5u");
+        assert_eq!(k(KeyCode::Char('x'), alt), b"\x1b[120;3u");
+        assert_eq!(k(KeyCode::Char(' '), ctrl), b"\x1b[32;5u");
+        assert_eq!(k(KeyCode::Esc, none), b"\x1b[27u");
+        assert_eq!(k(KeyCode::Enter, alt), b"\x1b[13;3u");
+        assert_eq!(k(KeyCode::Tab, ctrl), b"\x1b[9;5u");
+        assert_eq!(k(KeyCode::BackTab, ctrl | shift), b"\x1b[9;6u");
+        assert_eq!(k(KeyCode::F(3), none), b"\x1b[13~");
+        assert_eq!(k(KeyCode::F(3), ctrl), b"\x1b[13;5~");
+        // Unchanged: text, Enter, Tab and Backspace without modifiers, Shift+Tab, arrows and other F keys.
+        assert_eq!(k(KeyCode::Char('a'), none), b"a");
+        assert_eq!(k(KeyCode::Char('A'), shift), b"A");
+        assert_eq!(k(KeyCode::Char(' '), shift), b" ");
+        assert_eq!(k(KeyCode::Enter, none), b"\r");
+        assert_eq!(k(KeyCode::Tab, none), b"\t");
+        assert_eq!(k(KeyCode::Backspace, none), [0x7f]);
+        assert_eq!(k(KeyCode::BackTab, shift), b"\x1b[Z");
+        assert_eq!(k(KeyCode::Left, ctrl), b"\x1b[1;5D");
+        assert_eq!(k(KeyCode::F(5), none), b"\x1b[15~");
+    }
+
+    #[test]
+    fn kitty_flags_8_4_and_16() {
+        let (none, shift) = (KeyModifiers::NONE, KeyModifiers::SHIFT);
+        let all = TermMode::DISAMBIGUATE_ESC_CODES | TermMode::REPORT_ALL_KEYS_AS_ESC;
+        assert_eq!(kitty(KeyCode::Char('a'), none, all), b"\x1b[97u");
+        assert_eq!(kitty(KeyCode::Char('A'), shift, all), b"\x1b[97;2u");
+        assert_eq!(kitty(KeyCode::Enter, none, all), b"\x1b[13u");
+        assert_eq!(kitty(KeyCode::BackTab, shift, all), b"\x1b[9;2u");
+        let alternates = all | TermMode::REPORT_ALTERNATE_KEYS;
+        assert_eq!(kitty(KeyCode::Char('A'), shift, alternates), b"\x1b[97:65;2u");
+        let text = all | TermMode::REPORT_ASSOCIATED_TEXT;
+        assert_eq!(kitty(KeyCode::Char('a'), none, text), b"\x1b[97;;97u");
+        assert_eq!(kitty(KeyCode::Char('A'), shift, text), b"\x1b[97;2;65u");
+        assert_eq!(kitty(KeyCode::Char('a'), KeyModifiers::CONTROL, text), b"\x1b[97;5u");
+    }
+
+    #[test]
+    fn without_kitty_flags_modifiers_on_enter_are_dropped() {
+        assert_eq!(key(KeyCode::Enter, KeyModifiers::SHIFT), b"\r");
+        assert_eq!(key(KeyCode::Enter, KeyModifiers::CONTROL), b"\r");
+        assert_eq!(key(KeyCode::Char('z'), KeyModifiers::CONTROL | KeyModifiers::SHIFT), [0x1a]);
     }
 
     #[test]

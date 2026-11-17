@@ -1,3 +1,5 @@
+// Modified by termos (2026-11-17): `push_keyboard_mode` trims `keyboard_mode_stack`, not `title_stack`, when full.
+
 //! Exports the `Term` type which is a high-level API for the Grid.
 
 use std::ops::{Index, IndexMut, Range};
@@ -1293,7 +1295,8 @@ impl<T: EventListener> Handler for Term<T> {
         trace!("Pushing `{mode:?}` keyboard mode into the stack");
 
         if self.keyboard_mode_stack.len() >= KEYBOARD_MODE_STACK_MAX_DEPTH {
-            let removed = self.title_stack.remove(0);
+            // termos: upstream removed from `title_stack` here, which panics when no title was pushed.
+            let removed = self.keyboard_mode_stack.remove(0);
             trace!(
                 "Removing '{removed:?}' from bottom of keyboard mode stack that exceeds its \
                  maximum depth"

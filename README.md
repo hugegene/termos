@@ -142,6 +142,11 @@ panes, swap layouts, pane groups and zellij's plugins.
 `n` `p` `z` `x` `d`, plus `f` finder), add zellij's binding to `~/.config/termos/config.kdl`; see
 [key bindings](docs/cli.md#key-bindings-configtermosconfigkdl).
 
+Programs that ask for the kitty keyboard protocol get it, so modified keys reach them unchanged. For example,
+Shift+Enter in Claude Code, Codex, Cursor's CLI or `agy` adds a line instead of sending the prompt. This needs a
+terminal that speaks the protocol too, such as Ghostty or kitty. Ghostty on Linux keeps Ctrl+Enter for
+fullscreen; to pass it on, add `keybind = ctrl+enter=unbind` to its config.
+
 - **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to
   select and copy (OSC 52).
 
