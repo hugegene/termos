@@ -147,8 +147,8 @@ Shift+Enter in Claude Code, Codex, Cursor's CLI or `agy` adds a line instead of 
 terminal that speaks the protocol too, such as Ghostty or kitty. Ghostty on Linux keeps Ctrl+Enter for
 fullscreen; to pass it on, add `keybind = ctrl+enter=unbind` to its config.
 
-- **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to
-  select and copy (OSC 52).
+- **Mouse:** click to focus, click tabs (a tab's `×` closes it), drag the lines between panes to resize, wheel
+  to scroll back, drag to select and copy (OSC 52).
 
 ## Terminal file finder
 
@@ -163,8 +163,9 @@ fullscreen; to pass it on, add `keybind = ctrl+enter=unbind` to its config.
   `TOS_EDITOR` picks any editor.
 - **Opening in an app:** `o` opens any file or folder in its default app (`xdg-open`, or `open` on macOS), on the
   screen of the terminal you pressed it in.
-- **The menu:** right-click a file, or press `m`, to rename it, copy its name or path, open it in its app, or
-  delete it (to the trash; where there's no trash it asks first).
+- **The menu:** right-click a file, or press `m`, to rename it, copy its name or path, make a new file or folder
+  next to it, or delete it (to the trash; where there's no trash it asks first). Right-click empty space, or an
+  empty folder, for just New file and New folder.
 
 **Images** show for real in terminals that support kitty, iTerm2 or sixel images (Ghostty, kitty,
 WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one with

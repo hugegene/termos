@@ -1,6 +1,7 @@
-//! The file list's menu, opened by a right-click or `m`: rename, copy name, copy path, open in app, delete. Also
-//! the rename field and the "delete for good?" question that the menu leads to.
-//! Plan: docs/plans/2026-11-07-finder-menu.md.
+//! The file list's menu, opened by a right-click or `m`: rename, copy name, copy path, new file, new folder,
+//! delete. On empty space it has only new file and new folder. Also the rename field, the new name's box and the
+//! "delete for good?" question that the menu leads to.
+//! Plans: docs/plans/2026-11-07-finder-menu.md, docs/plans/2026-11-17-finder-new-and-tab-close.md.
 
 use std::io;
 use std::path::Path;
@@ -20,32 +21,49 @@ pub enum Item {
     Rename,
     CopyName,
     CopyPath,
-    OpenApp,
+    NewFile,
+    NewDir,
     Delete,
 }
 
-/// The menu's items, their labels and their letters.
-const ITEMS: [(Item, &str, char); 5] = [
+/// The menu for an entry: its items, their labels and their letters. `N` for a folder echoes Ctrl+Shift+N.
+const ENTRY_ITEMS: [(Item, &str, char); 6] = [
     (Item::Rename, "Rename", 'r'),
     (Item::CopyName, "Copy name", 'y'),
     (Item::CopyPath, "Copy path", 'p'),
-    (Item::OpenApp, "Open in app", 'o'),
+    (Item::NewFile, "New file", 'n'),
+    (Item::NewDir, "New folder", 'N'),
     (Item::Delete, "Delete", 'd'),
 ];
 
-/// The menu box: " Open in app o " inside a frame.
-const MENU_WIDTH: u16 = 17;
-const MENU_HEIGHT: u16 = ITEMS.len() as u16 + 2;
+/// The menu for empty space in the list, or an empty folder: only what needs no entry.
+const SPACE_ITEMS: [(Item, &str, char); 2] = [(Item::NewFile, "New file", 'n'), (Item::NewDir, "New folder", 'N')];
 
-/// The question box is at least this wide, spilling over the preview if the list is narrower.
+/// The menu's items: for an entry, or (`on_entry` false) for empty space.
+fn items(on_entry: bool) -> &'static [(Item, &'static str, char)] {
+    if on_entry { &ENTRY_ITEMS } else { &SPACE_ITEMS }
+}
+
+/// The menu box: " New folder  N " inside a frame.
+const MENU_WIDTH: u16 = 17;
+
+fn menu_height(on_entry: bool) -> u16 {
+    items(on_entry).len() as u16 + 2
+}
+
+/// The question box and the new name's box are at least this wide, spilling over the preview if the list is
+/// narrower.
 const CONFIRM_WIDTH: u16 = 30;
 
 /// What's open over the file list. Entries are named rather than indexed, since the folder can change meanwhile.
 pub enum Popup {
-    /// The menu for the entry `name`, in its box at `rect` (screen cells), with item `hover` highlighted.
-    Menu { name: String, rect: Rect, hover: usize },
+    /// The menu for the entry `name`, or for empty space if `None`, in its box at `rect` (screen cells), with item
+    /// `hover` highlighted. It was opened from screen row `row`.
+    Menu { name: Option<String>, rect: Rect, hover: usize, row: u16 },
     /// The entry `name`'s row is a text field holding its new name.
     Rename { name: String, edit: LineEdit },
+    /// A box at `rect` holding the name of a new file, or (with `dir`) a new folder.
+    Create { dir: bool, edit: LineEdit, rect: Rect },
     /// Moving `name` to the trash failed for `reason`; deleting it for good waits for `y`.
     Confirm { name: String, reason: String, is_dir: bool, rect: Rect },
 }
@@ -183,6 +201,27 @@ fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
+/// Why `name` can't name a file or folder, if it can't. An empty name is left to the caller.
+fn bad_name(name: &str) -> Option<String> {
+    if name.contains(['/', '\0']) {
+        return Some("a name can't contain '/'".into());
+    }
+    if name == "." || name == ".." {
+        return Some(format!("'{name}' can't be a name"));
+    }
+    None
+}
+
+/// Makes the empty file, or (with `dir`) the folder, `path`. Never replaces anything: it fails with
+/// `AlreadyExists` if the name is taken, even by a broken symlink.
+fn make_new(path: &Path, dir: bool) -> io::Result<()> {
+    if dir {
+        std::fs::create_dir(path)
+    } else {
+        std::fs::OpenOptions::new().write(true).create_new(true).open(path).map(drop)
+    }
+}
+
 /// Greedy word wrap to `width` columns; words longer than a line are cut.
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
@@ -226,25 +265,45 @@ impl Finder {
     pub(super) fn open_menu(&mut self, index: usize, x: u16) {
         self.select(index);
         let (Some(row), Some(e)) = (self.row_of(self.selected), self.current()) else { return };
-        let name = e.name.clone();
-        let rect = place(x, row, (MENU_WIDTH, MENU_HEIGHT), self.list_rect);
-        self.popup = Some(Popup::Menu { name, rect, hover: 0 });
+        let name = Some(e.name.clone());
+        let rect = place(x, row, (MENU_WIDTH, menu_height(true)), self.list_rect);
+        self.popup = Some(Popup::Menu { name, rect, hover: 0, row });
     }
 
-    /// `m`: the menu for the selected entry.
+    /// Opens the menu for empty space (New file, New folder) below screen row `row`, at column `x`.
+    fn open_space_menu(&mut self, x: u16, row: u16) {
+        let rect = place(x, row, (MENU_WIDTH, menu_height(false)), self.list_rect);
+        self.popup = Some(Popup::Menu { name: None, rect, hover: 0, row });
+    }
+
+    /// A right-click at screen cell (`x`, `y`): the menu for the entry there, or the menu for empty space below
+    /// the entries. Elsewhere, such as on the title, nothing.
+    pub(super) fn right_click(&mut self, x: u16, y: u16) {
+        match self.entry_at(x, y) {
+            Some(index) => self.open_menu(index, x),
+            None if contains(self.entries_rect(self.list_rect), x, y) => self.open_space_menu(x, y),
+            None => {}
+        }
+    }
+
+    /// `m`: the menu for the selected entry, or the menu for empty space if the list shows none.
     pub(super) fn open_menu_at_selection(&mut self) {
-        let x = self.entries_rect(self.list_rect).x + 2;
-        self.open_menu(self.selected, x);
+        let rows = self.entries_rect(self.list_rect);
+        if self.visible.is_empty() {
+            self.open_space_menu(rows.x + 2, rows.y);
+        } else {
+            self.open_menu(self.selected, rows.x + 2);
+        }
     }
 
     pub fn close_popup(&mut self) {
         self.popup = None;
     }
 
-    /// The box drawn over the panes (the menu or the question), in screen cells.
+    /// The box drawn over the panes (the menu, the new name or the question), in screen cells.
     pub fn popup_rect(&self) -> Option<Rect> {
         match self.popup.as_ref()? {
-            Popup::Menu { rect, .. } | Popup::Confirm { rect, .. } => Some(*rect),
+            Popup::Menu { rect, .. } | Popup::Create { rect, .. } | Popup::Confirm { rect, .. } => Some(*rect),
             Popup::Rename { .. } => None,
         }
     }
@@ -258,6 +317,8 @@ impl Finder {
         Some(match self.popup.as_ref()? {
             Popup::Menu { .. } => "Enter or a letter runs · Esc closes",
             Popup::Rename { .. } => "rename · type the new name · Enter renames · Esc cancels",
+            Popup::Create { dir: false, .. } => "new file · type its name · Enter creates · Esc cancels",
+            Popup::Create { dir: true, .. } => "new folder · type its name · Enter creates · Esc cancels",
             Popup::Confirm { .. } => "y deletes for good · any other key keeps it",
         })
     }
@@ -275,21 +336,22 @@ impl Finder {
         let popup = self.popup.take()?;
         let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
         Some(match popup {
-            Popup::Menu { name, rect, hover } => {
-                let last = ITEMS.len() - 1;
+            Popup::Menu { name, rect, hover, row } => {
+                let items = items(name.is_some());
+                let last = items.len() - 1;
                 let hover = match key.code {
                     KeyCode::Char('j') | KeyCode::Down => (hover + 1).min(last),
                     KeyCode::Char('k') | KeyCode::Up => hover.saturating_sub(1),
-                    KeyCode::Enter => return Some(self.run(ITEMS[hover].0, name)),
+                    KeyCode::Enter => return Some(self.run(items[hover].0, name, row)),
                     KeyCode::Esc | KeyCode::Char('q' | 'm') => return Some(Action::None),
                     _ if ctrl_c => return Some(Action::None),
-                    KeyCode::Char(c) => match ITEMS.iter().find(|i| i.2 == c) {
-                        Some(i) => return Some(self.run(i.0, name)),
+                    KeyCode::Char(c) => match items.iter().find(|i| i.2 == c) {
+                        Some(i) => return Some(self.run(i.0, name, row)),
                         None => hover,
                     },
                     _ => hover,
                 };
-                self.popup = Some(Popup::Menu { name, rect, hover });
+                self.popup = Some(Popup::Menu { name, rect, hover, row });
                 Action::None
             }
             Popup::Rename { name, mut edit } => match key.code {
@@ -299,6 +361,16 @@ impl Finder {
                 _ => {
                     edit.key(key);
                     self.popup = Some(Popup::Rename { name, edit });
+                    Action::None
+                }
+            },
+            Popup::Create { dir, mut edit, rect } => match key.code {
+                KeyCode::Enter => self.create(dir, &edit.text),
+                KeyCode::Esc => Action::None,
+                _ if ctrl_c => Action::None,
+                _ => {
+                    edit.key(key);
+                    self.popup = Some(Popup::Create { dir, edit, rect });
                     Action::None
                 }
             },
@@ -318,16 +390,19 @@ impl Finder {
         let down = matches!(ev.kind, MouseEventKind::Down(_));
         let wheel = matches!(ev.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown);
         match popup {
-            Popup::Menu { name, rect, hover } => {
+            Popup::Menu { name, rect, hover, row } => {
+                let items = items(name.is_some());
                 let inside = contains(rect, x, y);
-                let item = (inside && y > rect.y && y + 1 < rect.bottom()).then(|| usize::from(y - rect.y - 1));
+                let item = (inside && y > rect.y && y + 1 < rect.bottom())
+                    .then(|| usize::from(y - rect.y - 1))
+                    .filter(|i| *i < items.len());
                 match (ev.kind, item) {
-                    (MouseEventKind::Down(MouseButton::Left), Some(i)) => return Some(self.run(ITEMS[i].0, name)),
-                    // A right-click on another entry moves the menu there.
+                    (MouseEventKind::Down(MouseButton::Left), Some(i)) => {
+                        return Some(self.run(items[i].0, name, row));
+                    }
+                    // A right-click on another entry, or on empty space, moves the menu there.
                     (MouseEventKind::Down(MouseButton::Right), _) if !inside => {
-                        if let Some(index) = self.entry_at(x, y) {
-                            self.open_menu(index, x);
-                        }
+                        self.right_click(x, y);
                         return Some(Action::None);
                     }
                     // A click outside, or the wheel, closes the menu and does nothing else.
@@ -335,12 +410,14 @@ impl Finder {
                     _ => {}
                 }
                 let hover = item.unwrap_or(hover);
-                self.popup = Some(Popup::Menu { name, rect, hover });
+                self.popup = Some(Popup::Menu { name, rect, hover, row });
                 Some(Action::None)
             }
             // A click anywhere cancels a rename, or keeps the file the question is about.
             Popup::Confirm { name, .. } if down => Some(Action::Flash(format!("kept '{name}'"))),
             Popup::Rename { .. } if down => Some(Action::None),
+            // A click outside the new name's box cancels it; one inside keeps it open.
+            Popup::Create { rect, .. } if down && !contains(rect, x, y) => Some(Action::None),
             p => {
                 self.popup = Some(p);
                 Some(Action::None)
@@ -358,7 +435,16 @@ impl Finder {
         (index < self.visible.len()).then_some(index)
     }
 
-    fn run(&mut self, item: Item, name: String) -> Action {
+    /// Runs a menu item for the entry `name` (`None`: empty space), from a menu opened at screen row `row`.
+    fn run(&mut self, item: Item, name: Option<String>, row: u16) -> Action {
+        if let Item::NewFile | Item::NewDir = item {
+            // The box goes where the menu was opened, as wide as the list.
+            let width = self.list_rect.width.max(CONFIRM_WIDTH);
+            let rect = place(self.list_rect.x, row, (width, 3), self.list_rect);
+            self.popup = Some(Popup::Create { dir: item == Item::NewDir, edit: LineEdit::new(""), rect });
+            return Action::None;
+        }
+        let Some(name) = name else { return Action::None };
         match item {
             Item::Rename => {
                 let edit = LineEdit::new(&name);
@@ -367,8 +453,27 @@ impl Finder {
             }
             Item::CopyName => Action::Copy(name),
             Item::CopyPath => Action::Copy(self.dir.join(&name).display().to_string()),
-            Item::OpenApp => Action::OpenApp(self.dir.join(&name)),
             Item::Delete => self.delete(&name),
+            Item::NewFile | Item::NewDir => Action::None,
+        }
+    }
+
+    /// Makes the file, or (with `dir`) the folder, `new` in the list's folder, and selects it.
+    fn create(&mut self, dir: bool, new: &str) -> Action {
+        if new.is_empty() {
+            return Action::None;
+        }
+        if let Some(why) = bad_name(new) {
+            return Action::Flash(why);
+        }
+        match make_new(&self.dir.join(new), dir) {
+            Ok(()) => {
+                self.reload();
+                self.refilter(Some(new));
+                Action::Flash(if dir { format!("created folder '{new}'") } else { format!("created '{new}'") })
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Action::Flash(format!("'{new}' already exists")),
+            Err(e) => Action::Flash(format!("can't create '{new}': {e}")),
         }
     }
 
@@ -376,11 +481,8 @@ impl Finder {
         if new.is_empty() || new == name {
             return Action::None;
         }
-        if new.contains(['/', '\0']) {
-            return Action::Flash("a name can't contain '/'".into());
-        }
-        if new == "." || new == ".." {
-            return Action::Flash(format!("'{new}' can't be a name"));
+        if let Some(why) = bad_name(new) {
+            return Action::Flash(why);
         }
         match rename_no_replace(&self.dir.join(name), &self.dir.join(new)) {
             Ok(()) => {
@@ -441,15 +543,16 @@ impl Finder {
         }
     }
 
-    /// Draws the menu or the question over the panes. The rename field is drawn in the list's row instead.
+    /// Draws the menu, the new name's box or the question over the panes. The rename field is drawn in the list's
+    /// row instead.
     pub fn render_popup(&self, buf: &mut Buffer) {
         let Some(popup) = &self.popup else { return };
         match popup {
-            Popup::Menu { rect, hover, .. } => {
+            Popup::Menu { name, rect, hover, .. } => {
                 let rect = rect.intersection(buf.area);
                 fill(buf, rect, " ", Style::default());
                 draw_frame(buf, rect, "", "", Style::default());
-                for (i, (item, label, letter)) in ITEMS.iter().enumerate() {
+                for (i, (item, label, letter)) in items(name.is_some()).iter().enumerate() {
                     let y = rect.y + 1 + i as u16;
                     if y + 1 >= rect.bottom() {
                         break;
@@ -462,6 +565,20 @@ impl Finder {
                     let inside = rect.width.saturating_sub(2);
                     let text = format!(" {label:<w$}{letter} ", w = usize::from(inside.saturating_sub(3)));
                     put_str(buf, rect.x + 1, y, &text, style, inside);
+                }
+            }
+            Popup::Create { dir, edit, rect } => {
+                let rect = rect.intersection(buf.area);
+                let title = if *dir { "new folder" } else { "new file" };
+                fill(buf, rect, " ", Style::default());
+                draw_frame(buf, rect, title, "", Style::default().add_modifier(Modifier::BOLD));
+                if rect.height >= 3 && rect.width > 2 {
+                    // The field, coloured as the rename field.
+                    let field = Style::default().fg(Color::Black).bg(Color::Yellow);
+                    let inside = rect.width - 2;
+                    fill(buf, Rect::new(rect.x + 1, rect.y + 1, inside, 1), " ", field);
+                    let shown = edit.shown(usize::from(inside.saturating_sub(2)));
+                    put_str(buf, rect.x + 2, rect.y + 1, &shown, field, inside.saturating_sub(2));
                 }
             }
             Popup::Confirm { name, reason, is_dir, rect } => {
@@ -559,8 +676,12 @@ mod tests {
         mouse(&mut f, RIGHT, 4, 2);
         assert_eq!(selected(&f), "b");
         let text = screen(&f);
-        assert!(text.contains("│ Rename      r │") && text.contains("│ Delete      d │"), "{text}");
-        assert_eq!(f.popup_rect(), Some(Rect::new(4, 3, MENU_WIDTH, MENU_HEIGHT)));
+        for item in ["│ Rename      r │", "│ New file    n │", "│ New folder  N │", "│ Delete      d │"]
+        {
+            assert!(text.contains(item), "{item} in {text}");
+        }
+        assert!(!text.contains("Open in app"), "{text}");
+        assert_eq!(f.popup_rect(), Some(Rect::new(4, 3, MENU_WIDTH, 8)));
         assert!(f.hint(false).starts_with("Enter or a letter runs"));
 
         // Esc closes it; so does a click outside, which selects nothing.
@@ -571,8 +692,18 @@ mod tests {
         assert!(f.popup.is_none());
         assert_eq!(selected(&f), "a");
 
-        // A right-click on empty space opens nothing.
+        // A right-click on empty space opens the short menu, and selects nothing.
         mouse(&mut f, RIGHT, 4, 6);
+        let text = screen(&f);
+        assert!(text.contains("│ New file    n │") && text.contains("│ New folder  N │"), "{text}");
+        assert!(!text.contains("Rename") && !text.contains("Delete"), "{text}");
+        assert_eq!(f.popup_rect(), Some(Rect::new(4, 7, MENU_WIDTH, 4)));
+        assert_eq!(selected(&f), "a");
+        // A right-click on an entry moves to the full menu.
+        mouse(&mut f, RIGHT, 4, 3);
+        assert!(matches!(&f.popup, Some(Popup::Menu { name: Some(n), .. }) if n == "c"));
+        // The title row isn't empty space: a right-click there just closes the menu.
+        mouse(&mut f, RIGHT, 4, 0);
         assert!(f.popup.is_none());
     }
 
@@ -593,20 +724,115 @@ mod tests {
         let (_dir, mut f, _rx) = setup();
         press(&mut f, KeyCode::Char('j'));
         press(&mut f, KeyCode::Char('m'));
-        assert!(matches!(&f.popup, Some(Popup::Menu { name, .. }) if name == "b"));
+        assert!(matches!(&f.popup, Some(Popup::Menu { name: Some(n), .. }) if n == "b"));
         press(&mut f, KeyCode::Char('j'));
         assert!(matches!(press(&mut f, KeyCode::Enter), Action::Copy(n) if n == "b"));
         press(&mut f, KeyCode::Char('m'));
         assert!(matches!(press(&mut f, KeyCode::Char('y')), Action::Copy(n) if n == "b"));
-        // o opens it in its default app.
+        // Letters that aren't items do nothing, and the list's keys wait. `o` is the list's key for opening in
+        // the app, but no longer an item.
         press(&mut f, KeyCode::Char('m'));
-        assert!(matches!(press(&mut f, KeyCode::Char('o')), Action::OpenApp(p) if p.ends_with("b")));
-        // Letters that aren't items do nothing, and the list's keys wait.
-        press(&mut f, KeyCode::Char('m'));
+        assert!(matches!(press(&mut f, KeyCode::Char('o')), Action::None));
         press(&mut f, KeyCode::Char('x'));
+        assert!(f.popup.is_some());
         press(&mut f, KeyCode::Char('q'));
         assert!(f.popup.is_none());
         assert_eq!(selected(&f), "b");
+    }
+
+    #[test]
+    fn new_files_and_folders_go_in_the_lists_folder() {
+        let (dir, mut f, _rx) = setup();
+        // On the folder `b`'s menu, New file still makes the file next to it.
+        std::fs::remove_file(dir.path().join("b")).unwrap();
+        std::fs::create_dir(dir.path().join("b")).unwrap();
+        f.reload();
+        f.refilter(Some("b"));
+        press(&mut f, KeyCode::Char('m'));
+        press(&mut f, KeyCode::Char('n'));
+        assert!(f.hint(false).starts_with("new file · type its name"));
+        typed(&mut f, "todo.md");
+        assert!(words(&f).contains("new file todo.md▏"), "{}", screen(&f));
+        assert_eq!(flash(press(&mut f, KeyCode::Enter)), "created 'todo.md'");
+        assert_eq!(std::fs::read(dir.path().join("todo.md")).unwrap(), b"");
+        assert!(!dir.path().join("b/todo.md").exists());
+        assert_eq!(selected(&f), "todo.md");
+
+        // N makes a folder.
+        press(&mut f, KeyCode::Char('m'));
+        press(&mut f, KeyCode::Char('N'));
+        assert!(words(&f).contains("new folder ▏"), "{}", screen(&f));
+        typed(&mut f, "drafts");
+        assert_eq!(flash(press(&mut f, KeyCode::Enter)), "created folder 'drafts'");
+        assert!(dir.path().join("drafts").is_dir());
+        assert_eq!(selected(&f), "drafts");
+    }
+
+    #[test]
+    fn new_names_are_checked_and_never_replace() {
+        let (dir, mut f, _rx) = setup();
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), dir.path().join("broken")).unwrap();
+        for (letter, name, why) in [
+            ('n', "a", "'a' already exists"),
+            ('N', "a", "'a' already exists"),
+            ('n', "broken", "'broken' already exists"),
+            ('n', "x/y", "a name can't contain '/'"),
+            ('N', "..", "'..' can't be a name"),
+        ] {
+            press(&mut f, KeyCode::Char('m'));
+            press(&mut f, KeyCode::Char(letter));
+            typed(&mut f, name);
+            assert_eq!(flash(press(&mut f, KeyCode::Enter)), why);
+        }
+        assert_eq!(std::fs::read_to_string(dir.path().join("a")).unwrap(), "a");
+        assert!(!dir.path().join("nowhere").exists());
+
+        // An empty name, Esc and a click outside the box all make nothing.
+        press(&mut f, KeyCode::Char('m'));
+        press(&mut f, KeyCode::Char('n'));
+        assert!(matches!(press(&mut f, KeyCode::Enter), Action::None));
+        press(&mut f, KeyCode::Char('m'));
+        press(&mut f, KeyCode::Char('n'));
+        typed(&mut f, "zzz");
+        press(&mut f, KeyCode::Esc);
+        assert!(f.popup.is_none());
+        press(&mut f, KeyCode::Char('m'));
+        press(&mut f, KeyCode::Char('N'));
+        typed(&mut f, "zzz");
+        // A click inside the box keeps it; one outside cancels.
+        let rect = f.popup_rect().unwrap();
+        mouse(&mut f, LEFT, rect.x + 3, rect.y + 1);
+        assert!(f.popup.is_some());
+        mouse(&mut f, LEFT, 2, 1);
+        assert!(f.popup.is_none());
+        assert!(!dir.path().join("zzz").exists());
+    }
+
+    #[test]
+    fn an_empty_folder_gets_its_first_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, _rx) = mpsc::channel();
+        let mut f = Finder::new(1, dir.path().to_path_buf(), Rect::new(0, 0, 30, 12), true, tx);
+        // m opens the short menu at the "(empty)" row.
+        press(&mut f, KeyCode::Char('m'));
+        assert!(matches!(&f.popup, Some(Popup::Menu { name: None, .. })));
+        let text = screen(&f);
+        assert!(text.contains("New folder") && !text.contains("Rename"), "{text}");
+        press(&mut f, KeyCode::Esc);
+
+        // A right-click on the empty list opens it too; a click on New folder (its second row) opens the box.
+        mouse(&mut f, RIGHT, 4, 1);
+        let rect = f.popup_rect().unwrap();
+        mouse(&mut f, MouseEventKind::Moved, rect.x + 3, rect.y + 2);
+        assert!(matches!(&f.popup, Some(Popup::Menu { hover: 1, .. })));
+        mouse(&mut f, LEFT, rect.x + 3, rect.y + 2);
+        assert!(matches!(&f.popup, Some(Popup::Create { dir: true, .. })));
+        // The box is at least 30 wide and 3 high, just below the row clicked.
+        assert_eq!(f.popup_rect(), Some(Rect::new(0, 2, 30, 3)));
+        typed(&mut f, "first");
+        assert_eq!(flash(press(&mut f, KeyCode::Enter)), "created folder 'first'");
+        assert!(dir.path().join("first").is_dir());
+        assert_eq!(selected(&f), "first");
     }
 
     #[test]

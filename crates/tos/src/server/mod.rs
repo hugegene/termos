@@ -65,8 +65,19 @@ pub enum Ev {
 
 pub type ClientId = u32;
 
-/// A tab bar click area: (start x, end x, tab index or `None` for the "+" button).
-type TabZone = (u16, u16, Option<usize>);
+/// A tab bar click area: (start x, end x, what a click there does).
+type TabZone = (u16, u16, TabHit);
+
+/// What a click on the tab bar does. Plan: docs/plans/2026-11-17-finder-new-and-tab-close.md.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TabHit {
+    /// Goes to tab `i`.
+    Tab(usize),
+    /// Closes tab `i`: its ×.
+    Close(usize),
+    /// Opens a new tab: the "+".
+    New,
+}
 /// A status-bar segment's click area: (start x, end x, segment id).
 type StatusZone = (u16, u16, String);
 
@@ -98,7 +109,7 @@ struct Client {
     /// What the client's screen shows now; `None` forces a full redraw.
     prev: Option<Buffer>,
     prev_cursor: Option<Cursor>,
-    /// Tab bar click areas: (start x, end x, tab index or `None` for the "+" button).
+    /// Tab bar click areas.
     tab_zones: Vec<TabZone>,
     /// Status-bar segments' click areas.
     status_zones: Vec<StatusZone>,
@@ -1671,8 +1682,10 @@ impl Server {
                 let zone =
                     self.clients.get(&client).and_then(|c| c.tab_zones.iter().find(|z| x >= z.0 && x < z.1).copied());
                 match zone {
-                    Some((_, _, Some(i))) => self.go_to_tab(i),
-                    Some((_, _, None)) => self.new_tab_here(),
+                    Some((_, _, TabHit::Tab(i))) => self.go_to_tab(i),
+                    // As Ctrl+t x, without asking.
+                    Some((_, _, TabHit::Close(i))) => self.close_tab_at(i),
+                    Some((_, _, TabHit::New)) => self.new_tab_here(),
                     None => {}
                 }
             }
@@ -2141,15 +2154,23 @@ impl Server {
             };
             let style = if i == self.active { active } else { normal };
             let w = put_str(buf, x, 0, &label, style, right.saturating_sub(x));
-            zones.push((x, x + w, Some(i)));
-            x += w + 1;
+            zones.push((x, x + w, TabHit::Tab(i)));
+            x += w;
+            // Its ×, which closes it, if there's room after the whole label. A label cut off at the right fills
+            // the room, so it gets none.
+            if x + 2 <= right {
+                let w = put_str(buf, x, 0, "× ", style, 2);
+                zones.push((x, x + w, TabHit::Close(i)));
+                x += w;
+            }
+            x += 1;
             if x >= right {
                 break;
             }
         }
         if x + 3 <= right {
             let w = put_str(buf, x, 0, " + ", Style::default().fg(Color::DarkGray), 3);
-            zones.push((x, x + w, None));
+            zones.push((x, x + w, TabHit::New));
         }
         put_str(buf, right, 0, &session, Style::default().fg(Color::Black).bg(Color::Blue), width - right);
         zones
@@ -2253,7 +2274,7 @@ mod tests {
         s.keep_finders_left();
         assert_eq!(labels(&s), ["finder: alpha", "finder: beta", "a", "b"]);
         assert_eq!(s.active, 1);
-        assert!(tab_bar(&s).starts_with(" finder: alpha   finder: beta   1 a   2 b   + "), "{}", tab_bar(&s));
+        assert!(tab_bar(&s).starts_with(" finder: alpha ×   finder: beta ×   1 a ×   2 b ×   + "), "{}", tab_bar(&s));
         // Numbers skip the finders.
         assert_eq!(s.numbered_tab(1), Some(2));
         assert_eq!(s.numbered_tab(2), Some(3));
@@ -2263,6 +2284,29 @@ mod tests {
         s.close_tab_at(0);
         s.keep_finders_left();
         assert_eq!(labels(&s), ["finder", "a", "b"]);
+    }
+
+    #[test]
+    fn each_tab_has_a_close_button() {
+        let (s, _dir) = two_tabs();
+        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
+        let zones = s.draw_tab_bar(&mut buf);
+        assert!(tab_bar(&s).starts_with(" 1 a ×   2 b ×   + "), "{}", tab_bar(&s));
+        // " 1 a " is columns 0–4 and its "× " 5–6; a gap; " 2 b " 8–12 and "× " 13–14; a gap; " + " 16–18.
+        assert_eq!(
+            zones,
+            [
+                (0, 5, TabHit::Tab(0)),
+                (5, 7, TabHit::Close(0)),
+                (8, 13, TabHit::Tab(1)),
+                (13, 15, TabHit::Close(1)),
+                (16, 19, TabHit::New),
+            ]
+        );
+        // A tab cut off at the right edge gets no ×. The session's name takes the last 3 columns.
+        let mut buf = Buffer::empty(Rect::new(0, 0, 14, 1));
+        let zones = s.draw_tab_bar(&mut buf);
+        assert_eq!(zones, [(0, 5, TabHit::Tab(0)), (5, 7, TabHit::Close(0)), (8, 11, TabHit::Tab(1))]);
     }
 
     #[test]

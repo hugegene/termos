@@ -722,9 +722,9 @@ impl Server {
             .collect();
         lines.push(TextLine::default());
         lines.push(TextLine::styled(
-            " Mouse: click to focus, drag the lines between panes to resize, the wheel scrolls back, drag to \
-             select and copy (hold Shift if the program uses the mouse). Right-click a file in a finder to rename, \
-             copy or delete it.",
+            " Mouse: click to focus, a tab's × closes it, drag the lines between panes to resize, the wheel \
+             scrolls back, drag to select and copy (hold Shift if the program uses the mouse). Right-click a file \
+             in a finder to rename, copy or delete it, or to make a new file or folder.",
             Style::default().fg(Color::DarkGray),
         ));
         Clear.render(rect, buf);

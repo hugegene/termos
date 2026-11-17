@@ -1211,10 +1211,8 @@ impl Finder {
                 }
             }
             MouseEventKind::Down(MouseButton::Right) if in_list => {
-                if let Some(index) = self.entry_at(x, y) {
-                    self.last_click = None;
-                    self.open_menu(index, x);
-                }
+                self.last_click = None;
+                self.right_click(x, y);
             }
             MouseEventKind::Down(MouseButton::Left) if in_list => {
                 let Some(index) = self.entry_at(x, y) else { return Action::None };

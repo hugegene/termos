@@ -306,7 +306,17 @@ fn tabs_by_key_and_click() {
     // Ctrl+T r renames it; the old name is cleared first, as in zellij.
     s.send(b"\x14r");
     s.send(b"work\r");
-    s.wait_for(" 1 work ");
+    let text = s.wait_for(" 1 work ");
+    // A click on tab 2's × closes it, though tab 1 is active.
+    let bar = text.lines().next().unwrap();
+    let two = bar.find(" 2 ").unwrap();
+    let x = bar[..two].chars().count() + bar[two..].chars().position(|c| c == '×').unwrap();
+    s.send(&click(x as u16, 0));
+    wait("tab 2 closed", || {
+        let tabs = json(&env.tos(&["action", "list-tabs", "-j"]));
+        (tabs.as_array().unwrap().len() == 1).then_some(())
+    });
+    s.wait_until("the bar without tab 2", |t| t.lines().next().is_some_and(|l| l.starts_with(" 1 work ×   + ")));
 }
 
 #[test]
@@ -526,6 +536,15 @@ fn finder_menu_renames_and_deletes() {
     s.send(b"y");
     s.wait_for("deleted 'new.txt'");
     assert!(!files.join("new.txt").exists() && files.join("keep.txt").exists());
+    // A right-click on empty space below the files opens New file and New folder; N, a name and Enter make a
+    // folder there.
+    s.send(format!("\x1b[<2;{x};{y1}M\x1b[<2;{x};{y1}m", y1 = y + 4).as_bytes());
+    s.wait_for("New folder");
+    s.send(b"N");
+    s.wait_for("new folder");
+    s.send(b"drafts\r");
+    s.wait_until("the new folder", |t| t.contains(" drafts/") && t.contains("created folder 'drafts'"));
+    assert!(files.join("drafts").is_dir());
 }
 
 #[test]
@@ -779,7 +798,7 @@ fn sessions_come_back_after_kill() {
     // Attaching brings it back: tabs, names, folders, the finder's selection, and the command at the prompt.
     // The finder tab stays first, without a number.
     let s = env.attach(100, 30);
-    s.wait_for(" finder   1 work ");
+    s.wait_for(" finder ×   1 work ");
     s.wait_for("┌ b.txt ");
     let panes = env.panes();
     // The finder is two panes, its file list and its preview, linked again.
@@ -821,20 +840,20 @@ fn finder_tabs_stay_left() {
 
     // Two shell tabs, in one and two.
     s.send(format!("cd {}\r", env.root.join("one").display()).as_bytes());
-    bar(" 1 one ");
+    bar(" 1 one × ");
     s.send(b"\x14n");
     s.send(format!("cd {}\r", env.root.join("two").display()).as_bytes());
-    bar(" 1 one   2 two ");
+    bar(" 1 one ×   2 two × ");
 
     // Ctrl+T f opens a finder on two at the far left; the numbers start after it.
     s.send(b"\x14f");
-    bar(" finder   1 one   2 two ");
+    bar(" finder ×   1 one ×   2 two × ");
     // Ctrl+T 1 goes to the tab numbered 1. A second finder from there goes after the first, and both show
     // their folder.
     s.send(b"\x141");
     wait("on one", || (active() == (1, "one".to_owned())).then_some(()));
     s.send(b"\x14f");
-    bar(" finder: two   finder: one   1 one   2 two ");
+    bar(" finder: two ×   finder: one ×   1 one ×   2 two × ");
     assert_eq!(active(), (1, "finder: one".to_owned()), "positions count the finders");
 
     // go-to-tab N uses the numbers on the bar.
@@ -846,9 +865,9 @@ fn finder_tabs_stay_left() {
 
     // Alt+I moves two left, then wraps to the end of the numbered tabs rather than passing the finders.
     s.send(b"\x1bi");
-    bar(" finder: two   finder: one   1 two   2 one ");
+    bar(" finder: two ×   finder: one ×   1 two ×   2 one × ");
     s.send(b"\x1bi");
-    bar(" finder: two   finder: one   1 one   2 two ");
+    bar(" finder: two ×   finder: one ×   1 one ×   2 two × ");
 
     // Ctrl+T 0 goes to the first finder.
     s.send(b"\x140");

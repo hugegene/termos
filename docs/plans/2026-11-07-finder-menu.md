@@ -148,3 +148,6 @@ Build and test as CLAUDE.md says: `cargo build --offline`, `cargo test --workspa
     - **Wording:** the box says "Can't move 'x' to the trash: <reason>. Delete it for good? y / n", and names
       the file once.
 - **2026-11-09:** step 6 done: the user checked it by hand.
+- **2026-11-17:** Open in app (added 2026-11-12 by [the grid copy and open in app plan](2026-11-11-grid-copy-and-open-in-app.md))
+  left the menu, and New file (`n`) and New folder (`N`) joined it. Right-clicking empty space now opens a short
+  menu with just those two. See [New file, New folder and a × on every tab](2026-11-17-finder-new-and-tab-close.md).
