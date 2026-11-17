@@ -133,9 +133,9 @@ impl Server {
             Some(toggle(Modal::Session))
         } else if ctrl(key, 's') {
             Some(if scrolling { Modal::Normal } else { Modal::Scroll })
-        } else if ctrl(key, 'b') && !scrolling && m != Modal::Tmux {
-            Some(Modal::Tmux)
         } else {
+            // No Ctrl+b: it goes to the program. Tmux mode is opt-in through config.kdl.
+            // Plan: docs/plans/2026-11-17-ctrl-b-to-programs.md.
             None
         };
         if let Some(next) = switch {
@@ -702,7 +702,6 @@ impl Server {
             ("Ctrl+h", "move: ←↓↑→ swap with the neighbour · n p next / previous"),
             ("Ctrl+s", "scroll: ↓↑ d u PgDn PgUp · s search (n p c w o) · e edit · v select with vi keys"),
             ("Ctrl+o", "session: d detach"),
-            ("Ctrl+b", "tmux keys: c % \" , [ o n p z x d, f finder"),
             ("Ctrl+q", "quit: ends the session (asks first)"),
             ("Alt+n", "new pane · Alt+←↓↑→ focus · Alt+= Alt+- resize · Alt+i Alt+o move the tab"),
             ("Esc", "back to normal (Enter too)"),

@@ -37,7 +37,7 @@ tos attach           # start a session, or go back to the one running
 | A text editor, for quick edits | Neovim inside the preview: `Ctrl+s` saves, `Ctrl+e` closes |
 | Excel or Numbers, for a quick look | spreadsheets as tables, and CSV edited in a grid |
 | Word or PowerPoint, for reading | documents and slides shown as Markdown |
-| tmux or zellij | tabs, splits and sessions that come back after a reboot, with zellij's keys and tmux's |
+| tmux or zellij | tabs, splits and sessions that come back after a reboot, with zellij's keys (tmux's are opt-in) |
 
 Some jobs still need the app: `tos` can't save spreadsheets or Word files, and `o` opens them there.
 
@@ -131,13 +131,16 @@ frame like zellij's:
 | `Ctrl+h` | **move:** arrows/`hjkl` swap the pane with its neighbour, `n` `p` |
 | `Ctrl+s` | **scroll:** `↓↑` `d` `u` `PgDn` `PgUp`, `s` search (`n` `p` `c` `w` `o`), `e` edit in the editor, `v` select with vi keys. In an editor tos started, `Ctrl+s` saves instead |
 | `Ctrl+o` | **session:** `d` detach |
-| `Ctrl+b` | **tmux keys:** `c` `%` `"` `,` `[` `o` `n` `p` `z` `x` `d`, plus `f` finder |
 | `Ctrl+g` | **lock:** all keys go to the program until `Ctrl+g` again |
 | `Ctrl+q` | quit: ends the session (asks first) |
 | `Alt+n`, `Alt+arrows`, `Alt+=`/`Alt+-`, `Alt+i`/`Alt+o` | new pane, focus, resize, move the tab |
 
 `Esc` or `Enter` leaves a mode; `?` in any mode shows all keys. Not in `tos` yet: floating, stacked and pinned
 panes, swap layouts, pane groups and zellij's plugins.
+
+`Ctrl+b` goes to the program, as in a plain terminal. For tmux's keys (`Ctrl+b`, then `c` `%` `"` `,` `[` `o`
+`n` `p` `z` `x` `d`, plus `f` finder), add zellij's binding to `~/.config/termos/config.kdl`; see
+[key bindings](docs/cli.md#key-bindings-configtermosconfigkdl).
 
 - **Mouse:** click to focus, click tabs, drag the lines between panes to resize, wheel to scroll back, drag to
   select and copy (OSC 52).

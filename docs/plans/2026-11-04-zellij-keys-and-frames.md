@@ -8,7 +8,9 @@
 The user asked for `tb` to "use the zellij commands" and to "draw a box on the outer edge like zellij".
 
 1. **Keys:** replace the Ctrl+B prefix with **zellij's modes, using the user's own zellij 0.44.1 bindings**.
-   - Ctrl+B still works, because zellij's "tmux" mode is part of those bindings.
+   - Ctrl+B still works, because zellij's "tmux" mode is part of those bindings. **Changed 2026-11-17:** Ctrl+B
+     goes to the program, and tmux mode is opt-in through `config.kdl`; see
+     [Ctrl+B goes to the program](2026-11-17-ctrl-b-to-programs.md).
    - Keys for features `tb` doesn't have yet are listed under **Not supported yet**.
 2. **Frames:** draw a **box around every pane**, with the title in the top border, as zellij does.
    - The focused pane's box is green, and turns yellow while a mode (pane, tab, …) is active.
@@ -30,7 +32,7 @@ The user asked for `tb` to "use the zellij commands" and to "draw a box on the o
 | **Scroll** (Ctrl+S) | ↓ ↑ j k line · d u half page · PgDn PgUp l h → ← Ctrl+F Ctrl+B page · Ctrl+C bottom · s search · e edit scrollback in the editor · **v select with vi keys** (ours: the step 3 copy mode) |
 | **Search** (Scroll, then `s`, type, Enter) | n down · p up · c case-sensitive · w wrap · o whole word, plus the scroll keys |
 | **Session** (Ctrl+O) | d detach |
-| **Tmux** (Ctrl+B) | c new tab · % split right · " split down · ←↓↑→ / h j k l focus · o next pane · n / p tab · z fullscreen · x close · [ scroll · , rename tab · d detach · Ctrl+B send Ctrl+B · **f finder**, **? help** (ours) |
+| **Tmux** (Ctrl+B; since 2026-11-17 only when bound in `config.kdl`) | c new tab · % split right · " split down · ←↓↑→ / h j k l focus · o next pane · n / p tab · z fullscreen · x close · [ scroll · , rename tab · d detach · Ctrl+B send Ctrl+B · **f finder**, **? help** (ours) |
 | **All modes but Normal and Locked** | Esc or Enter back to Normal · Ctrl+<mode key> again leaves the mode · **? help** (ours) |
 
 **Differences from zellij, on purpose:**
@@ -98,3 +100,5 @@ The user asked for `tb` to "use the zellij commands" and to "draw a box on the o
   - Two details found while building:
     - In Normal mode a status message briefly replaces the mode list, which otherwise fills the line.
     - At 80 columns the mode list uses a short form (`^ g lock p pane …`).
+- **2026-11-17:** Ctrl+B no longer enters tmux mode; it goes to the program. Tmux mode stays, reached by
+  zellij's binding in `config.kdl`. See [Ctrl+B goes to the program](2026-11-17-ctrl-b-to-programs.md).

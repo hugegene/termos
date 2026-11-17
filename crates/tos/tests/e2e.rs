@@ -304,9 +304,6 @@ fn tabs_by_key_and_click() {
     s.send(b"\x14r");
     s.send(b"work\r");
     s.wait_for(" 1 work ");
-    // Ctrl+B is zellij's tmux mode: c opens a tab.
-    s.send(b"\x02c");
-    s.wait_for(" 3 ");
 }
 
 #[test]
@@ -587,6 +584,12 @@ fn zellij_modes() {
     s.wait_for(" PANE ");
     s.send(b"\x1b");
     s.wait_for("<g> LOCK");
+
+    // Ctrl+B isn't a mode: the shell gets it, so `echo a^Bb` prints "ab". If tos took Ctrl+B (tmux mode,
+    // before 2026-11-17), it would take b too, and Enter would only leave the mode.
+    s.send(b"echo a\x02b\r");
+    s.wait_until("ab printed", |t| t.lines().any(|l| unframe(l).starts_with("ab")));
+    assert!(s.text().contains("<g> LOCK"), "still normal mode:\n{}", s.text());
 
     // Locked mode passes Ctrl+P to the program instead of switching mode.
     s.send(b"\x07");
@@ -1293,6 +1296,9 @@ keybinds clear-defaults=true {
     normal {
         bind "Alt y" { WriteChars "echo from-binding"; Write 13; }
     }
+    shared_except "locked" "scroll" "search" "tmux" {
+        bind "Ctrl b" { SwitchToMode "tmux"; }
+    }
 }
 "#,
     )
@@ -1311,6 +1317,11 @@ keybinds clear-defaults=true {
     let printed = |word: &'static str| move |t: &str| t.lines().any(|l| unframe(l).starts_with(word));
     s.send(b"\x1by");
     s.wait_until("from-binding printed", printed("from-binding"));
+    // zellij's tmux binding turns tmux mode back on: Ctrl+b, then c opens a tab.
+    s.send(b"\x02");
+    s.wait_for(" TMUX ");
+    s.send(b"c");
+    wait("tmux c opened a tab", || env.panes().iter().any(|p| p["tab"] == 2).then_some(()));
     // reload-config lists what it skipped; the bindings it could load still work.
     fs::write(&config, "keybinds {\n  normal {\n    bind \"Alt y\" { WriteChars \"echo reloaded\"; Write 13; }\n    bind \"Alt u\" { ToggleFloatingPanes; }\n  }\n}\n")
         .unwrap();

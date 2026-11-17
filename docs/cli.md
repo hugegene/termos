@@ -226,6 +226,17 @@ keybinds {
   - modes: `normal`, `locked`, `pane`, `tab`, `resize`, `move`, `scroll`, `search`, `session`, `tmux`
   - `shared`, `shared_except "mode"…` and `shared_among "mode"…`
 - **A binding replaces `tos`'s own key in that mode.** `clear-defaults=true` is ignored: `tos` keeps its keys.
+- **tmux's keys are opt-in.** `Ctrl+b` goes to the program unless you bind it. zellij's binding turns tmux mode
+  on (`c` `%` `"` `,` `[` `o` `n` `p` `z` `x` `d`, `f` finder, and `Ctrl+b` again to send a real `Ctrl+b`), and
+  leaves `Ctrl+b` as page up in scroll and search mode:
+
+  ```kdl
+  keybinds {
+      shared_except "locked" "scroll" "search" "tmux" {
+          bind "Ctrl b" { SwitchToMode "tmux"; }
+      }
+  }
+  ```
 - **Actions:**
   - `Run "cmd" "arg"…`, with `cwd`, `direction`, `name`, `start_suspended` and `close_on_exit`
   - `NewTab`, with `name` and `cwd`
