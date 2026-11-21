@@ -165,6 +165,9 @@ fullscreen; to pass it on, add `keybind = ctrl+enter=unbind` to its config.
 - **Without Neovim:** `Enter` opens nano instead (`Ctrl+s` saves, `Ctrl+x` closes), or without nano your
   `$VISUAL` or `$EDITOR`, else `vi` (`Esc` `:wq`), each with its own keys. tos says once how to install Neovim.
   `TOS_EDITOR` picks any editor.
+- **Copying:** drag over a preview to select text; letting go copies it, and `Ctrl+c` copies it again. `v`
+  selects whole lines from the keyboard: `j`/`k` extend, `y` or `Ctrl+c` copies, `Esc` cancels. A code file's line
+  numbers aren't copied, and Markdown copies as shown (`E` opens the source).
 - **Opening in an app:** `o` opens any file or folder in its default app (`xdg-open`, or `open` on macOS), on the
   screen of the terminal you pressed it in.
 - **The menu:** right-click a file, or press `m`, to rename it, copy its name or path, make a new file or folder
@@ -175,7 +178,7 @@ fullscreen; to pass it on, add `keybind = ctrl+enter=unbind` to its config.
 WezTerm, iTerm2, xterm with sixel), and as coloured blocks elsewhere. Force one with
 `TOS_IMAGES=kitty|iterm2|sixel|blocks`. Enter in a `.csv`/`.tsv` preview opens a **grid editor**: arrows move,
 `e` edits a cell, `a`/`A` add a row or column, `d`/`D` delete one, `u` undoes, `Ctrl+s` saves and `q` or `Ctrl+e` closes.
-`v` (or `V` for whole rows, or a mouse drag) selects a range of cells, and `y` copies it as tab-separated text,
+`v` (or `V` for whole rows, or a mouse drag) selects a range of cells, and `y` or `Ctrl+c` copies it as tab-separated text,
 which spreadsheet apps paste as cells. `E` opens any text file in Neovim.
 
 **PDFs** in the finder show their text; `t` shows each page as an image (`+`/`-` zoom, `0` fit width), and `t`

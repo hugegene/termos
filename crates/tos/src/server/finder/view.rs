@@ -37,6 +37,8 @@ pub struct View {
     pub links: Vec<Link>,
     /// For a spreadsheet: which sheet this is (0-based), and how many there are.
     pub sheets: Option<(usize, usize)>,
+    /// How many columns at the start of each line are line numbers (a code file's), which aren't selected.
+    pub gutter: usize,
 }
 
 /// A link, or the part of one on one line: columns `start..end` of rendered line `line`, and where it points.
@@ -50,7 +52,7 @@ pub struct Link {
 
 impl View {
     fn lines(info: String, lines: Vec<Line<'static>>) -> View {
-        View { info, body: Body::Lines(lines), links: Vec::new(), sheets: None }
+        View { info, body: Body::Lines(lines), links: Vec::new(), sheets: None, gutter: 0 }
     }
 }
 
@@ -69,7 +71,7 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
         Preview::Dir(entries) => View::lines(format!("folder · {} items", entries.len()), dir_lines(&entries)),
         Preview::Markdown(src) | Preview::Html(src) => {
             let (lines, links) = markdown(&src, width);
-            View { info: info(""), body: Body::Lines(lines), links, sheets: None }
+            View { info: info(""), body: Body::Lines(lines), links, sheets: None, gutter: 0 }
         }
         Preview::Csv { rows, truncated } => {
             let mut lines = table(&rows, width, true);
@@ -80,7 +82,7 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
         }
         Preview::Image { thumbnail, width: w, height: h } => {
             let body = Body::Image(Arc::new(thumbnail), next_image_id());
-            View { info: info(&format!("{w}×{h}")), body, links: Vec::new(), sheets: None }
+            View { info: info(&format!("{w}×{h}")), body, links: Vec::new(), sheets: None, gutter: 0 }
         }
         Preview::Pdf { info: doc, pages, truncated } => {
             let (mut lines, _) = super::pdf::text_lines(1, &pages, width);
@@ -92,9 +94,13 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
         Preview::Video { info: facts, frame } => {
             let info = info(&facts.summary());
             match frame {
-                Some(Ok(img)) => {
-                    View { info, body: Body::Image(Arc::new(img), next_image_id()), links: Vec::new(), sheets: None }
-                }
+                Some(Ok(img)) => View {
+                    info,
+                    body: Body::Image(Arc::new(img), next_image_id()),
+                    links: Vec::new(),
+                    sheets: None,
+                    gutter: 0,
+                },
                 Some(Err(e)) => View::lines(
                     info,
                     vec![Line::styled(format!("can't show a frame: {e}"), Style::default().fg(Color::Red))],
@@ -119,14 +125,21 @@ pub fn build(preview: Preview, kind: &Kind, size: Option<u64>, width: u16) -> Vi
                 lines.push(Line::styled("… the preview stops here (file too large)", dim()));
             }
             let slides = doc.slides.map(|n| format!("{n} slide{}", if n == 1 { "" } else { "s" }));
-            View { info: info(slides.as_deref().unwrap_or("")), body: Body::Lines(lines), links, sheets: None }
+            View {
+                info: info(slides.as_deref().unwrap_or("")),
+                body: Body::Lines(lines),
+                links,
+                sheets: None,
+                gutter: 0,
+            }
         }
         Preview::Text { text, syntax, truncated } => {
-            let mut lines = code_lines(&text, syntax.as_deref());
+            let (mut lines, gutter) = code_lines(&text, syntax.as_deref());
             if truncated {
-                lines.push(Line::styled("… the preview stops here (file too large)", dim()));
+                // Lined up with the code, past the gutter.
+                lines.push(Line::styled(format!("{:gutter$}… the preview stops here (file too large)", ""), dim()));
             }
-            View::lines(info(""), lines)
+            View { gutter, ..View::lines(info(""), lines) }
         }
         Preview::Binary { size } => {
             View::lines(info(""), vec![Line::styled(format!("binary file, {}", human_size(size)), dim())])
@@ -157,10 +170,11 @@ fn dir_lines(entries: &[Entry]) -> Vec<Line<'static>> {
 }
 
 /// Source code or plain text with line numbers and syntax colours.
-fn code_lines(text: &str, syntax: Option<&str>) -> Vec<Line<'static>> {
+/// The lines, each after its line number, and how many columns the numbers take ("12 │ ").
+fn code_lines(text: &str, syntax: Option<&str>) -> (Vec<Line<'static>>, usize) {
     let highlighted = Highlighter::get().highlight(text, syntax, MAX_HIGHLIGHT_LINES);
     let digits = highlighted.len().max(1).to_string().len();
-    highlighted
+    let lines = highlighted
         .into_iter()
         .enumerate()
         .map(|(i, pieces)| {
@@ -168,7 +182,8 @@ fn code_lines(text: &str, syntax: Option<&str>) -> Vec<Line<'static>> {
             spans.extend(pieces.into_iter().map(|(s, t)| Span::styled(t, s)));
             Line::from(spans)
         })
-        .collect()
+        .collect();
+    (lines, digits + 3)
 }
 
 fn truncate(s: &str, width: usize) -> String {

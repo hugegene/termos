@@ -457,6 +457,10 @@ impl Grid {
         if close {
             return self.close();
         }
+        // Ctrl+c copies as y does (and Ctrl+Shift+c, where the terminal passes it on).
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c' | 'C')) {
+            return self.copy();
+        }
         if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() {
             match key.code {
                 KeyCode::Char('v') => return self.toggle_range(false),
@@ -697,6 +701,11 @@ impl Grid {
             left -= w;
             col += 1;
         }
+    }
+
+    /// The left button went down on a cell and hasn't come up.
+    pub fn mouse_held(&self) -> bool {
+        self.press.is_some()
     }
 
     /// A click picks a cell; a drag selects a range, which is copied when the button comes up; the wheel scrolls.

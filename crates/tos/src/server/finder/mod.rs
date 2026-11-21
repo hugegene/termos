@@ -6,6 +6,7 @@ mod grid;
 mod highlight;
 mod menu;
 mod pdf;
+mod select;
 pub mod view;
 
 use std::cell::RefCell;
@@ -28,6 +29,8 @@ use pdf::{Merge, PageImage, PdfJob, PdfResult, PdfView, Zoom};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Line;
+use select::{Making, Selection};
 
 use super::Ev;
 use super::editor::Editor;
@@ -115,8 +118,9 @@ pub enum Action {
     FocusFiles,
     /// Copy this text to the clipboard (the menu's Copy name and Copy path).
     Copy(String),
-    /// Copy cells from the grid; `what` says how many, for the status bar ("3 rows × 2 columns").
-    CopyCells {
+    /// Copy cells from the grid, or text selected in the preview; `what` says how much, for the status bar
+    /// ("3 rows × 2 columns", "4 lines").
+    CopyText {
         text: String,
         what: String,
     },
@@ -204,6 +208,8 @@ pub struct Finder {
     popup: Option<Popup>,
     /// The command that moves a file to the trash; the path is added at the end.
     trash: Vec<String>,
+    /// Text selected in the preview (plan: docs/plans/2026-11-21-preview-select-copy.md).
+    selection: Option<Selection>,
 }
 
 /// What the worker remembers about a PDF: when the file last changed, what `pdfinfo` said, and whether its
@@ -430,6 +436,7 @@ impl Finder {
             history: Vec::new(),
             popup: None,
             trash: menu::trash_command(),
+            selection: None,
         };
         f.cd(dir, None);
         f
@@ -514,6 +521,7 @@ impl Finder {
             // A PDF wraps its text again and renders its page again; it isn't reloaded.
             self.view_width = width;
             p.relayout(usize::from(width));
+            self.selection = None;
             self.pdf_request();
         } else if width != self.view_width {
             self.request_preview(true);
@@ -610,12 +618,14 @@ impl Finder {
             self.preview_path = None;
             self.view = None;
             self.pdf = None;
+            self.selection = None;
             return;
         };
         let width = self.preview_width();
         if !force && self.preview_path.as_ref() == Some(&entry.path) && self.view_width == width {
             return;
         }
+        self.selection = None;
         if self.preview_path.as_ref() != Some(&entry.path) {
             self.scroll = 0;
             self.view = None;
@@ -679,6 +689,7 @@ impl Finder {
         if p.no_text {
             return Action::Flash("this PDF has no text".into());
         }
+        self.selection = None;
         self.pdf_pages = !self.pdf_pages;
         p.error = None;
         if self.pdf_pages {
@@ -767,6 +778,7 @@ impl Finder {
                 if self.preview_path.as_ref() == Some(&path) && self.view_width == width && self.pdf.is_none() {
                     self.view = Some(view);
                     self.image_cache.replace(None);
+                    self.selection = None;
                 }
             }
             FinderEvent::Pdf { path, job, info, result } => {
@@ -776,8 +788,17 @@ impl Finder {
                 }
                 match (job, result) {
                     (PdfJob::Text { first, .. }, PdfResult::Text { pages, truncated }) => {
-                        if let Merge::Prepended(lines) = p.add_text(first, pages, truncated) {
-                            self.scroll += lines;
+                        match p.add_text(first, pages, truncated) {
+                            Merge::Prepended(lines) => {
+                                self.scroll += lines;
+                                // The selection stays on its text.
+                                if let Some(s) = self.selection.as_mut() {
+                                    s.anchor.0 += lines;
+                                    s.head.0 += lines;
+                                }
+                            }
+                            Merge::Replaced => self.selection = None,
+                            Merge::Appended => {}
                         }
                     }
                     (PdfJob::Page { page, zoom, viewport }, PdfResult::Page { image }) => {
@@ -1015,6 +1036,140 @@ impl Finder {
         }
     }
 
+    // ----- selecting text -----
+
+    /// The preview's text lines and their gutter, unless it shows a picture or a PDF's pages.
+    fn text_lines(&self) -> Option<(&[Line<'static>], usize)> {
+        if let Some(p) = &self.pdf {
+            return (!self.pdf_pages_view()).then_some((p.lines.as_slice(), 0));
+        }
+        match self.view.as_ref()? {
+            View { body: Body::Lines(lines), gutter, .. } => Some((lines.as_slice(), *gutter)),
+            _ => None,
+        }
+    }
+
+    /// The point in the text at screen position `x`, `y`; the pane's last column is the end of the line. While
+    /// dragging (`drag`), a point above or below the preview scrolls it a line and counts as its first or last row.
+    fn text_point(&mut self, x: u16, y: u16, drag: bool) -> Option<select::Point> {
+        let body = self.body_rect();
+        let (count, gutter) = self.text_lines().map(|(l, g)| (l.len(), g))?;
+        if count == 0 || body.height == 0 || (!drag && !super::layout::contains(body, x, y)) {
+            return None;
+        }
+        let row = if y < body.y {
+            self.scroll_by(-1);
+            0
+        } else if y >= body.bottom() {
+            self.scroll_by(1);
+            body.height - 1
+        } else {
+            y - body.y
+        };
+        let line = (self.text_top() + usize::from(row)).min(count - 1);
+        // The text starts after a column of padding and the gutter.
+        let col = if x + 1 >= body.right() {
+            usize::MAX
+        } else {
+            usize::from(x.saturating_sub(body.x + 1)).saturating_sub(gutter)
+        };
+        Some((line, col))
+    }
+
+    /// The mouse button went down in the preview (the text or the grid) and is still down, so the server sends
+    /// the drag here until it comes up, wherever the pointer goes.
+    pub fn mouse_held(&self) -> bool {
+        match &self.grid {
+            Some(g) => g.mouse_held(),
+            None => self.selection.as_ref().is_some_and(|s| s.making == Making::Mouse),
+        }
+    }
+
+    /// The selected text to the clipboard.
+    fn copy_selection(&self) -> Action {
+        let (Some(sel), Some((lines, gutter))) = (&self.selection, self.text_lines()) else { return Action::None };
+        let text = sel.text(lines, gutter);
+        if text.len() > select::MAX_COPY {
+            return Action::Flash(format!("too big to copy ({:.1} MB)", text.len() as f64 / f64::from(1 << 20)));
+        } else if text.is_empty() {
+            return Action::Flash("nothing to copy: the selected lines are blank".into());
+        }
+        let what = sel.describe(&text);
+        Action::CopyText { text, what }
+    }
+
+    /// Keys for selecting text in the preview, or `None` for keys that do what they always do. `v` or `V`
+    /// starts a selection of whole lines, and while it's made the scroll keys move its end. `y` and `Ctrl+c`
+    /// copy (and `Ctrl+Shift+c`, where the terminal passes it on); `Esc` cancels.
+    fn selection_key(&mut self, key: &KeyEvent, ctrl: bool, g_pending: bool) -> Option<Action> {
+        let copy = (ctrl && matches!(key.code, KeyCode::Char('c' | 'C')))
+            || (key.code == KeyCode::Char('y') && key.modifiers.is_empty());
+        let start =
+            matches!(key.code, KeyCode::Char('v' | 'V')) && key.modifiers.difference(KeyModifiers::SHIFT).is_empty();
+        let making = self.selection.as_ref().filter(|s| s.shown()).map(|s| s.making);
+        match making {
+            Some(Making::Keys) => Some(self.extend_key(key, copy, ctrl, g_pending)),
+            Some(Making::Mouse) => None,
+            Some(Making::Done) if copy => Some(self.copy_selection()),
+            Some(Making::Done) if key.code == KeyCode::Esc => {
+                self.selection = None;
+                Some(Action::None)
+            }
+            _ if start => {
+                if self.text_lines().is_some_and(|(l, _)| !l.is_empty()) {
+                    self.selection = Some(Selection::keys(self.text_top()));
+                }
+                Some(Action::None)
+            }
+            None if copy && ctrl && self.text_lines().is_some() => {
+                Some(Action::Flash("nothing selected: drag over the text, or press v".into()))
+            }
+            _ => None,
+        }
+    }
+
+    /// A key while selecting lines with the keyboard: the scroll keys move the selection's end, keeping it on
+    /// screen; `y`, `Ctrl+c` or `Enter` copies and ends it; `Esc`, `v`, `V` or `q` ends it. Other keys do nothing.
+    fn extend_key(&mut self, key: &KeyEvent, copy: bool, ctrl: bool, g_pending: bool) -> Action {
+        if copy || key.code == KeyCode::Enter {
+            let action = self.copy_selection();
+            self.selection = None;
+            return action;
+        }
+        let page = self.preview_rows() as isize;
+        let delta = match key.code {
+            KeyCode::Char('j') | KeyCode::Down => 1,
+            KeyCode::Char('k') | KeyCode::Up => -1,
+            KeyCode::Char('d') if ctrl => page / 2,
+            KeyCode::Char('u') if ctrl => -page / 2,
+            KeyCode::Char(' ') | KeyCode::PageDown => page,
+            KeyCode::Char('b') | KeyCode::PageUp => -page,
+            KeyCode::Char('g') if g_pending => isize::MIN / 2,
+            KeyCode::Home => isize::MIN / 2,
+            KeyCode::Char('G') | KeyCode::End => isize::MAX / 2,
+            KeyCode::Char('g') => {
+                self.pending_g = true;
+                0
+            }
+            KeyCode::Esc | KeyCode::Char('v' | 'V' | 'q') => {
+                self.selection = None;
+                return Action::None;
+            }
+            _ => 0,
+        };
+        let (count, top, rows) = (self.line_count(), self.text_top(), self.preview_rows());
+        if let Some(sel) = self.selection.as_mut() {
+            sel.extend(delta, count);
+            let head = sel.head.0;
+            if head < top {
+                self.scroll = head;
+            } else if head >= top + rows {
+                self.scroll = head + 1 - rows;
+            }
+        }
+        Action::None
+    }
+
     // ----- input -----
 
     /// A key typed in the file list (`preview` false) or in the preview pane (`preview` true).
@@ -1046,12 +1201,17 @@ impl Finder {
                     }
                     return action;
                 }
-                grid::Outcome::Copy { text, what } => return Action::CopyCells { text, what },
+                grid::Outcome::Copy { text, what } => return Action::CopyText { text, what },
                 grid::Outcome::OpenApp(path) => return Action::OpenApp(path),
             }
             return Action::None;
         }
         if let Some(action) = self.popup_key(key) {
+            return action;
+        }
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let g_pending = std::mem::take(&mut self.pending_g);
+        if preview && let Some(action) = self.selection_key(key, ctrl, g_pending) {
             return action;
         }
         // E edits any text file in Neovim, CSV included.
@@ -1061,8 +1221,6 @@ impl Finder {
             self.edit_from_list = !preview;
             return Action::OpenEditor(p);
         }
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let g_pending = std::mem::take(&mut self.pending_g);
         let page = self.list_rows() as isize;
         if self.filtering {
             match key.code {
@@ -1191,7 +1349,7 @@ impl Finder {
                 && preview
                 && let grid::Outcome::Copy { text, what } = g.handle_mouse(ev, body)
             {
-                return Action::CopyCells { text, what };
+                return Action::CopyText { text, what };
             }
             return Action::None;
         }
@@ -1205,7 +1363,24 @@ impl Finder {
             MouseEventKind::ScrollUp if in_list => self.move_selection(-3),
             MouseEventKind::ScrollDown if preview => self.preview_wheel(3),
             MouseEventKind::ScrollUp if preview => self.preview_wheel(-3),
+            // A press starts a selection; a link is followed on release if the mouse didn't move, so a drag can
+            // start on one.
             MouseEventKind::Down(MouseButton::Left) if preview => {
+                self.selection = self.text_point(x, y, false).map(Selection::press);
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.mouse_held() => {
+                if let Some(at) = self.text_point(x, y, true)
+                    && let Some(sel) = self.selection.as_mut()
+                {
+                    sel.drag(at);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.mouse_held() => {
+                if let Some(sel) = self.selection.as_mut().filter(|s| s.shown()) {
+                    sel.making = Making::Done;
+                    return self.copy_selection();
+                }
+                self.selection = None;
                 if let Some(url) = self.link_at(x, y) {
                     return self.follow(&url);
                 }
@@ -1245,6 +1420,13 @@ impl Finder {
         } else if !preview {
             return "o app · ←→ focus · / filter · . hidden · m menu";
         }
+        if let Some(sel) = self.selection.as_ref().filter(|s| s.shown()) {
+            return if sel.making == Making::Keys {
+                "j/k extend · y copy · Esc cancel"
+            } else {
+                "Ctrl+c copy · Esc clear"
+            };
+        }
         let back = !self.history.is_empty();
         if self.pdf_pages_view() {
             let pans = self.pdf.as_ref().is_some_and(|p| p.pans(self.viewport_px().0));
@@ -1255,23 +1437,23 @@ impl Finder {
             };
         }
         if self.pdf.is_some() {
-            return "o app · [ ] page · t image · ←→ focus";
+            return "o app · [ ] page · t image · ←→ focus · v select";
         }
         if self.sheet_view().is_some() {
             return "Enter grid · o app · [ ] sheet · ←→ focus";
         }
         if self.editable().is_some() {
             return if back {
-                "Enter edit · o app · [ ] page · Backspace back · ←→ focus"
+                "Enter edit · o app · [ ] page · Backspace back · ←→ focus · v select"
             } else {
-                "Enter edit · o app · [ ] page · ←→ focus"
+                "Enter edit · o app · [ ] page · ←→ focus · v select"
             };
         }
         // Text to scroll, or a picture, a video or nothing much.
         let pages = matches!(self.preview_kind, Some(Kind::Docx | Kind::Pptx | Kind::Dir));
         match (pages, back) {
-            (true, false) => "o app · [ ] page · ←→ focus",
-            (true, true) => "o app · [ ] page · Backspace back · ←→ focus",
+            (true, false) => "o app · [ ] page · ←→ focus · v select",
+            (true, true) => "o app · [ ] page · Backspace back · ←→ focus · v select",
             (false, false) => "o app · ←→ focus",
             (false, true) => "o app · Backspace back · ←→ focus",
         }
@@ -1394,6 +1576,9 @@ impl Finder {
                 for (row, line) in lines.iter().skip(self.scroll.min(max)).take(usize::from(body.height)).enumerate() {
                     buf.set_line(body.x + 1, body.y + row as u16, line, body.width.saturating_sub(1));
                 }
+                if let Some(sel) = &self.selection {
+                    sel.draw(buf, lines, self.scroll.min(max), view.gutter, body.x + 1, body);
+                }
             }
             Body::Image(img, id) => {
                 let area = Rect::new(body.x + 1, body.y, body.width.saturating_sub(2), body.height);
@@ -1430,6 +1615,9 @@ impl Finder {
             }
             for (row, line) in p.lines.iter().skip(self.text_top()).take(usize::from(body.height)).enumerate() {
                 buf.set_line(body.x + 1, body.y + row as u16, line, width);
+            }
+            if let Some(sel) = &self.selection {
+                sel.draw(buf, &p.lines, self.text_top(), 0, body.x + 1, body);
             }
             return;
         }
@@ -1646,5 +1834,93 @@ mod tests {
         h.restore_state(&old);
         let text = h.list_text();
         assert!(text.contains(".hidden") && !text.contains("1 hidden"), "{text}");
+    }
+
+    /// A finder on a folder holding just `main.rs`, with its preview at columns 30 to 69 and loaded.
+    fn code_preview() -> (Finder, mpsc::Receiver<Ev>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {\n    run();\n}\n").unwrap();
+        let (mut f, rx) = finder(dir.path(), false);
+        f.resize_preview(Rect::new(30, 0, 40, 10), (8, 16));
+        while f.view.is_none() {
+            if let Ev::Finder(_, ev) = rx.recv_timeout(Duration::from_secs(10)).expect("a preview") {
+                f.on_event(ev);
+            }
+        }
+        (f, rx, dir)
+    }
+
+    fn mouse(f: &mut Finder, kind: MouseEventKind, column: u16, row: u16) -> Action {
+        f.handle_mouse(&MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }, true)
+    }
+
+    fn preview_key(f: &mut Finder, code: KeyCode, modifiers: KeyModifiers) -> Action {
+        f.handle_key(&KeyEvent::new(code, modifiers), true)
+    }
+
+    fn copied(action: Action) -> (String, String) {
+        match action {
+            Action::CopyText { text, what } => (text, what),
+            _ => panic!("nothing copied"),
+        }
+    }
+
+    #[test]
+    fn a_drag_in_the_preview_copies_and_ctrl_c_copies_again() {
+        let (mut f, _rx, _dir) = code_preview();
+        // The body starts on row 1 (below the header); text at column 31, after the padding, and the gutter
+        // ("1 │ ") takes 4 more columns. Press on "main", drag to the "u" of "run" on the next line.
+        let left = MouseButton::Left;
+        assert!(matches!(mouse(&mut f, MouseEventKind::Down(left), 38, 1), Action::None));
+        assert!(f.mouse_held());
+        mouse(&mut f, MouseEventKind::Drag(left), 40, 2);
+        let (text, what) = copied(mouse(&mut f, MouseEventKind::Up(left), 40, 2));
+        assert_eq!((text.as_str(), what.as_str()), ("main() {\n    ru", "2 lines"));
+        assert!(!f.mouse_held());
+        assert_eq!(f.hint(true), "Ctrl+c copy · Esc clear");
+        // The selection is drawn reversed, from "m" (column 38) to "u" (column 40).
+        let mut buf = Buffer::empty(Rect::new(0, 0, 70, 10));
+        f.render_preview(&mut buf, f.preview_rect, true, Color::Green, None, None);
+        let rev = |x, y| buf[(x, y)].modifier.contains(Modifier::REVERSED);
+        assert!(!rev(37, 1) && rev(38, 1) && rev(35, 2) && rev(40, 2) && !rev(41, 2));
+
+        let ctrl_c = preview_key(&mut f, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(copied(ctrl_c).0, "main() {\n    ru");
+        // Ctrl+Shift+c, where the terminal passes it on, is the same.
+        let ctrl_shift_c = preview_key(&mut f, KeyCode::Char('C'), KeyModifiers::CONTROL | KeyModifiers::SHIFT);
+        assert_eq!(copied(ctrl_shift_c).0, "main() {\n    ru");
+
+        // Esc clears it; then Ctrl+c says how to select.
+        preview_key(&mut f, KeyCode::Esc, KeyModifiers::NONE);
+        assert!(f.selection.is_none());
+        let Action::Flash(hint) = preview_key(&mut f, KeyCode::Char('c'), KeyModifiers::CONTROL) else { panic!() };
+        assert!(hint.starts_with("nothing selected"), "{hint}");
+
+        // A click without a drag selects nothing.
+        mouse(&mut f, MouseEventKind::Down(left), 38, 1);
+        assert!(matches!(mouse(&mut f, MouseEventKind::Up(left), 38, 1), Action::None));
+        assert!(f.selection.is_none());
+    }
+
+    #[test]
+    fn v_selects_lines_with_the_keyboard() {
+        let (mut f, _rx, _dir) = code_preview();
+        let none = KeyModifiers::NONE;
+        assert!(f.hint(true).contains("v select"), "{}", f.hint(true));
+        preview_key(&mut f, KeyCode::Char('v'), none);
+        assert_eq!(f.hint(true), "j/k extend · y copy · Esc cancel");
+        preview_key(&mut f, KeyCode::Char('j'), none);
+        // Other keys do nothing while selecting: `E` doesn't open the editor.
+        assert!(matches!(preview_key(&mut f, KeyCode::Char('E'), none), Action::None));
+        let (text, what) = copied(preview_key(&mut f, KeyCode::Char('y'), none));
+        assert_eq!((text.as_str(), what.as_str()), ("fn main() {\n    run();", "2 lines"));
+        assert!(f.selection.is_none());
+
+        // G goes to the last line; Esc cancels.
+        preview_key(&mut f, KeyCode::Char('V'), KeyModifiers::SHIFT);
+        preview_key(&mut f, KeyCode::Char('G'), KeyModifiers::SHIFT);
+        assert_eq!(f.selection.as_ref().map(|s| s.head.0), Some(2));
+        preview_key(&mut f, KeyCode::Esc, none);
+        assert!(f.selection.is_none());
     }
 }

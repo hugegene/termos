@@ -200,10 +200,13 @@ enum Mode {
 
 const NORMAL: Mode = Mode::Modal(Modal::Normal);
 
+/// What a drag with the mouse is doing. `Finder`: a press in a finder's preview (selecting text or grid cells),
+/// whose drag goes to that finder until the button comes up, even over the file list.
 enum Drag {
     Border { path: Vec<bool>, area: Rect, vertical: bool },
     Select { pane: PaneId, rect: Rect, start: Point, started: bool },
     Forward { pane: PaneId, rect: Rect },
+    Finder { finder: PaneId },
 }
 
 pub struct Server {
@@ -1473,7 +1476,7 @@ impl Server {
                 self.copy_to_clipboard(None, &text);
                 self.flash(format!("copied '{text}'"));
             }
-            Action::CopyCells { text, what } => {
+            Action::CopyText { text, what } => {
                 self.copy_to_clipboard(None, &text);
                 self.flash(format!("copied {what}"));
             }
@@ -1724,6 +1727,9 @@ impl Server {
                 return;
             }
             let action = f.handle_mouse(&ev, preview);
+            if preview && f.mouse_held() {
+                self.drag = Some(Drag::Finder { finder: fid });
+            }
             self.finder_action(fid, action);
             return;
         }
@@ -1797,6 +1803,14 @@ impl Server {
                 if moving {
                     self.drag = Some(Drag::Forward { pane, rect });
                 }
+            }
+            Drag::Finder { finder } => {
+                let Some(f) = self.finder_mut(finder) else { return true };
+                let action = f.handle_mouse(ev, true);
+                if moving && f.mouse_held() {
+                    self.drag = Some(Drag::Finder { finder });
+                }
+                self.finder_action(finder, action);
             }
         }
         self.dirty = true;

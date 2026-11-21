@@ -592,6 +592,47 @@ fn finder_follows_markdown_links() {
     s.wait_for("no such file: nope.md");
 }
 
+/// Plan: docs/plans/2026-11-21-preview-select-copy.md.
+#[test]
+fn drag_in_the_finder_preview_copies() {
+    let env = Env::new("e2e-pcopy");
+    let files = env.root.join("p");
+    fs::create_dir_all(&files).unwrap();
+    fs::write(files.join("notes.txt"), "alpha beta\ngamma delta\n").unwrap();
+    env.tos(&["start"]);
+    open_finder(&env, &files);
+    // Wide enough for the caption after the mode list.
+    let s = env.attach(150, 24);
+    let text = s.wait_for("gamma delta");
+    let at = |word: &str| {
+        let (row, line) = text.lines().enumerate().find(|(_, l)| l.contains(word)).unwrap();
+        let col = line[..line.find(word).unwrap()].chars().count();
+        (col as u16 + 1, row as u16 + 1)
+    };
+    // Press on "beta", drag to the end of "delta", and let go over the file list.
+    let ((x0, y0), (x1, y1)) = (at("beta"), at("delta"));
+    s.send(format!("\x1b[<0;{x0};{y0}M\x1b[<32;{};{y1}M\x1b[<0;3;{y1}m", x1 + 4).as_bytes());
+    let clip = wait("clipboard", || s.proxy.clipboard.lock().unwrap().last().cloned());
+    assert_eq!(clip, "beta\ngamma delta");
+    s.wait_for("copied 2 lines");
+    s.wait_for("Ctrl+c copy · Esc clear");
+
+    // The press focused the preview, where Ctrl+c copies it again.
+    s.send(b"\x03");
+    wait("copied again", || (s.proxy.clipboard.lock().unwrap().len() == 2).then_some(()));
+
+    // Esc clears it (sent alone: Esc and v together read as Alt+v).
+    s.send(b"\x1b");
+    s.wait_until("the selection cleared", |t| !t.contains("Esc clear"));
+    // v selects lines from the top of the preview; j adds one and y copies them.
+    s.send(b"v");
+    s.wait_for("j/k extend");
+    s.send(b"jy");
+    wait("lines copied", || {
+        (s.proxy.clipboard.lock().unwrap().last().map(String::as_str) == Some("alpha beta\ngamma delta")).then_some(())
+    });
+}
+
 #[test]
 fn zellij_modes() {
     let env = Env::new("e2e-modes");
