@@ -1,6 +1,6 @@
 # Plan: a demo animation for the README
 
-**Status:** done · **Date:** 2026-11-13 · **Changed** (2026-11-13, at the user's request):
+**Status:** done · **Date:** 2026-11-13 · **Changed** (2026-11-13 and 2026-11-21, at the user's request):
 - it starts with `tos attach` from a plain shell, and ends with Claude Code in a new tab
 - it's recorded in Ghostty instead of xterm, so pictures are in full colour
 - it's an animated WebP instead of a GIF: lossless, because a GIF's 256 colours undid Ghostty's full-colour
@@ -13,6 +13,12 @@
 - the order is now: `tos attach`, a finder tab, Claude Code in a new tab writing `server.py`, back to the
   finder where `/server` finds it, then the walk through every file (the user's request). Recorded at 99 s (WebP
   1.5 MB, GIF 1.2 MB) and 33 s for the short GIF (0.8 MB); Claude's 12 s plays at 2× and 6×
+- **2026-11-21:** Claude writes a plan instead of a server, to show the docs pane. It's started as `tos claude`
+  and asked for `plan.md`; the docs pane opens with the plan on the right of its tab. `Ctrl+p` `→` focuses the
+  pane, `V` `j` `y` copy the plan's first lines, `Ctrl+p` `←` and `Ctrl+Shift+v` twice paste them into Claude's
+  prompt (not sent). Back in the finder, `/plan` finds `plan.md`, rendered. See "Example: the Claude step" below.
+  Recorded at 111 s (WebP 1.4 MB, GIF 1.3 MB) and 44 s for the short GIF (0.9 MB); Claude's 10.5 s plays at 2×
+  ([finding](../findings/2026-11-21-demo-docs-pane.md)).
 
 **Findings:**
 [recording the finder demo GIF](../findings/2026-11-13-demo-gif-recording.md),
@@ -20,6 +26,7 @@
 [recording in Ghostty](../findings/2026-11-13-ghostty-demo.md),
 [WebP instead of GIF](../findings/2026-11-13-demo-webp.md),
 [the Ghibli video and picture](../findings/2026-11-13-demo-ghibli-media.md),
+[the docs pane in the demo](../findings/2026-11-21-demo-docs-pane.md),
 [`tb`'s finder images in xterm](../findings/2026-11-05-xterm-sixel.md)
 
 ## Decision
@@ -59,8 +66,9 @@ ffmpeg and adds a caption bar. Each recording writes a GIF, `docs/images/finder-
 | `report.pdf` | the text; `t` shows the page as an image, `]` the next page, `t` back |
 | `sales.csv` | the table; `→` `Enter` opens the grid, `e` changes a cell, `Alt+s` saves, `q` closes |
 | `snapshot.png` | the picture, in full colour (the kitty protocol): a generated frame of a baby in a cape (made up: `sunset.png`) |
-| new tab | `Ctrl+t` `n`; `claude`; a prompt for a simple web server; Claude's work, sped up (the caption says how much) |
-| back | `Ctrl+t` `Tab` `Esc` to the finder, which lists `server.py`; `↑` shows it highlighted |
+| new tab | `Ctrl+t` `n`; `tos claude`; a prompt for a short plan in `plan.md`; Claude's work, sped up (the caption says how much); the docs pane opens with the plan |
+| docs pane | `Ctrl+p` `→` `Esc` focuses it; `V`, `j`…, `y` copy the plan's first lines; `Ctrl+p` `←` `Esc`, then `Ctrl+Shift+v` twice, paste them into Claude's prompt |
+| back | `Ctrl+t` `Tab` `Esc` to the finder; `/plan` finds `plan.md`, rendered; `Esc` clears the filter |
 
 - **The sample files are made up** (`scripts/demo/make_files.py`): a bakery's folder.
   - **The video and the picture:** `--video` and `--image` give them. The README's recording uses
@@ -72,8 +80,23 @@ ffmpeg and adds a caption bar. Each recording writes a GIF, `docs/images/finder-
 
 ## Example: the Claude step, key by key
 
+Changed on 2026-11-21: Claude writes `plan.md` instead of `server.py`, and the docs pane shows it.
+
+```
+ tab "2 bakery"                                   ┌ finder tab ─────────────┐
+ ┌ claude (60%) ─────────────┬ docs (40%) ───────┐ │ /plan                   │
+ │ ❯ Write a short plan in   │ ▾ plan.md         │ │ ▸ plan.md  │ # Plan …   │
+ │   plan.md for …           │ # Plan: online …  │ │            │ (rendered) │
+ │ ⏺ Write(plan.md)  ──(1)──▶│ 1. Add an order … │ └─────────────────────────┘
+ │ ❯ # Plan: online … ◀─(3)──┤ (2) V j j y copies│        ▲ (4) Ctrl+t Tab, /plan
+ └───────────────────────────┴───────────────────┘
+ (1) the hook: tos hook --agent claude ─▶ add-doc ─▶ the server opens the docs pane
+ (2) OSC 52 from the docs pane ─▶ tos ─▶ Ghostty's clipboard
+ (3) Ctrl+Shift+v: Ghostty pastes ─▶ tos ─▶ Claude's prompt
+```
+
 1. **`Ctrl+t` `n`:** a new tab, "2 bakery", opens with a shell.
-2. **`claude`, `Enter`:** Claude Code starts. Its config folder is the script's own:
+2. **`tos claude`, `Enter`:** Claude Code starts with the docs pane's hook. Its config folder is the script's own:
    - a copy of your login
    - the notices you've already seen
    - the sample folder trusted
@@ -81,16 +104,23 @@ ffmpeg and adds a caption bar. Each recording writes a GIF, `docs/images/finder-
    So it starts without first-run notices.
 3. **The script waits for Claude's prompt.** It polls `tos dump-screen` until `❯` shows.
 4. **It types the request and presses `Enter`:**
-   `Write a simple web server in server.py that says "Hello from the bakery!"`.
+   `Write a short plan in plan.md for taking the bakery's orders online`.
 5. **The script waits for Claude to finish.** Every 1.5 s it reads the screen again. It stops when all three hold:
-   - `server.py` exists
+   - `plan.md` exists
    - "esc to interrupt" is gone
    - the screen is unchanged since the last read
 
-   In the recorded run this took 12 s, shown at 2×. The factor is the time taken ÷ 6 s, at least 2.
-6. **"Done: Claude's reply" shows for 4.5 s.**
-7. **`Ctrl+t` `Tab` `Esc`, then `↑`:** back in the finder, the list keeps the picture (`snapshot.png` or
-   `sunset.png`) selected by name, so `↑` lands on the new `server.py`, which sorts just before it.
+   Meanwhile the hook has opened the docs pane, on the right, with `plan.md` open. Claude's work is sped up to
+   show for at most 6 s; the factor is the time taken ÷ 6 s, at least 2.
+6. **"Done" shows for a few seconds,** with the plan beside Claude's reply.
+7. **`Ctrl+p` `→` `Esc`:** the docs pane has the focus. **`V`** selects the first line on screen, the plan's title;
+   **`j`** extends it to the first step, and **`y`** copies: the title line says `copied N characters`.
+8. **`Ctrl+p` `←` `Esc`, then `Ctrl+Shift+v` twice:** back in Claude, Ghostty pastes the lines into its prompt.
+   Claude folds a paste of several lines into `[Pasted text #1 +5 lines]`, and the second paste shows them. It
+   isn't sent. Ghostty runs with `--app-notifications=no-clipboard-copy`, so no toast covers the screen.
+9. **`Ctrl+t` `Tab` `Esc`, then `/plan` `Enter`:** in the finder, `plan.md` is highlighted and its preview is
+   rendered. `Esc` clears the filter, and the tour starts from the first file. It passes `plan.md` on its way
+   from `notes.docx` to `README.md`.
 
 ## Options considered
 

@@ -9,8 +9,9 @@ By default it writes docs/images/finder-demo.webp (lossless) and docs/images/fin
 pictures band a little), from one recording. --video and --image show your own video and picture instead of the
 made-up ones (see make_files.py); the README's demo uses a video and a frame from ~/ghibli-video.
 
-The tour: `tos attach` from a plain shell and a finder tab; a new tab where Claude Code writes a small web
-server; back in the finder, `/` finds it; then a walk through every kind of file. `--no-claude` leaves Claude out.
+The tour: `tos attach` from a plain shell and a finder tab; a new tab where `tos claude` writes a plan, which
+opens in the docs pane beside it; a few lines copied from the pane and pasted into Claude's prompt; back in the
+finder, `/` finds the plan; then a walk through every kind of file. `--no-claude` leaves Claude out.
 
 Needs Xvfb, Ghostty (or xterm with sixel, as Ubuntu's is), xdotool, ffmpeg, LibreOffice and Python with Pillow,
 openpyxl and matplotlib; for the Claude part, Claude Code signed in. Nothing touches your own sessions or files:
@@ -20,7 +21,7 @@ its own D-Bus; all of it is ended and removed afterwards. Plan: docs/plans/2026-
     ┌ Xvfb :N (virtual display) ───────────────────┐
     │  Ghostty (kitty images), own D-Bus           │  1 key presses   ┌──────────┐
     │   └ bash ── tos attach ── tos server ◀───────┼──────────────────│ this     │
-    │   tabs: finder · bash · claude               │  (xdotool)       │ script   │
+    │   tabs: finder · claude + docs pane          │  (xdotool)       │ script   │
     └──────────────────────────────────────────────┘                  └──────────┘
           │ 2 frames (ffmpeg x11grab)                                       │ 3 captions and fast-forwards,
           ▼                                                                 ▼   with their times
@@ -45,7 +46,7 @@ REPO = HERE.parent.parent
 COLS, ROWS = 104, 34  # 8×17-pixel cells: 832×578, about the width GitHub shows a README image at
 FPS = 15
 CAPTION_H = 40
-CLAUDE_PROMPT = 'Write a simple web server in server.py that says "Hello from the bakery!"'
+CLAUDE_PROMPT = "Write a short plan in plan.md for taking the bakery's orders online: a title and 5 numbered steps"
 CLAUDE_SHOWN = 6.0  # seconds that Claude's work takes in the full animation, at most (it's sped up to fit)
 CLAUDE_SHOWN_SHORT = 2.0  # and in the short one
 
@@ -160,9 +161,9 @@ def start(d):
     time.sleep(1.6)
 
 
-def tour(d, server):
+def tour(d, plan):
     """A walk through every file, from the top. The folder lists budget.xlsx, index.html, the video (mandelbrot.mp4
-    or movie.mp4), notes.docx, README.md, report.pdf, sales.csv, server.py (when Claude wrote it) and the picture
+    or movie.mp4), notes.docx, plan.md (when Claude wrote it), README.md, report.pdf, sales.csv and the picture
     (sunset.png or snapshot.png), in that order."""
     d.highlight(1.8)
     d.caption("`↓` `↑` move through the files · spreadsheets show as a table", pause=0.9)
@@ -198,6 +199,8 @@ def tour(d, server):
     d.key("Down", wait=0.2)
     d.caption("Word documents show as Markdown", pause=2.2)
 
+    if plan:  # shown already, from the docs pane's part
+        d.key("Down", wait=0.3)
     d.key("Down", wait=0.2)
     d.caption("Markdown is rendered", pause=1.8)
     d.caption("`→` `Enter` edits it: tick a box")
@@ -237,10 +240,6 @@ def tour(d, server):
     d.key("ctrl+e", wait=1.8)
     d.key("Left", wait=0.2)
 
-    if server:
-        d.key("Down", wait=0.2)
-        d.caption("Code shows highlighted: Claude's server.py", pause=1.4)
-
     d.highlight(2.2)
     d.key("Down", wait=0.2)
     d.caption("Images show for real in kitty, iTerm2, WezTerm, Ghostty or xterm", pause=1.5)
@@ -248,29 +247,71 @@ def tour(d, server):
     time.sleep(1.9)
 
 
+def lines_to_first_step(screen):
+    """How many `j`s take a selection from the plan's first line to the end of its first numbered step, in the
+    docs pane's text: plan.md's header line, then the file, rendered. 2 if there's no numbered step on screen."""
+    rows = screen.splitlines()
+    top = next((i + 1 for i, r in enumerate(rows) if "plan.md" in r), None)
+    if top is None:
+        return 2
+    for i in range(top, len(rows)):
+        if rows[i].lstrip().startswith(("1.", "1)")):
+            end = i
+            # The step's wrapped lines: indented, up to a blank line or the next step.
+            while end + 1 < len(rows) and rows[end + 1].startswith(" ") and rows[end + 1].strip() \
+                    and not rows[end + 1].lstrip()[:2].rstrip(".)").isdigit():
+                end += 1
+            return min(end - top, 12)
+    return 2
+
+
 def claude(d, folder):
-    """A new tab, Claude Code writing server.py there, then back to the finder, where `/` finds server.py and Esc
-    clears the filter, leaving the first file selected for the tour. A caption's {factor} is filled in for each
+    """A new tab, `tos claude` writing plan.md there, which opens in the docs pane on the tab's right; its first
+    lines copied from the pane and pasted into Claude's prompt; then back to the finder, where `/` finds plan.md and
+    Esc clears the filter, leaving the first file selected for the tour. A caption's {factor} is filled in for each
     animation, as each speeds Claude up differently."""
     with d.highlighting(3):
         d.caption("`Ctrl+t` `n` opens a new tab")
         d.key("ctrl+t", gap=0.3, wait=0)
         d.key("n", wait=1.0)
-        d.caption("Run Claude Code in it", pause=0.3)
-        d.type("claude")
+        d.caption("`tos claude` starts Claude Code, with tos's docs pane", pause=0.3)
+        d.type("tos claude")
         d.key("Return", wait=0.5)
         d.wait_screen(lambda s: "❯" in s, "Claude's prompt", timeout=30)
         time.sleep(1.2)
     with d.highlighting(4):
-        d.caption("Ask it for a simple web server", pause=0.3)
+        d.caption("Ask it for a plan", pause=0.3)
         d.type(CLAUDE_PROMPT, wait=0.8)
         d.key("Return", wait=0)
-    d.caption("Claude writes server.py (sped up {factor}×)", pause=0)
-    d.wait_for_claude(folder / "server.py")
-    d.highlight(2.8)
-    d.caption("Done: Claude's reply", pause=0.5)
+    d.caption("Claude writes plan.md, and it opens in the docs pane on the right (sped up {factor}×)", pause=0)
+    d.wait_for_claude(folder / "plan.md")
+    d.highlight(3.2)
+    d.caption("Done: the plan shows beside Claude, rendered", pause=0.5)
     d.snap()
-    time.sleep(4.0)
+    time.sleep(3.5)
+
+    with d.highlighting(2):
+        d.caption("`Ctrl+p` `→` `Esc` moves to the docs pane")
+        d.key("ctrl+p", gap=0.3, wait=0)
+        d.key("Right", "Escape", wait=0.8)
+    steps = lines_to_first_step(d.screen())
+    d.highlight(3.4)
+    d.caption("`V` selects lines · `j` adds more · `y` copies them", pause=0.4)
+    d.key("V", wait=0.4)
+    d.key(*["j"] * steps, gap=0.18, wait=0.5)
+    d.key("y", wait=1.4)
+    d.snap()
+    with d.highlighting(2):
+        d.caption("`Ctrl+p` `←` `Esc` goes back to Claude")
+        d.key("ctrl+p", gap=0.3, wait=0)
+        d.key("Left", "Escape", wait=0.6)
+    d.highlight(4.4)
+    # Claude folds a paste of several lines into "[Pasted text #1 +5 lines]"; the same paste again unfolds it.
+    d.caption("`Ctrl+Shift+v` pastes them into Claude's prompt · again shows them", pause=0.3)
+    d.key("ctrl+shift+v", wait=1.6)
+    d.key("ctrl+shift+v", wait=2.4)
+    d.snap()
+
     d.highlight(2.6)
     d.caption("`Ctrl+t` `Tab` goes back to the finder")
     d.key("ctrl+t", gap=0.3, wait=0)
@@ -278,10 +319,10 @@ def claude(d, folder):
     d.key("Escape", wait=1.4)
     with d.highlighting(2):
         d.caption("`/` filters: type part of a name", pause=0.3)
-        d.type("/server", wait=0.6)
+        d.type("/plan", wait=0.6)
         d.key("Return", wait=0.3)
     d.highlight(3.2)
-    d.caption("There's server.py, highlighted · `Esc` clears the filter", pause=1.0)
+    d.caption("There's Claude's plan.md, rendered · `Esc` clears the filter", pause=1.0)
     d.snap()
     time.sleep(2.6)
     d.key("Escape", wait=0.8)
@@ -366,6 +407,8 @@ def terminal_command(name, folder):
                 "--window-decoration=false", "--theme=Catppuccin Mocha", "--font-size=10",
                 f"--window-width={COLS}", f"--window-height={ROWS}", "--cursor-style-blink=false",
                 "--resize-overlay=never", "--confirm-close-surface=false", "--shell-integration=none",
+                # No "Copied to clipboard" toast over the docs pane's part: tos says it already.
+                "--app-notifications=no-clipboard-copy",
                 f"--working-directory={folder}"]
     xrm = [f"XTerm*color{i}: {c}" for i, c in enumerate(ANSI)] + [
         "XTerm*numColorRegisters: 256",  # the default 16 garbles sixel colours (findings/2026-11-05-xterm-sixel.md)
@@ -580,7 +623,7 @@ def main():
             start(demo)
             if not args.no_claude:
                 claude(demo, folder)
-            tour(demo, server=not args.no_claude)
+            tour(demo, plan=not args.no_claude)
         finally:
             length = time.monotonic() - demo.t0
             rec.communicate(b"q", timeout=30)

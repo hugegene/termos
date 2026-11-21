@@ -367,7 +367,9 @@ Built on 2026-11-21, in the order below. Step 0 became part of step 6: the hook 
 6. **By hand, yours:** in a `tos` pane, start each agent with the log on, for example `TOS_HOOK_LOG=1 tos claude`.
    Ask it to write a plan as a `.md` file, and check that it shows on the right.
    `~/.local/state/termos/agents/hook.log` then shows each call. That answers the open questions:
-   - **Claude:** do hooks from `--settings` run alongside yours?
+   - **Claude:** do hooks from `--settings` run alongside yours? They run (seen in the README demo's recording
+     on 2026-11-21, Claude Code 2.1.330, a config without hooks of its own:
+     [finding](../findings/2026-11-21-demo-docs-pane.md)); alongside your own hooks is still unchecked.
    - **Codex:** does a `-c` hook run? Codex asks once to trust it; does that trust last?
    - **`agy`:** does `--settings` take hooks?
    - **Gemini:** does a hook from the system settings file run?

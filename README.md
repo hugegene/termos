@@ -11,7 +11,7 @@ termos (`tos`), short for terminal OS, is a terminal workspace with a terminal f
 jobs of your file manager, your file viewers and tmux: browse, preview and edit files, keep sessions alive through
 reboots, and run AI coding agents side by side, all in one program.
 
-![tos in 30 seconds: a finder tab; Claude Code in a new tab writing server.py; back in the finder, / finds server.py; then a spreadsheet, a web page edited in Neovim, a video, a Word document, a PDF page, a CSV edited in the grid, and a picture](docs/images/demo-short.gif)
+![tos in 45 seconds: a finder tab; tos claude in a new tab writing plan.md, which opens in the docs pane beside it; lines copied from the docs pane and pasted into Claude's prompt; back in the finder, / finds plan.md; then a spreadsheet, a web page edited in Neovim, a video, a Word document, a PDF page, a CSV edited in the grid, and a picture](docs/images/demo-short.gif)
 
 ```bash
 curl -fsSL https://github.com/hugegene/termos/releases/latest/download/install.sh | sh
@@ -20,9 +20,9 @@ tos attach           # start a session, or go back to the one running
 ```
 
 <details>
-<summary><b>Watch the full tour</b> (90 seconds, with every key shown)</summary>
+<summary><b>Watch the full tour</b> (2 minutes, with every key shown)</summary>
 
-![tos: attaching from a shell and opening a finder tab; Claude Code in a new tab writing server.py; back in the finder, / finds server.py, highlighted; then the finder previewing a spreadsheet, editing HTML and Markdown in Neovim, a video frame, a Word document, a PDF's text and pages, editing a CSV in the grid, and an image](docs/images/finder-demo.gif)
+![tos: attaching from a shell and opening a finder tab; tos claude in a new tab writing plan.md, which opens in the docs pane on the right; V, j and y copy its first lines, and Ctrl+Shift+v pastes them into Claude's prompt; back in the finder, / finds plan.md, rendered; then the finder previewing a spreadsheet, editing HTML and Markdown in Neovim, a video frame, a Word document, a PDF's text and pages, editing a CSV in the grid, and an image](docs/images/finder-demo.gif)
 
 </details>
 
