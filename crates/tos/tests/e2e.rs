@@ -2301,6 +2301,16 @@ fn docs_pane_shows_the_markdown_an_agent_writes() {
     wait("the docs pane again", || env.panes().into_iter().find(|p| p["kind"] == "docs"));
     s.wait_for("later.md");
     s.wait_until("the status segment to go", |t| !t.contains("▤ docs"));
+
+    // Ctrl+t d hides it and brings it back, with the same list.
+    s.send(b"\x14");
+    s.send(b"d");
+    wait("Ctrl+t d to hide it", || env.panes().iter().all(|p| p["kind"] != "docs").then_some(()));
+    s.send(b"\x14");
+    s.send(b"d");
+    wait("Ctrl+t d to bring it back", || env.panes().into_iter().find(|p| p["kind"] == "docs"));
+    s.wait_for("later.md");
+    assert_eq!(env.focused(), agent, "the focus stays on the agent");
 }
 
 #[test]

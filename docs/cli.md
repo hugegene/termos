@@ -224,8 +224,9 @@ documentation. The files are in `~/.local/state/termos/agents/`.
   - `j`/`k`, the arrows, `PgUp`/`PgDn`, `g`/`G` and the wheel scroll.
   - `e` edits the file in a new pane, and `x` drops it from the list.
   - `q` closes the pane.
-- **Once closed, it stays closed:** new files only count up in the status bar (`▤ docs: 2 new`). A click there,
-  or `tos action toggle-docs`, opens it again.
+- **Once closed, it stays closed:** new files only count up in the status bar (`▤ docs: 2 new`). To open it
+  again: **`Ctrl+t` then `d`**, a click on that segment, or `tos action toggle-docs`. `Ctrl+t d` also hides it.
+  In `config.kdl` the same is the action `ToggleDocs`.
 
 **`tos hook --agent NAME`** reads the hook's JSON from stdin, in the agent's shape. The file can be in
 `tool_input`, `toolCall.args`, `toolArgs` or a top-level `file_path`, or named in an `apply_patch` patch. It
@@ -314,6 +315,7 @@ keybinds {
   - the eight scroll actions, `Search`, `SearchToggleOption`
   - `UndoRenamePane`, `UndoRenameTab`
   - `Write`, `WriteChars`, `Detach`, `Quit` (asks first)
+  - `ToggleDocs`: show or hide the tab's docs pane (`tos`'s own)
 - **Skipped, with a warning naming the line:** a binding that uses anything else (plugins, floating panes,
   swap layouts, pane groups). The warnings show briefly in the status bar when you attach, and in full from
   `tos action reload-config`.

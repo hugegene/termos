@@ -278,6 +278,7 @@ fn action(node: &Node) -> Result<Bound, String> {
         }),
         "CloseFocus" => Bound::Action(A::ClosePane { pane: None }),
         "CloseTab" => Bound::Action(A::CloseTab { tab: None }),
+        "ToggleDocs" => Bound::Action(A::ToggleDocs { tab: None }),
         "MoveFocus" => Bound::Action(A::Focus(FocusTarget::Dir(dir_arg(0)?.ok_or("MoveFocus needs a direction")?))),
         "MoveFocusOrTab" => Bound::Action(A::FocusOrTab(dir_arg(0)?.ok_or("MoveFocusOrTab needs a direction")?)),
         "FocusNextPane" | "SwitchFocus" => Bound::Action(A::Focus(FocusTarget::Next)),
@@ -352,6 +353,14 @@ mod tests {
 
     fn load_str(text: &str) -> Loaded {
         from_nodes(&kdl::parse(text).unwrap())
+    }
+
+    #[test]
+    fn toggle_docs_can_be_bound() {
+        let l = load_str(r#"keybinds { normal { bind "F9" { ToggleDocs; } } }"#);
+        let f9 = l.bindings.find(Modal::Normal, &keyspec::parse("F9").unwrap()).expect("F9");
+        assert!(matches!(f9[0], Bound::Action(CliAction::ToggleDocs { tab: None })));
+        assert!(l.warnings.is_empty(), "{:?}", l.warnings);
     }
 
     #[test]

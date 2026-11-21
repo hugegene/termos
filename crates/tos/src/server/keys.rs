@@ -272,6 +272,12 @@ impl Server {
             KeyCode::Char('[') => self.break_pane_to(false),
             KeyCode::Char(']') => self.break_pane_to(true),
             KeyCode::Char('f') => self.open_finder_tab(),
+            // The docs pane: the Markdown files an agent in the tab wrote (docs/plans/2026-11-17-agent-plan-pane.md).
+            KeyCode::Char('d') if !self.tabs.is_empty() => {
+                if let Err(e) = self.toggle_docs(self.active) {
+                    self.flash(format!("{e:#}"));
+                }
+            }
             _ => return None,
         }
         Some(Modal::Normal)
@@ -672,7 +678,7 @@ impl Server {
         match m {
             Modal::Locked => "Ctrl+g unlock · all other keys go to the program".into(),
             Modal::Pane => "←↓↑→ focus · n new · d down · r right · x close · f fullscreen · z frames · c rename · p next · Esc back".into(),
-            Modal::Tab => "←→ switch · n new · x close · r rename · 1-9 go to · 0 finder · Tab last · s sync · b break out · [ ] move pane to tab · f new finder · Esc back".into(),
+            Modal::Tab => "←→ switch · n new · x close · r rename · 1-9 go to · 0 finder · Tab last · s sync · b break out · [ ] move pane to tab · f new finder · d docs · Esc back".into(),
             Modal::Resize => "←↓↑→ grow · H J K L shrink · + - all sides · Esc back".into(),
             Modal::Move => "←↓↑→ swap with neighbour · n next · p previous · Esc back".into(),
             Modal::Scroll => "↓↑ line · d u half page · PgDn PgUp page · s search · e edit · v select · Ctrl+c bottom · Esc back".into(),
@@ -697,7 +703,7 @@ impl Server {
             ("Ctrl+p", "pane: ←↓↑→ focus · n new · d down · r right · x close · f fullscreen · z frames · c rename"),
             (
                 "Ctrl+t",
-                "tab: ←→ switch · n new · x close · r rename · 1-9 · 0 finder · Tab last · s sync · b break out · f new finder",
+                "tab: ←→ switch · n new · x close · r rename · 1-9 · 0 finder · Tab last · s sync · b break out · f new finder · d docs",
             ),
             ("Ctrl+n", "resize: ←↓↑→ grow that side · H J K L shrink it · + - all sides"),
             ("Ctrl+h", "move: ←↓↑→ swap with the neighbour · n p next / previous"),

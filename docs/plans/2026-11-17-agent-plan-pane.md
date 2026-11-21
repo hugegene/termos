@@ -35,6 +35,8 @@
     - **The starting instructions go on the command line as text,** so there's no `prompt.md`.
     - **The first version leaves out** plan text and step lists that live only inside a tool call, and the
       folder watch (option B). Both come later.
+  - **After it was built,** the user asked for a key to bring a closed docs pane back: `Ctrl+t d`, and
+    `ToggleDocs` in `config.kdl` (section 3, "Hiding").
 
 ## Decision
 
@@ -202,7 +204,10 @@ a file yourself. A file that's deleted leaves the list.
 - `q`, the `×` or `Ctrl+p x` hides the pane, and the tab keeps its list.
 - New entries then don't reopen it. They only count up in the segment `▤ docs 4`, and clicking the segment
   shows the pane again.
-- `tos action toggle-docs` does the same, for a `Run` binding. There's no default key.
+- `tos action toggle-docs` does the same from scripts.
+- **`Ctrl+t` then `d`** (tab mode, `d` for docs) shows or hides the active tab's docs pane. `d` was free in tab
+  mode, and the key isn't Alt-based, so it works on macOS without Option-as-Alt. In `config.kdl` the same is
+  the action `ToggleDocs`. (Added 2026-11-21, after the user asked for a key to bring the pane back.)
 
 **Kept and visible to extensions:**
 - Saving the layout keeps the list, because the list is a file. Attaching again restarts the viewer on it.
