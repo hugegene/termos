@@ -58,7 +58,7 @@ pub fn pane_id(s: &str) -> Result<PaneId, String> {
     if s.starts_with("plugin_") {
         return Err(format!("'{s}': tos has no plugin panes"));
     }
-    let n = ["terminal_", "finder_", "preview_"].iter().find_map(|k| s.strip_prefix(k)).unwrap_or(s);
+    let n = ["terminal_", "finder_", "preview_", "docs_"].iter().find_map(|k| s.strip_prefix(k)).unwrap_or(s);
     n.parse().map_err(|_| format!("not a pane id: '{s}' (use 3 or terminal_3)"))
 }
 
@@ -484,6 +484,25 @@ pub enum ActionCmd {
     },
     /// Read ~/.config/termos/config.kdl again and print what it skipped (tos)
     ReloadConfig,
+    /// Show a Markdown file in the docs pane of a pane's tab, opening the docs pane if needed (tos). `tos
+    /// claude` and the other agent launchers do this for each .md file the agent writes
+    #[command(
+        after_long_help = "Examples:\n  tos action add-doc docs/plans/2026-11-21-x.md          # beside the pane this runs in\n  tos action add-doc -p terminal_7 --cwd ~/termos notes.md"
+    )]
+    AddDoc {
+        file: PathBuf,
+        /// The pane whose tab gets the file, e.g. terminal_3 or 3 (default: the pane this runs in)
+        #[arg(short, long = "pane-id", value_parser = pane_id)]
+        pane_id: Option<PaneId>,
+        /// The folder the docs pane shows the file's path relative to (default: the current folder)
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+    },
+    /// Show a tab's docs pane, or hide it if it's showing (tos)
+    ToggleDocs {
+        #[command(flatten)]
+        t: TabOpt,
+    },
 }
 
 #[derive(Args, Clone)]
@@ -653,6 +672,15 @@ fn request(session: &str, cmd: ActionCmd) -> anyhow::Result<(CliAction, Output)>
         ActionCmd::SetStatus { text, id, ttl } => plain(A::SetStatus { id, text, ttl }),
         ActionCmd::ClearStatus { id } => plain(A::ClearStatus { id }),
         ActionCmd::ReloadConfig => plain(A::ReloadConfig),
+        ActionCmd::AddDoc { file, pane_id, cwd } => plain(A::AddDoc {
+            pane: pane_id.or_else(|| own_pane(session)),
+            path: absolute(file)?,
+            cwd: Some(match cwd {
+                Some(dir) => absolute(dir)?,
+                None => std::env::current_dir()?,
+            }),
+        }),
+        ActionCmd::ToggleDocs { t } => plain(A::ToggleDocs { tab: t.tab_id }),
     }
 }
 

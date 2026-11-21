@@ -37,6 +37,13 @@ Plain `tos` attaches to (or starts) the session.
 | [`tos list-panes`](list-panes.md) | List the session's panes |
 | [`tos dump-screen`](dump-screen.md) | Print a pane's text (default: the focused pane) |
 | [`tos update`](update.md) | Install the newest release over this one (only a tos installed by the one-line installer) |
+| [`tos claude`](claude.md) | Start Claude Code with the docs pane's hook: the .md files it writes in its folder show beside it |
+| [`tos codex`](codex.md) | Start OpenAI's Codex CLI with the docs pane's hook (Codex asks once to trust it) |
+| [`tos agy`](agy.md) | Start Google's Antigravity CLI (agy) with the docs pane's hook |
+| [`tos agent`](agent.md) | Start Cursor's CLI (agent) with the docs pane's hook |
+| [`tos grok`](grok.md) | Start xAI's Grok Build (grok) with the docs pane's hook |
+| [`tos gemini`](gemini.md) | Start Google's Gemini CLI with the docs pane's hook |
+| [`tos hook`](hook.md) | What an agent's hook runs after a tool call, with the call as JSON on stdin: shows the .md files it wrote in the docs pane. Prints nothing and never fails |
 
 ## `tos action …`
 
@@ -104,3 +111,5 @@ zellij's actions, with zellij's names and flags, and `tos`'s own.
 | [`set-status`](action/set-status.md) | Show TEXT in the status bar (tos). Each --id is its own segment; clicks reach `tos subscribe` |
 | [`clear-status`](action/clear-status.md) | Remove a status segment, or all of them (tos) |
 | [`reload-config`](action/reload-config.md) | Read ~/.config/termos/config.kdl again and print what it skipped (tos) |
+| [`add-doc`](action/add-doc.md) | Show a Markdown file in the docs pane of a pane's tab, opening the docs pane if needed (tos). `tos claude` and the other agent launchers do this for each .md file the agent writes |
+| [`toggle-docs`](action/toggle-docs.md) | Show a tab's docs pane, or hide it if it's showing (tos) |

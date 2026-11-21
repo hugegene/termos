@@ -297,6 +297,18 @@ pub enum CliAction {
     },
     /// Read config.kdl again; answers with the warnings.
     ReloadConfig,
+    /// Show `path`, a Markdown file the agent in `pane` wrote, in the docs pane of that pane's tab, opening the
+    /// docs pane if needed. `cwd` is the agent's working folder, which the docs pane shows paths relative to.
+    /// Plan: docs/plans/2026-11-17-agent-plan-pane.md.
+    AddDoc {
+        pane: Option<PaneId>,
+        path: PathBuf,
+        cwd: Option<PathBuf>,
+    },
+    /// Show tab `tab`'s docs pane, or hide it if it's showing.
+    ToggleDocs {
+        tab: Option<u32>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]

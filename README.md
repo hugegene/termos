@@ -54,6 +54,10 @@ Run Claude Code, Codex or any other agent in a tab, and keep the finder open nex
 appear in the finder straight away, previewed and ready to edit. Sessions keep running when you close the
 window, so an agent can work while you're away, and `tos` takes you back to it.
 
+Start it as `tos claude` (or `tos codex`, `tos agy`, `tos agent`, `tos grok`, `tos gemini`), and each Markdown
+file it writes in its folder, such as a plan, opens in a docs pane on the right of its tab
+([how](docs/cli.md#agents-and-the-docs-pane)).
+
 [prbot](https://github.com/hugegene/prbot) goes further: it opens a Claude tab for each GitHub PR that needs
 you (see [Extending](#extending)).
 

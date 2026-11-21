@@ -60,6 +60,8 @@ meaning. Failures exit non-zero with the message on stderr.
 | `tos subscribe` | Events, below |
 | `tos finder [DIR]` | A finder tab |
 | `tos update [--version X] [--force]` | Install the newest release, or X, over a `tos` that the one-line installer put there (below) |
+| `tos claude`, `tos codex`, `tos agy`, `tos agent`, `tos grok`, `tos gemini` `[ARGS…]` | Start that agent with the docs pane's hook (below). Every argument goes to the agent |
+| `tos hook --agent NAME` | What those agents' hooks run, with the tool call as JSON on stdin (below) |
 
 ### `tos action …` (`tos ac …`)
 
@@ -131,6 +133,8 @@ active tab).
 | `set-status [--id ID] [--ttl SECS] TEXT` | Show TEXT at the right of the status bar. Each `--id` is one segment, so extensions share the bar. Default id: `default` |
 | `clear-status [--id ID]` | Remove a segment, or all |
 | `reload-config` | Read `config.kdl` again; prints what it skipped |
+| `add-doc [-p ID] [--cwd DIR] FILE` | Show FILE in the docs pane of the pane's tab, opening it if needed (below). Default pane: the one it runs in |
+| `toggle-docs [-t ID]` | Show the tab's docs pane, or hide it |
 
 ## JSON
 
@@ -159,7 +163,7 @@ or `~` for home).
 - `tab_id`, `tab_position`, `tab_name`
 
 `tos` adds:
-- `kind`: `terminal`, `finder` (a finder's file list) or `preview` (a finder's preview)
+- `kind`: `terminal`, `finder` (a finder's file list), `preview` (a finder's preview) or `docs` (a docs pane)
 - `tab`: position from 1
 - `name`: given with `rename-pane`
 - `focused`, `visible`
@@ -168,6 +172,66 @@ or `~` for home).
 - `editor_pane`: a finder's Neovim pane, on both of its panes; Neovim shows in the preview
 
 **`list-clients`**: `client_id`, `pane_id`, `running_command`, `active`, `cols`, `rows`, `images`.
+
+## Agents and the docs pane
+
+`tos claude` starts Claude Code with two additions, for that session only. Nothing is written to Claude's own
+settings, and plain `claude` is unchanged.
+- **A hook** that runs `tos hook --agent claude` after each `Write`, `Edit` or `MultiEdit`.
+- **A few lines at the end of its system prompt:** you're inside `tos`, and the `.md` files you write in this
+  folder show beside you. The text comes from `~/.config/termos/agent-prompt.md` if that exists; an empty file
+  means none.
+
+Each `.md` file the agent then creates or edits **inside its working folder** shows in the tab's **docs pane**, on
+the tab's right. Files in agents' own folders (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, `~/.grok`)
+never show, so Claude's memory doesn't.
+
+```
+ $ tos claude
+     │ (1) writes ~/.local/state/termos/agents/claude/settings.json (the hook), then becomes:
+     ▼
+ claude --settings …/claude/settings.json --append-system-prompt "You are running inside tos, …"
+     │ (2) Write docs/plans/x.md
+     │ (3) the hook runs: tos hook --agent claude   (the call on stdin; TOS_PANE_ID says which pane)
+     ▼
+ tos server ── (4) add-doc: appends the file to the tab's list, and opens the docs pane if it's closed
+```
+
+**How each agent gets the hook and the instructions:**
+
+| Command | Hook | Instructions |
+|---|---|---|
+| `tos claude` | `--settings FILE` | `--append-system-prompt` |
+| `tos codex` | `-c hooks.PostToolUse=[…]`. Codex asks once to trust it | `-c developer_instructions=…`, which replaces your own for that session if you set any |
+| `tos agy` | `--settings FILE` | none |
+| `tos agent` (Cursor) | `--plugin-dir DIR`, a plugin with an `afterFileEdit` hook | none |
+| `tos grok` (xAI Grok Build) | `--plugin-dir DIR` | `--rules` |
+| `tos gemini` | `GEMINI_CLI_SYSTEM_SETTINGS_PATH=FILE`, a settings file holding only the hook | none |
+
+Only `tos claude`'s flags have been checked against a real Claude Code; the others follow each agent's
+documentation. The files are in `~/.local/state/termos/agents/`.
+[The plan](plans/2026-11-17-agent-plan-pane.md) and
+[the finding](findings/2026-11-21-agent-launch-flags.md) have the details.
+
+**The docs pane** is an ordinary pane running `tos docs`, one per tab, 40% of the tab's width:
+- **A header line per file,** newest first. A file that's written again keeps its place.
+- **One file open at a time,** rendered as the finder renders Markdown, and redrawn when the file changes.
+- **Following:** while the title says `following`, the file written last opens by itself. Opening another
+  yourself stops that, and `f` starts it again.
+- **Keys:**
+  - `Tab`/`Shift+Tab` move to the next or previous file.
+  - `Enter` or a click on a header opens or closes that file.
+  - `j`/`k`, the arrows, `PgUp`/`PgDn`, `g`/`G` and the wheel scroll.
+  - `e` edits the file in a new pane, and `x` drops it from the list.
+  - `q` closes the pane.
+- **Once closed, it stays closed:** new files only count up in the status bar (`▤ docs: 2 new`). A click there,
+  or `tos action toggle-docs`, opens it again.
+
+**`tos hook --agent NAME`** reads the hook's JSON from stdin, in the agent's shape. The file can be in
+`tool_input`, `toolCall.args`, `toolArgs` or a top-level `file_path`, or named in an `apply_patch` patch. It
+sends one `add-doc` per Markdown file inside the `cwd` the JSON names. It never fails and prints nothing; for
+`agy` it prints the `{}` that `agy` expects. With `TOS_HOOK_LOG=1` in the agent's environment, each call goes to
+`~/.local/state/termos/agents/hook.log`.
 
 ## Events: `tos subscribe`
 

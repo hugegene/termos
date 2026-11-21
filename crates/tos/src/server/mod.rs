@@ -4,9 +4,10 @@
 mod actions;
 mod config;
 mod copy;
+mod docs_pane;
 mod editor;
 mod events;
-mod finder;
+pub(crate) mod finder;
 mod images;
 mod input;
 mod keys;
@@ -158,6 +159,8 @@ struct Tab {
     zoomed: bool,
     /// Typing goes to every terminal pane in the tab.
     sync: bool,
+    /// The tab's docs pane, the Markdown files its agents write: its list, kept while the pane is closed.
+    docs: docs_pane::TabDocs,
 }
 
 /// zellij's input modes. See `keys.rs`.
@@ -846,6 +849,7 @@ impl Server {
             focus: id,
             zoomed: false,
             sync: false,
+            docs: docs_pane::TabDocs::default(),
         }
     }
 
@@ -1087,6 +1091,7 @@ impl Server {
             return;
         }
         self.dirty = true;
+        self.docs_closing(id);
         if let Some(owner) = self.editor_owner(id) {
             self.drop_pane(id);
             let back = self.finder_mut(owner).is_some_and(|f| {
@@ -1673,7 +1678,11 @@ impl Server {
                     self.clients.get(&client).and_then(|c| c.status_zones.iter().find(|z| x >= z.0 && x < z.1))
             {
                 let button = format!("{button:?}").to_lowercase();
-                self.send_event(serde_json::json!({"event": "status_clicked", "id": zone.2, "button": button}));
+                let id = zone.2.clone();
+                self.send_event(serde_json::json!({"event": "status_clicked", "id": id, "button": button}));
+                if id == docs_pane::STATUS_ID && button == "left" {
+                    self.docs_status_clicked();
+                }
             }
             return;
         }

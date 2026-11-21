@@ -389,6 +389,19 @@ impl Server {
                 }
                 done(self)
             }
+            CliAction::AddDoc { pane, path, cwd } => {
+                let pane = self.pane_or_focused(pane)?;
+                if !path.is_file() {
+                    bail!("{} isn't a file", path.display());
+                }
+                self.add_doc(pane, &path, cwd.as_deref())?;
+                done(self)
+            }
+            CliAction::ToggleDocs { tab } => {
+                let ti = self.tab_index(tab)?;
+                self.toggle_docs(ti)?;
+                done(self)
+            }
             CliAction::Detach => {
                 let ids: Vec<ClientId> =
                     self.clients.iter().filter(|(i, c)| c.attached && **i != from).map(|(i, _)| *i).collect();
@@ -623,7 +636,8 @@ impl Server {
                             let c = term.grid().cursor.point;
                             [c.column.0, c.line.0.max(0) as usize]
                         };
-                        ("terminal", p.display_title(), p.cwd(), None, spawned, running, body, Some(cursor))
+                        let kind = if self.is_docs_pane(id) { "docs" } else { "terminal" };
+                        (kind, p.display_title(), p.cwd(), None, spawned, running, body, Some(cursor))
                     }
                     Some(Pane::Finder(f)) => {
                         ("finder", "finder".to_owned(), Some(f.dir.clone()), f.editor, None, None, frame, None)

@@ -15,6 +15,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+use super::docs_pane;
 use super::finder::{self, Finder, FinderState};
 use super::layout::Node;
 use super::pane::SpawnOptions;
@@ -229,6 +230,7 @@ impl Server {
                 focus,
                 zoomed: t.zoomed,
                 sync: t.sync,
+                docs: super::docs_pane::TabDocs::default(),
             });
         }
         self.link_finders(links);
@@ -310,7 +312,24 @@ impl Server {
 
     fn restore_pane(&mut self, p: &SavedPane, links: &mut Links) -> Option<PaneId> {
         let dir = usable_dir(p.cwd.as_deref());
+        // A docs pane starts its viewer again at once, on the same list: it's part of tos, not a command the
+        // user was running.
+        let docs_list = p.command.as_deref().and_then(docs_pane::viewer_list).filter(|_| p.kind == PaneKind::Terminal);
         let id = match p.kind {
+            _ if let Some(list) = docs_list => {
+                if !list.is_file() {
+                    return None;
+                }
+                let opts =
+                    SpawnOptions { cwd: dir, command: docs_pane::viewer_command(&list), ..SpawnOptions::default() };
+                match self.spawn_term(opts) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        log::warn!("restoring a docs pane: {e}");
+                        return None;
+                    }
+                }
+            }
             PaneKind::Terminal => {
                 let id = match self.spawn_term(SpawnOptions { cwd: dir, ..SpawnOptions::default() }) {
                     Ok(id) => id,

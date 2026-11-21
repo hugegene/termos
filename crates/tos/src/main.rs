@@ -1,10 +1,12 @@
 //! `tos`, the command of termos: a terminal workspace with persistent sessions, tabs, split panes and a
 //! built-in file finder.
 
+mod agents;
 mod cli;
 mod client;
 #[cfg(test)]
 mod docs;
+mod docsview;
 mod kdl;
 mod keyspec;
 mod logger;
@@ -211,6 +213,37 @@ enum Cmd {
         #[arg(long, requires = "version")]
         force: bool,
     },
+    /// Start Claude Code with the docs pane's hook: the .md files it writes in its folder show beside it
+    #[command(disable_help_flag = true, after_long_help = AGENT_HELP)]
+    Claude(AgentArgs),
+    /// Start OpenAI's Codex CLI with the docs pane's hook (Codex asks once to trust it)
+    #[command(disable_help_flag = true, after_long_help = AGENT_HELP)]
+    Codex(AgentArgs),
+    /// Start Google's Antigravity CLI (agy) with the docs pane's hook
+    #[command(disable_help_flag = true, after_long_help = AGENT_HELP)]
+    Agy(AgentArgs),
+    /// Start Cursor's CLI (agent) with the docs pane's hook
+    #[command(disable_help_flag = true, after_long_help = AGENT_HELP)]
+    Agent(AgentArgs),
+    /// Start xAI's Grok Build (grok) with the docs pane's hook
+    #[command(disable_help_flag = true, after_long_help = AGENT_HELP)]
+    Grok(AgentArgs),
+    /// Start Google's Gemini CLI with the docs pane's hook
+    #[command(disable_help_flag = true, after_long_help = AGENT_HELP)]
+    Gemini(AgentArgs),
+    /// What an agent's hook runs after a tool call, with the call as JSON on stdin: shows the .md files it wrote
+    /// in the docs pane. Prints nothing and never fails
+    Hook {
+        /// The agent whose JSON this is
+        #[arg(long, value_enum)]
+        agent: agents::Agent,
+    },
+    /// The docs pane's program: follows a list of files and shows them as an accordion
+    #[command(hide = true)]
+    Docs {
+        #[arg(long)]
+        list: PathBuf,
+    },
     #[command(name = "__server", hide = true)]
     Server {
         name: String,
@@ -218,6 +251,17 @@ enum Cmd {
         run_commands: bool,
     },
 }
+
+/// An agent launcher's arguments: all of them go to the agent, `--help` included.
+#[derive(Args)]
+struct AgentArgs {
+    /// Arguments for the agent, passed on as they are
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
+}
+
+/// The launchers' examples. What they add to the agent is in docs/cli.md ("Agents and the docs pane").
+const AGENT_HELP: &str = "Examples:\n  tos claude                    # Claude Code, with the docs pane's hook\n  tos claude --resume           # every argument goes to the agent\n  tos codex \"plan the export\"   # Codex, starting with that prompt\n  tos claude --help             # Claude's own help";
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum SubscribeFormat {
@@ -295,6 +339,14 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Cmd::DumpScreen { s, a } => cli::dump_screen(&session(None, s)?, a)?,
         Cmd::Watch { name } => client::watch(&session(name, SessionOpt::default())?)?,
         Cmd::Update { version, force } => update::run(version, force)?,
+        Cmd::Claude(a) => agents::launch(agents::Agent::Claude, a.args)?,
+        Cmd::Codex(a) => agents::launch(agents::Agent::Codex, a.args)?,
+        Cmd::Agy(a) => agents::launch(agents::Agent::Agy, a.args)?,
+        Cmd::Agent(a) => agents::launch(agents::Agent::Cursor, a.args)?,
+        Cmd::Grok(a) => agents::launch(agents::Agent::Grok, a.args)?,
+        Cmd::Gemini(a) => agents::launch(agents::Agent::Gemini, a.args)?,
+        Cmd::Hook { agent } => agents::hook(agent),
+        Cmd::Docs { list } => docsview::run(list)?,
         Cmd::Subscribe { pane_id, format, scrollback, ansi } => {
             let scrollback = match scrollback.as_deref() {
                 None => None,

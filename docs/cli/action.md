@@ -81,5 +81,7 @@ Also: `ac`.
 | [`set-status`](action/set-status.md) | Show TEXT in the status bar (tos). Each --id is its own segment; clicks reach `tos subscribe` |
 | [`clear-status`](action/clear-status.md) | Remove a status segment, or all of them (tos) |
 | [`reload-config`](action/reload-config.md) | Read ~/.config/termos/config.kdl again and print what it skipped (tos) |
+| [`add-doc`](action/add-doc.md) | Show a Markdown file in the docs pane of a pane's tab, opening the docs pane if needed (tos). `tos claude` and the other agent launchers do this for each .md file the agent writes |
+| [`toggle-docs`](action/toggle-docs.md) | Show a tab's docs pane, or hide it if it's showing (tos) |
 
 See also: [all commands](README.md) · [the overview](../cli.md)

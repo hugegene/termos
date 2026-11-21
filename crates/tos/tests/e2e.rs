@@ -2233,3 +2233,123 @@ fn update_notice_shows_a_newer_release() {
     let kept = fs::read_to_string(env.root.join("state/update-check")).unwrap();
     assert!(kept.trim().ends_with(" 9.9.9"), "{kept}");
 }
+
+/// Runs `tos hook --agent AGENT` as an agent in pane `pane` would, with `payload` on stdin.
+fn run_hook(env: &Env, pane: u64, agent: &str, payload: &serde_json::Value) -> String {
+    use std::io::Write;
+    let mut child = Command::new(TOS)
+        .args(["hook", "--agent", agent])
+        .envs(env.vars.iter().map(|(k, v)| (k, v)))
+        .env("TOS_SESSION", &env.session)
+        .env("TOS_PANE_ID", pane.to_string())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "tos hook failed");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Plan: docs/plans/2026-11-17-agent-plan-pane.md.
+#[test]
+fn docs_pane_shows_the_markdown_an_agent_writes() {
+    let env = Env::new("e2e-docs");
+    let work = env.root.join("work");
+    fs::create_dir_all(work.join("docs")).unwrap();
+    fs::write(work.join("docs/plan.md"), "# The export plan\n\nStep one: add the button.\n").unwrap();
+    fs::write(work.join("main.rs"), "fn main() {}\n").unwrap();
+    fs::write(env.root.join("outside.md"), "# Outside\n").unwrap();
+    let s = env.attach(120, 30);
+    s.wait_for("$");
+    let agent = env.focused();
+    let write = |file: &Path| serde_json::json!({"cwd": work, "tool_name": "Write", "tool_input": {"file_path": file}});
+
+    // Not Markdown, and outside the agent's folder: nothing opens. Claude's hook prints nothing.
+    assert_eq!(run_hook(&env, agent, "claude", &write(&work.join("main.rs"))), "");
+    run_hook(&env, agent, "claude", &write(&env.root.join("outside.md")));
+    sleep(Duration::from_millis(300));
+    assert!(env.panes().iter().all(|p| p["kind"] != "docs"), "nothing should show yet");
+
+    // A plan in its folder: the docs pane opens on the tab's right edge, full height, and the focus stays.
+    run_hook(&env, agent, "claude", &write(&work.join("docs/plan.md")));
+    let docs = wait("the docs pane", || env.panes().into_iter().find(|p| p["kind"] == "docs"));
+    let agent_pane = env.panes().into_iter().find(|p| p["id"] == agent).unwrap();
+    assert!(docs["x"].as_u64() > agent_pane["x"].as_u64(), "docs pane on the right: {docs}");
+    assert_eq!(docs["y"], agent_pane["y"]);
+    assert_eq!(env.focused(), agent, "the focus stays on the agent");
+    s.wait_for("docs/plan.md");
+    s.wait_for("Step one: add the button.");
+
+    // A second file goes on top and opens; the first closes to its header.
+    fs::write(work.join("notes.md"), "# Notes\n\nSecond file.\n").unwrap();
+    let agy = serde_json::json!({"cwd": work, "toolCall": {"name": "write_to_file", "args": {"TargetFile": work.join("notes.md")}}});
+    assert_eq!(run_hook(&env, agent, "agy", &agy).trim(), "{}", "agy expects {{}}");
+    s.wait_for("Second file.");
+    let text = s.wait_until("plan.md's section to close", |t| !t.contains("Step one"));
+    assert!(text.contains("▸ docs/plan.md"), "{text}");
+
+    // Closed by the user, it stays closed: new files count up in the status bar, and toggle-docs reopens it.
+    env.tos(&["action", "close-pane", "-p", &docs["id"].to_string()]);
+    wait("the docs pane to close", || env.panes().iter().all(|p| p["kind"] != "docs").then_some(()));
+    fs::write(work.join("later.md"), "# Later\n").unwrap();
+    run_hook(&env, agent, "claude", &write(&work.join("later.md")));
+    s.wait_for("▤ docs: 1 new");
+    assert!(env.panes().iter().all(|p| p["kind"] != "docs"));
+    env.tos(&["action", "toggle-docs"]);
+    wait("the docs pane again", || env.panes().into_iter().find(|p| p["kind"] == "docs"));
+    s.wait_for("later.md");
+    s.wait_until("the status segment to go", |t| !t.contains("▤ docs"));
+}
+
+#[test]
+fn agent_launchers_add_their_hook() {
+    let env = Env::new("e2e-launch");
+    let bin = env.root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let args_out = env.root.join("args.txt");
+    // A stand-in for Claude Code that records its arguments.
+    let fake = format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", args_out.display());
+    fs::write(bin.join("claude"), fake).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    let config = env.root.join("config");
+    let launch = |args: &[&str]| {
+        Command::new(TOS)
+            .args(args)
+            .envs(env.vars.iter().map(|(k, v)| (k, v)))
+            .env("PATH", &path)
+            .env("XDG_CONFIG_HOME", &config)
+            .output()
+            .unwrap()
+    };
+
+    let out = launch(&["claude", "--resume", "--help"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let args = fs::read_to_string(&args_out).unwrap();
+    let args: Vec<&str> = args.lines().collect();
+    let settings = env.root.join("state/agents/claude/settings.json");
+    assert_eq!(args[..2], ["--settings", settings.to_str().unwrap()]);
+    assert_eq!(args[2], "--append-system-prompt");
+    assert!(args[3].starts_with("You are running inside tos"), "{args:?}");
+    assert_eq!(args[4..], ["--resume", "--help"], "every argument goes to the agent, --help too");
+    let hooks: serde_json::Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+    let command = hooks["hooks"]["PostToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+    assert!(command.ends_with(" hook --agent claude"), "{command}");
+
+    // Your own starting instructions, or none.
+    fs::create_dir_all(config.join("termos")).unwrap();
+    fs::write(config.join("termos/agent-prompt.md"), "Be brief.\n").unwrap();
+    launch(&["claude"]);
+    assert_eq!(fs::read_to_string(&args_out).unwrap().lines().nth(3), Some("Be brief."));
+    fs::write(config.join("termos/agent-prompt.md"), "").unwrap();
+    launch(&["claude"]);
+    assert_eq!(fs::read_to_string(&args_out).unwrap().lines().count(), 2);
+
+    // An agent that isn't installed.
+    let out = launch(&["grok"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("grok isn't on your PATH"));
+}
