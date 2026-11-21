@@ -1,7 +1,9 @@
 //! `tos docs --list FILE`: the docs pane's program. It follows the list that the server appends to (one JSON
 //! line per Markdown file an agent wrote, `server/docs_pane.rs`) and shows the files as an accordion: a header
 //! line per file, newest first, and one file open below its header, drawn with the finder's Markdown renderer.
-//! Plan: docs/plans/2026-11-17-agent-plan-pane.md.
+//! Text in the open file is selected and copied as in the finder's preview, with the same code (`select.rs`);
+//! being a program, it copies by writing OSC 52, which `tos` passes on to the clipboard.
+//! Plans: docs/plans/2026-11-17-agent-plan-pane.md, docs/plans/2026-11-21-preview-select-copy.md.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Stdout};
@@ -26,6 +28,7 @@ use ratatui::text::Line;
 use unicode_width::UnicodeWidthStr;
 
 use crate::paths;
+use crate::server::finder::select::{self, Making, Selection};
 use crate::server::finder::view::markdown;
 
 /// One file in the list.
@@ -46,6 +49,15 @@ pub enum Outcome {
     Redraw,
     Quit,
     Edit(PathBuf),
+    /// Text for the clipboard.
+    Copy(String),
+}
+
+/// A selection in the open file, and which file and version of it: it clears when either changes.
+struct Selected {
+    sel: Selection,
+    path: PathBuf,
+    mtime: Option<SystemTime>,
 }
 
 /// The accordion's state.
@@ -70,6 +82,15 @@ pub struct Docs {
     /// From the last draw: the open section's height on screen, and its length.
     body_rows: usize,
     body_len: usize,
+    /// From the last draw: where the open section's lines are on screen, the column their text starts in, and
+    /// the width they were rendered at.
+    body_area: Rect,
+    body_x: u16,
+    body_width: usize,
+    /// Text selected in the open section.
+    selection: Option<Selected>,
+    /// Said in the title line until the next key: why nothing was copied.
+    note: Option<String>,
 }
 
 /// How a path shows: relative to `cwd` if inside it, else with `~` for the home folder.
@@ -215,10 +236,44 @@ impl Docs {
     }
 
     pub fn key(&mut self, k: KeyEvent) -> Outcome {
+        self.check_selection();
+        self.note = None;
         let page = self.body_rows.max(2) as isize - 1;
+        let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
+        if let Some(making) = self.selection.as_ref().map(|s| s.sel.making) {
+            // Selecting lines with `v`: the scroll keys move its end; y, Ctrl+c or Enter copy it.
+            if making == Making::Keys {
+                match k.code {
+                    KeyCode::Char('j') | KeyCode::Down => self.extend(1),
+                    KeyCode::Char('k') | KeyCode::Up => self.extend(-1),
+                    KeyCode::PageDown | KeyCode::Char(' ') => self.extend(page),
+                    KeyCode::PageUp => self.extend(-page),
+                    KeyCode::Char('g') | KeyCode::Home => self.extend(-(self.body_len as isize)),
+                    KeyCode::Char('G') | KeyCode::End => self.extend(self.body_len as isize),
+                    KeyCode::Char('y') | KeyCode::Enter => return self.copy(true),
+                    _ if ctrl_c => return self.copy(true),
+                    KeyCode::Esc => self.selection = None,
+                    KeyCode::Char('q') => return Outcome::Quit,
+                    _ => {}
+                }
+                return Outcome::Redraw;
+            }
+            // A selection made with the mouse stays until Esc: y or Ctrl+c copy it again.
+            match k.code {
+                KeyCode::Char('y') => return self.copy(false),
+                _ if ctrl_c => return self.copy(false),
+                KeyCode::Esc => {
+                    self.selection = None;
+                    return Outcome::Redraw;
+                }
+                _ => {}
+            }
+        }
         match k.code {
             KeyCode::Char('q') => return Outcome::Quit,
-            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return Outcome::Quit,
+            // Ctrl+c copies, when something is selected (above); it never closes the pane.
+            _ if ctrl_c => {}
+            KeyCode::Char('v' | 'V') => self.select_lines(),
             KeyCode::Char('j') | KeyCode::Down => self.scroll_by(1),
             KeyCode::Char('k') | KeyCode::Up => self.scroll_by(-1),
             KeyCode::PageDown | KeyCode::Char(' ') => self.scroll_by(page),
@@ -246,19 +301,136 @@ impl Docs {
         Outcome::Redraw
     }
 
+    /// The open section's file.
+    fn open_path(&self) -> Option<&Path> {
+        self.open.and_then(|o| self.entries.get(o)).map(|e| e.path.as_path())
+    }
+
+    /// Forgets a selection whose file closed or changed.
+    fn check_selection(&mut self) {
+        let stale = match &self.selection {
+            Some(s) => self.open_path() != Some(s.path.as_path()) || mtime(&s.path) != s.mtime,
+            None => false,
+        };
+        if stale {
+            self.selection = None;
+        }
+    }
+
+    /// Starts a selection in the open section. Selecting stops following, so the agent's next file doesn't
+    /// replace what you're selecting.
+    fn start_selection(&mut self, sel: Selection) {
+        let Some(path) = self.open_path().map(Path::to_path_buf) else { return };
+        let mtime = mtime(&path);
+        self.selection = Some(Selected { sel, path, mtime });
+        self.following = false;
+    }
+
+    /// `v`: whole lines, starting at the first line on screen.
+    fn select_lines(&mut self) {
+        if self.body_rows > 0 {
+            let top = self.scroll_top();
+            self.start_selection(Selection::keys(top));
+        }
+    }
+
+    fn scroll_top(&self) -> usize {
+        self.open_path().and_then(|p| self.scroll.get(p)).copied().unwrap_or(0)
+    }
+
+    /// Moves a line selection's end `n` lines, scrolling to keep it on screen.
+    fn extend(&mut self, n: isize) {
+        let len = self.body_len;
+        let Some(s) = self.selection.as_mut() else { return };
+        s.sel.extend(n, len);
+        let head = s.sel.head.0;
+        let top = self.scroll_top();
+        if head < top {
+            self.scroll_by(head as isize - top as isize);
+        } else if head >= top + self.body_rows {
+            self.scroll_by((head + 1 - self.body_rows) as isize - top as isize);
+        }
+    }
+
+    /// The selection's text for the clipboard; `clear` ends the selection (one made with keys).
+    fn copy(&mut self, clear: bool) -> Outcome {
+        let (Some(o), Some(s)) = (self.open, self.selection.as_ref()) else { return Outcome::Redraw };
+        let sel = s.sel.clone();
+        let width = self.body_width.max(1);
+        let text = sel.text(self.body(o, width), 0);
+        if clear {
+            self.selection = None;
+        }
+        if text.len() > select::MAX_COPY {
+            self.note = Some(format!("too big to copy ({:.1} MB)", text.len() as f64 / f64::from(1 << 20)));
+            Outcome::Redraw
+        } else if text.is_empty() {
+            self.note = Some("nothing to copy: the lines are blank".into());
+            Outcome::Redraw
+        } else {
+            Outcome::Copy(text)
+        }
+    }
+
+    /// The point in the open section's text at screen cell (`col`, `row`). Outside the section, `None`, unless
+    /// `clamp`, which takes the nearest line.
+    fn point_at(&self, col: u16, row: u16, clamp: bool) -> Option<select::Point> {
+        let a = self.body_area;
+        if self.body_rows == 0 || self.body_len == 0 {
+            return None;
+        }
+        if !clamp && (row < a.y || row >= a.bottom() || col < a.x || col >= a.right()) {
+            return None;
+        }
+        let r = row.clamp(a.y, a.bottom() - 1) - a.y;
+        let line = self.scroll_top() + usize::from(r);
+        if line >= self.body_len {
+            return Some((self.body_len - 1, usize::MAX));
+        }
+        Some((line, usize::from(col.saturating_sub(self.body_x))))
+    }
+
     /// The section written last.
     fn newest(&self) -> Option<usize> {
         (0..self.entries.len()).max_by(|&a, &b| self.entries[a].written.total_cmp(&self.entries[b].written))
     }
 
     pub fn mouse(&mut self, m: MouseEvent) -> Outcome {
+        self.check_selection();
+        let making = self.selection.as_ref().map(|s| s.sel.making);
         match m.kind {
             MouseEventKind::ScrollDown => self.scroll_by(3),
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) => {
+                self.selection = None;
                 if let Some(&(_, i)) = self.header_rows.iter().find(|(y, _)| *y == m.row) {
                     self.toggle(i);
+                } else if let Some(at) = self.point_at(m.column, m.row, false) {
+                    self.start_selection(Selection::press(at));
                 }
+            }
+            // Dragging above or below the open section scrolls it.
+            MouseEventKind::Drag(MouseButton::Left) if making == Some(Making::Mouse) => {
+                if m.row < self.body_area.y {
+                    self.scroll_by(-1);
+                } else if m.row >= self.body_area.bottom() {
+                    self.scroll_by(1);
+                }
+                if let (Some(at), Some(s)) = (self.point_at(m.column, m.row, true), self.selection.as_mut()) {
+                    s.sel.drag(at);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if making == Some(Making::Mouse) => {
+                let shown = self.selection.as_ref().is_some_and(|s| s.sel.shown());
+                if !shown {
+                    // A click in the text selects nothing.
+                    self.selection = None;
+                    return Outcome::Redraw;
+                }
+                if let Some(s) = self.selection.as_mut() {
+                    s.sel.making = Making::Done;
+                }
+                return self.copy(false);
             }
             _ => {}
         }
@@ -281,6 +453,7 @@ impl Docs {
     }
 
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer, now: f64) {
+        self.check_selection();
         self.header_rows.clear();
         self.body_rows = 0;
         self.body_len = 0;
@@ -290,7 +463,12 @@ impl Docs {
         let dim = Style::default().fg(Color::DarkGray);
         let n = self.entries.len();
         let follow = if self.following { "following" } else { "f follows" };
-        let title = format!(" docs · {n} · {follow}");
+        let title = match (&self.note, self.selection.as_ref().filter(|s| s.sel.shown()).map(|s| s.sel.making)) {
+            (Some(note), _) => format!(" {note}"),
+            (None, Some(Making::Keys)) => " j/k extend · y copy · Esc cancel".to_owned(),
+            (None, Some(_)) => " Ctrl+c copy · Esc clear".to_owned(),
+            (None, None) => format!(" docs · {n} · {follow}"),
+        };
         buf.set_stringn(area.x, area.y, &title, usize::from(area.width), dim);
         let avail = usize::from(area.height - 1);
         if n == 0 {
@@ -300,7 +478,7 @@ impl Docs {
                 " The .md files that an agent in this tab",
                 " writes in its folder show here.",
                 "",
-                " q closes · tos action toggle-docs reopens",
+                " q closes · Ctrl+t d reopens",
             ];
             for (k, l) in lines.iter().enumerate().take(avail) {
                 buf.set_stringn(area.x, area.y + 1 + k as u16, l, usize::from(area.width), dim);
@@ -329,6 +507,8 @@ impl Docs {
             body = self.body(o, text_w).to_vec();
             self.body_rows = body_h;
             self.body_len = body.len();
+            self.body_width = text_w;
+            self.body_x = area.x + 2;
             let max = body.len().saturating_sub(body_h);
             let s = self.scroll.entry(self.entries[o].path.clone()).or_insert(0);
             *s = (*s).min(max);
@@ -363,12 +543,18 @@ impl Docs {
                     buf.set_stringn(rx, y, &right, right.width(), right_style);
                 }
                 None => {
+                    if body_line == 0 {
+                        self.body_area = Rect::new(area.x, y, area.width, body_h as u16);
+                    }
                     if let Some(line) = body.get(scroll + body_line) {
                         buf.set_line(area.x + 2, y, line, area.width.saturating_sub(2));
                     }
                     body_line += 1;
                 }
             }
+        }
+        if let Some(s) = self.selection.as_ref().filter(|s| s.sel.shown() && self.body_rows > 0) {
+            s.sel.draw(buf, &body, scroll, 0, self.body_x, self.body_area);
         }
     }
 }
@@ -381,6 +567,17 @@ impl Drop for Restore {
         let _ = execute!(io::stdout(), DisableMouseCapture, terminal::LeaveAlternateScreen, cursor::Show);
         let _ = terminal::disable_raw_mode();
     }
+}
+
+/// Copies `text` the way a program does: OSC 52, which `tos` passes on to the clipboard and announces in the
+/// status bar.
+fn osc52(text: &str) {
+    use base64::Engine;
+    use std::io::Write;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(text);
+    let mut out = io::stdout();
+    let _ = write!(out, "\x1b]52;c;{encoded}\x07");
+    let _ = out.flush();
 }
 
 enum Msg {
@@ -458,10 +655,13 @@ pub fn run(list: PathBuf) -> anyhow::Result<()> {
                                 .spawn();
                         }
                     }
+                    Outcome::Copy(text) => osc52(&text),
                     Outcome::Redraw => {}
                 },
                 Msg::Term(Event::Mouse(m)) => {
-                    docs.mouse(m);
+                    if let Outcome::Copy(text) = docs.mouse(m) {
+                        osc52(&text);
+                    }
                 }
                 Msg::Term(_) | Msg::Changed | Msg::Tick => {}
             }
@@ -568,6 +768,106 @@ mod tests {
         docs.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
         assert_eq!(docs.entries.len(), 1);
         assert_eq!(docs.sel, 0);
+    }
+
+    fn mouse_at(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// The screen cell where `word` starts.
+    fn cell_of(rows: &[String], word: &str) -> (u16, u16) {
+        let (row, line) = rows.iter().enumerate().find(|(_, l)| l.contains(word)).expect(word);
+        (line[..line.find(word).unwrap()].chars().count() as u16, row as u16)
+    }
+
+    /// A docs pane showing one file, open.
+    fn one_file(text: &str) -> (tempfile::TempDir, Docs, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.md"), text).unwrap();
+        let mut docs = Docs::new();
+        docs.ingest(&list_line(&dir.path().join("a.md"), dir.path(), 999.0));
+        let rows = screen(&mut docs, 40, 10);
+        (dir, docs, rows)
+    }
+
+    #[test]
+    fn dragging_in_the_open_file_copies_it_and_it_stays_selected() {
+        let (_dir, mut docs, rows) = one_file("alpha beta\n\ngamma delta\n");
+        let (bx, by) = cell_of(&rows, "beta");
+        let (dx, dy) = cell_of(&rows, "delta");
+        let left = MouseButton::Left;
+        assert_eq!(docs.mouse(mouse_at(MouseEventKind::Down(left), bx, by)), Outcome::Redraw);
+        assert!(!docs.following, "selecting stops following");
+        docs.mouse(mouse_at(MouseEventKind::Drag(left), dx + 4, dy));
+        let copied = docs.mouse(mouse_at(MouseEventKind::Up(left), dx + 4, dy));
+        assert_eq!(copied, Outcome::Copy("beta\n\ngamma delta".into()));
+
+        // It stays highlighted, the title says how to copy it again, and Ctrl+c does.
+        let area = Rect::new(0, 0, 40, 10);
+        let mut buf = Buffer::empty(area);
+        docs.draw(area, &mut buf, 1000.0);
+        assert!(buf[(bx, by)].modifier.contains(Modifier::REVERSED));
+        assert!(!buf[(bx - 1, by)].modifier.contains(Modifier::REVERSED));
+        assert_eq!(screen(&mut docs, 40, 10)[0], " Ctrl+c copy · Esc clear");
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(docs.key(ctrl_c), Outcome::Copy("beta\n\ngamma delta".into()));
+        // Esc clears it; then Ctrl+c does nothing, and never closes the pane.
+        docs.key(key(KeyCode::Esc));
+        assert!(docs.selection.is_none());
+        assert_eq!(docs.key(ctrl_c), Outcome::Redraw);
+    }
+
+    #[test]
+    fn a_click_in_the_text_selects_nothing() {
+        let (_dir, mut docs, rows) = one_file("alpha beta\n");
+        let (x, y) = cell_of(&rows, "beta");
+        docs.mouse(mouse_at(MouseEventKind::Down(MouseButton::Left), x, y));
+        assert_eq!(docs.mouse(mouse_at(MouseEventKind::Up(MouseButton::Left), x, y)), Outcome::Redraw);
+        assert!(docs.selection.is_none());
+    }
+
+    #[test]
+    fn v_selects_lines_from_the_top_and_y_copies_them() {
+        let (_dir, mut docs, _) = one_file("one\n\ntwo\n\nthree\n");
+        docs.key(key(KeyCode::Char('v')));
+        assert_eq!(screen(&mut docs, 40, 10)[0], " j/k extend · y copy · Esc cancel");
+        docs.key(key(KeyCode::Char('j')));
+        docs.key(key(KeyCode::Char('j')));
+        assert_eq!(docs.key(key(KeyCode::Char('y'))), Outcome::Copy("one\n\ntwo".into()));
+        assert!(docs.selection.is_none(), "copying lines ends the selection");
+        // Esc cancels without copying.
+        docs.key(key(KeyCode::Char('V')));
+        docs.key(key(KeyCode::Esc));
+        assert!(docs.selection.is_none());
+    }
+
+    #[test]
+    fn the_selection_clears_when_the_file_changes_or_another_opens() {
+        let (dir, mut docs, _) = one_file("one\n");
+        docs.key(key(KeyCode::Char('v')));
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(dir.path().join("a.md"), "one, changed\n").unwrap();
+        screen(&mut docs, 40, 10);
+        assert!(docs.selection.is_none());
+        // During a line selection Enter copies it, rather than closing the section.
+        docs.key(key(KeyCode::Char('v')));
+        assert_eq!(docs.key(key(KeyCode::Enter)), Outcome::Copy("one, changed".into()));
+        assert_eq!(docs.open, Some(0));
+        // Closing the section (Enter, with nothing selected) clears a mouse selection.
+        let rows = screen(&mut docs, 40, 10);
+        let (x, y) = cell_of(&rows, "changed");
+        docs.mouse(mouse_at(MouseEventKind::Down(MouseButton::Left), x, y));
+        docs.mouse(mouse_at(MouseEventKind::Drag(MouseButton::Left), x + 3, y));
+        docs.mouse(mouse_at(MouseEventKind::Up(MouseButton::Left), x + 3, y));
+        assert!(docs.selection.is_some());
+        docs.key(key(KeyCode::Enter));
+        screen(&mut docs, 40, 10);
+        assert_eq!(docs.open, None);
+        assert!(docs.selection.is_none());
     }
 
     #[test]

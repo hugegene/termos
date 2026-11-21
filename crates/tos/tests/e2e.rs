@@ -2404,3 +2404,46 @@ fn agent_launchers_add_their_hook() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("grok isn't on your PATH"));
 }
+
+/// Plans: docs/plans/2026-11-17-agent-plan-pane.md, docs/plans/2026-11-21-preview-select-copy.md.
+#[test]
+fn drag_in_the_docs_pane_copies() {
+    let env = Env::new("e2e-docscopy");
+    let work = env.root.join("work");
+    fs::create_dir_all(&work).unwrap();
+    fs::write(work.join("plan.md"), "Step one: add the button.\n\nStep two: test it.\n").unwrap();
+    let s = env.attach(120, 30);
+    s.wait_for("$");
+    let agent = env.focused();
+    let write =
+        serde_json::json!({"cwd": work, "tool_name": "Write", "tool_input": {"file_path": work.join("plan.md")}});
+    run_hook(&env, agent, "claude", &write);
+    let text = s.wait_for("Step two: test it.");
+    let at = |word: &str| {
+        let (row, line) = text.lines().enumerate().find(|(_, l)| l.contains(word)).unwrap();
+        let col = line[..line.find(word).unwrap()].chars().count();
+        (col as u16 + 1, row as u16 + 1)
+    };
+    // Press on "add", drag to the end of "button.", and let go: the docs pane copies with OSC 52, through tos.
+    let ((x0, y0), (x1, y1)) = (at("add the"), at("button."));
+    let end = x1 + "button.".len() as u16 - 1;
+    s.send(format!("\x1b[<0;{x0};{y0}M\x1b[<32;{end};{y1}M\x1b[<0;{end};{y1}m").as_bytes());
+    let clip = wait("clipboard", || s.proxy.clipboard.lock().unwrap().last().cloned());
+    assert_eq!(clip, "add the button.");
+    s.wait_for("copied 15 characters");
+    s.wait_for("Ctrl+c copy · Esc clear");
+    // The press focused the docs pane, where Ctrl+c copies it again.
+    s.send(b"\x03");
+    wait("copied again", || (s.proxy.clipboard.lock().unwrap().len() == 2).then_some(()));
+    // v selects whole lines from the top; j adds one and y copies them.
+    s.send(b"\x1b");
+    s.wait_until("the selection cleared", |t| !t.contains("Esc clear"));
+    s.send(b"v");
+    s.wait_for("j/k extend");
+    s.send(b"jjy");
+    wait("lines copied", || {
+        let clip = s.proxy.clipboard.lock().unwrap().last().cloned();
+        (clip.as_deref() == Some("Step one: add the button.\n\nStep two: test it.")).then_some(())
+    });
+    assert!(env.panes().iter().any(|p| p["kind"] == "docs"), "Ctrl+c and y never close the docs pane");
+}

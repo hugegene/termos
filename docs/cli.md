@@ -224,6 +224,14 @@ documentation. The files are in `~/.local/state/termos/agents/`.
   - `j`/`k`, the arrows, `PgUp`/`PgDn`, `g`/`G` and the wheel scroll.
   - `e` edits the file in a new pane, and `x` drops it from the list.
   - `q` closes the pane.
+- **Copying, as in the finder's preview:**
+  - **Drag** over the open file to select from one character to another; letting go copies it, and it stays
+    highlighted until `Esc`.
+  - **`v` or `V`** selects whole lines from the top of the screen. `j`/`k` extend them, and `y`, `Ctrl+c` or
+    `Enter` copy them.
+  - **`Ctrl+c`** copies the selection again; it never closes the pane.
+  - Selecting stops following. The pane copies with OSC 52, which `tos` passes to your terminal's clipboard
+    (`copied 15 characters`).
 - **Once closed, it stays closed:** new files only count up in the status bar (`▤ docs: 2 new`). To open it
   again: **`Ctrl+t` then `d`**, a click on that segment, or `tos action toggle-docs`. `Ctrl+t d` also hides it.
   In `config.kdl` the same is the action `ToggleDocs`.

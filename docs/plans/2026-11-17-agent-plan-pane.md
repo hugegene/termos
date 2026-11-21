@@ -37,6 +37,8 @@
       folder watch (option B). Both come later.
   - **After it was built,** the user asked for a key to bring a closed docs pane back: `Ctrl+t d`, and
     `ToggleDocs` in `config.kdl` (section 3, "Hiding").
+  - Then, with the finder preview's copy merged into `main`, the user asked for the same in the docs pane
+    (section 3, "Selecting and copying").
 
 ## Decision
 
@@ -199,6 +201,27 @@ a file yourself. A file that's deleted leaves the list.
 - `e` edits the file in the docs pane's place, as the finder's editor does. `o` shows it in a finder tab.
 - `x` drops the entry from the list, without touching the file. `f` turns following back on.
 - `q` hides the pane.
+
+**Selecting and copying** (added 2026-11-21, after the user asked for the finder preview's copy in the docs pane
+too). It works as in the finder's preview ([its plan](2026-11-21-preview-select-copy.md)), with the same code
+(`finder/select.rs`):
+- **Drag** over the open file selects from one character to another. Letting go copies it, and the selection
+  stays highlighted. Dragging above or below the open file scrolls it.
+- **`v` or `V`** selects whole lines, starting at the first line on screen. `j`/`k` and the other scroll keys
+  extend it. `y`, `Ctrl+c` or `Enter` copies it, and `Esc` cancels.
+- **`Ctrl+c`** copies the selection again. It no longer closes the pane; `q` does.
+- **What's copied** is the text as shown: rendered Markdown, wrapped, without `#` or `**`.
+- **Starting a selection stops following,** so the agent's next file doesn't replace what you're selecting.
+  The selection clears when another file opens, or when the open file changes.
+- **How it copies:** the docs pane is a program, so it sends OSC 52 itself. `tos` passes a program's OSC 52 to
+  your terminal's clipboard, and the status bar says `copied N characters`, as for the preview.
+
+```
+ drag in the docs pane ──1. mouse──▶ tos server ──2. forwarded (the pane asked for the mouse)──▶ tos docs
+                                                                                                  │ 3. select, highlight
+ your terminal ◀──5. OSC 52──── tos server ◀──4. OSC 52 on its output (letting go, y, Ctrl+c)─────┘
+ (clipboard)                    "copied 42 characters"
+```
 
 **Hiding:**
 - `q`, the `×` or `Ctrl+p x` hides the pane, and the tab keeps its list.

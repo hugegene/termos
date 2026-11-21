@@ -6,7 +6,7 @@ mod grid;
 mod highlight;
 mod menu;
 mod pdf;
-mod select;
+pub mod select;
 pub mod view;
 
 use std::cell::RefCell;
