@@ -2,6 +2,7 @@
 //! PowerPoint files (as Markdown), folders, images and video frames.
 
 use finder_core::{Entry, Kind, Preview, human_size};
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -219,11 +220,13 @@ const TABLE_SEP: usize = 3;
 
 /// A table: columns sized to their content, shrunk to fit `width`, first row bold if `header`.
 pub fn table(rows: &[Vec<String>], width: usize, header: bool) -> Vec<Line<'static>> {
-    draw_table(rows, &column_widths(rows, width), header)
+    // Each cell on one line, so columns are at most 40 wide.
+    draw_table(rows, &fit_columns(rows, width, |cell| clean(cell).width().min(40)), header)
 }
 
-/// Table columns sized to their content (up to 40 columns each), shrunk to fit `width`.
-fn column_widths(rows: &[Vec<String>], width: usize) -> Vec<usize> {
+/// Table columns as wide as `measure` says each column's widest cell is, then the widest shrunk, one column at
+/// a time, until they fit `width` (or are all 3 wide).
+fn fit_columns(rows: &[Vec<String>], width: usize, measure: impl Fn(&str) -> usize) -> Vec<usize> {
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
     if cols == 0 {
         return Vec::new();
@@ -231,7 +234,7 @@ fn column_widths(rows: &[Vec<String>], width: usize) -> Vec<usize> {
     let mut widths = vec![1usize; cols];
     for row in rows.iter().take(500) {
         for (c, cell) in row.iter().enumerate() {
-            widths[c] = widths[c].max(clean(cell).width().min(40));
+            widths[c] = widths[c].max(measure(cell));
         }
     }
     while widths.iter().sum::<usize>() + TABLE_SEP * (cols - 1) > width {
@@ -242,6 +245,63 @@ fn column_widths(rows: &[Vec<String>], width: usize) -> Vec<usize> {
         widths[i] -= 1;
     }
     widths
+}
+
+/// Where `text` breaks to fit `width` columns: the byte range of each line. It breaks at spaces and at "\n", and
+/// splits a word longer than a line at the edge.
+fn wrap(text: &str, width: usize) -> Vec<Range<usize>> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut at = 0;
+    for para in text.split('\n') {
+        // The words on the line so far, and their width.
+        let mut line: Option<Range<usize>> = None;
+        let mut line_w = 0;
+        let mut i = at;
+        for word in para.split(' ') {
+            let (mut s, e) = (i, i + word.len());
+            i = e + 1;
+            if word.is_empty() {
+                continue;
+            }
+            let mut w = word.width();
+            if let Some(r) = line.take() {
+                // The spaces before the word take a column each.
+                let joined = line_w + (s - r.end) + w;
+                if joined <= width {
+                    line = Some(r.start..e);
+                    line_w = joined;
+                    continue;
+                }
+                lines.push(r);
+            }
+            while w > width {
+                let (mut cut, mut cut_w) = (s, 0);
+                for (j, ch) in text[s..e].char_indices() {
+                    let cw = ch.width().unwrap_or(0);
+                    if cut_w + cw > width && j > 0 {
+                        break;
+                    }
+                    cut = s + j + ch.len_utf8();
+                    cut_w += cw;
+                }
+                lines.push(s..cut);
+                s = cut;
+                w = text[s..e].width();
+            }
+            line = Some(s..e);
+            line_w = w;
+        }
+        lines.push(line.unwrap_or(at..at));
+        at += para.len() + 1;
+    }
+    lines
+}
+
+/// Whether an HTML tag is a line break: `<br>`, `<br/>` or `<br />`.
+fn is_br(html: &str) -> bool {
+    let tag = html.trim().strip_prefix('<').and_then(|t| t.strip_suffix('>'));
+    tag.is_some_and(|t| t.trim_end_matches('/').trim().eq_ignore_ascii_case("br"))
 }
 
 /// Draws a table with columns `widths` wide; a rule follows the first row if it's a `header`.
@@ -463,6 +523,7 @@ impl Md {
     fn event(&mut self, event: Event) {
         if let Some(cell) = &mut self.cell {
             match event {
+                Event::Html(t) | Event::InlineHtml(t) if is_br(&t) => cell.push('\n'),
                 Event::Text(t) | Event::Code(t) | Event::Html(t) | Event::InlineHtml(t) => cell.push_str(&t),
                 Event::Start(Tag::Link { link_type, dest_url, .. } | Tag::Image { link_type, dest_url, .. }) => {
                     self.cell_open.push((cell.len(), link_url(link_type, &dest_url)));
@@ -635,7 +696,8 @@ impl Md {
                 self.link_stack.pop();
             }
             TagEnd::TableCell => {
-                let cell = self.cell.take().unwrap_or_default();
+                // Tabs become spaces, a byte each, so the links' byte ranges stay right.
+                let cell = self.cell.take().unwrap_or_default().replace(['\t', '\r'], " ");
                 let text = cell.trim();
                 let lead = cell.len() - cell.trim_start().len();
                 // The row is added to the table when it ends.
@@ -659,36 +721,63 @@ impl Md {
             TagEnd::Table => {
                 let rows = self.table.take().unwrap_or_default();
                 let avail = self.width.saturating_sub(self.indent_width());
-                let widths = column_widths(&rows, avail);
-                let first = self.lines.len();
-                // Where each table line starts, after the indents of quotes and lists.
-                let mut starts = Vec::new();
-                for line in draw_table(&rows, &widths, true) {
-                    self.start_line();
-                    starts.push(self.cur_w);
-                    self.cur.extend(line.spans);
-                    self.flush();
-                }
-                for l in std::mem::take(&mut self.table_links) {
-                    // A rule follows the header row.
-                    let index = l.row + usize::from(l.row > 0);
-                    let (Some(x), Some(cell), Some(w)) =
-                        (starts.get(index), rows.get(l.row).and_then(|r| r.get(l.col)), widths.get(l.col))
-                    else {
-                        continue;
-                    };
-                    let x = x + widths[..l.col].iter().sum::<usize>() + TABLE_SEP * l.col;
-                    // A cut cell ends in "…" at its last column.
-                    let start = clean(&cell[..l.start]).width().min(*w);
-                    let end = clean(&cell[..l.end]).width().min(*w);
-                    if start < end {
-                        self.links.push(Link { line: first + index, start: x + start, end: x + end, url: l.url });
-                    }
-                }
+                // Each column as wide as its widest line, if it fits; cells wrap to their column.
+                let widths =
+                    fit_columns(&rows, avail, |cell| cell.split('\n').map(UnicodeWidthStr::width).max().unwrap_or(0));
+                self.wrapped_table(&rows, &widths);
                 self.blank();
             }
             TagEnd::FootnoteDefinition => self.flush(),
             _ => {}
+        }
+    }
+
+    /// Draws a table whose cells wrap to `widths`, and places its links. A rule follows the header and, if any
+    /// row takes more than one line, every row.
+    fn wrapped_table(&mut self, rows: &[Vec<String>], widths: &[usize]) {
+        if widths.is_empty() {
+            return;
+        }
+        let cell = |r: usize, c: usize| rows[r].get(c).map_or("", String::as_str);
+        // Each cell's lines, as byte ranges in its text.
+        let pieces: Vec<Vec<Vec<Range<usize>>>> =
+            (0..rows.len()).map(|r| widths.iter().enumerate().map(|(c, w)| wrap(cell(r, c), *w)).collect()).collect();
+        let tall = pieces.iter().flatten().any(|lines| lines.len() > 1);
+        let rule = widths.iter().map(|w| "─".repeat(*w)).collect::<Vec<_>>().join("─┼─");
+        let links = std::mem::take(&mut self.table_links);
+        for (r, row_pieces) in pieces.iter().enumerate() {
+            let style = if r == 0 { Style::default().add_modifier(Modifier::BOLD) } else { Style::default() };
+            let height = row_pieces.iter().map(Vec::len).max().unwrap_or(1);
+            for k in 0..height {
+                self.start_line();
+                let mut x = self.prefix_w;
+                for (c, w) in widths.iter().enumerate() {
+                    if c > 0 {
+                        self.cur.push(Span::styled(" │ ", dim()));
+                        x += TABLE_SEP;
+                    }
+                    let text = cell(r, c);
+                    let piece = row_pieces[c].get(k).cloned().unwrap_or(0..0);
+                    for l in links.iter().filter(|l| l.row == r && l.col == c) {
+                        let (start, end) = (l.start.max(piece.start), l.end.min(piece.end));
+                        if start < end {
+                            let col = |i: usize| x + text[piece.start..i].width();
+                            let line = self.lines.len();
+                            self.links.push(Link { line, start: col(start), end: col(end), url: l.url.clone() });
+                        }
+                    }
+                    let shown = &text[piece];
+                    let pad = " ".repeat(w.saturating_sub(shown.width()));
+                    self.cur.push(Span::styled(format!("{shown}{pad}"), style));
+                    x += w;
+                }
+                self.flush();
+            }
+            if r == 0 || (tall && r + 1 < rows.len()) {
+                self.start_line();
+                self.cur.push(Span::styled(rule.clone(), dim()));
+                self.flush();
+            }
         }
     }
 
@@ -819,10 +908,54 @@ mod tests {
     fn links_in_tables() {
         let md =
             "> | cmd | about |\n> |---|---|\n> | [`tos ls`](ls.md) | lists |\n> | x [a long name](long.md) | y |\n";
-        let found = links(md, 18);
-        // In a quote, after "│ ". The second link is cut with the cell, at its "…".
-        assert_eq!(text(&markdown(md, 18).0)[3], "│ x a lon… │ y");
-        assert_eq!(found, [(2, "tos ls".into(), "ls.md".into()), (3, "a lon…".into(), "long.md".into())]);
+        // In a quote, after "│ ". The second link's cell wraps, so it's on two lines, and rules separate the rows.
+        assert_eq!(
+            text(&markdown(md, 18).0),
+            [
+                "│ cmd      │ about",
+                "│ ─────────┼──────",
+                "│ tos ls   │ lists",
+                "│ ─────────┼──────",
+                "│ x a long │ y",
+                "│ name     │"
+            ]
+        );
+        assert_eq!(
+            links(md, 18),
+            [
+                (2, "tos ls".into(), "ls.md".into()),
+                (4, "a long".into(), "long.md".into()),
+                (5, "name".into(), "long.md".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn table_cells_wrap() {
+        let md = "| Option | Pros | Cons |\n|---|---|---|\n| A | fast to build, no new [dependency](d.md) | cuts long cells |\n| B | shows everything<br>links still work | taller tables |\n";
+        let (lines, _) = markdown(md, 44);
+        assert_eq!(
+            text(&lines),
+            [
+                "Option │ Pros              │ Cons",
+                "───────┼───────────────────┼────────────────",
+                "A      │ fast to build, no │ cuts long cells",
+                "       │ new dependency    │",
+                "───────┼───────────────────┼────────────────",
+                "B      │ shows everything  │ taller tables",
+                "       │ links still work  │",
+            ]
+        );
+        assert_eq!(links(md, 44), [(3, "dependency".into(), "d.md".into())]);
+    }
+
+    #[test]
+    fn wrap_breaks_at_spaces_and_splits_long_words() {
+        let text = "ab cd\n\nabcdefgh";
+        let lines: Vec<&str> = wrap(text, 4).into_iter().map(|r| &text[r]).collect();
+        assert_eq!(lines, ["ab", "cd", "", "abcd", "efgh"]);
+        // An empty cell is one empty line.
+        assert_eq!(wrap("", 5).len(), 1);
     }
 
     #[test]
