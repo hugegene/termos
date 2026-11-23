@@ -132,7 +132,8 @@ pub fn draw_term(buf: &mut Buffer, rect: Rect, pane: &TermPane, decor: &TermDeco
             style = style.fg(Color::Black).bg(Color::Cyan).remove_modifier(Modifier::REVERSED);
         }
         let wide_at_edge = cell.flags.contains(Flags::WIDE_CHAR) && col + 1 >= usize::from(rect.width);
-        if cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) || wide_at_edge || cell.c == '\0' {
+        // A tab's cell holds `\t` (see `pane::shown`): it must go out as a blank.
+        if cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) || wide_at_edge || cell.c.is_control() {
             target.set_symbol(" ");
         } else if let Some(zw) = cell.zerowidth() {
             let mut s = String::from(cell.c);

@@ -20,6 +20,13 @@ use super::editor::Editor;
 use crate::os;
 use crate::protocol::PaneId;
 
+/// The character a terminal cell shows. The terminal keeps a tab as `\t` in the cell where it started, but on
+/// screen that cell is blank. Sent on as `\t`, the user's terminal would jump to its next tab stop, and the
+/// rest of the line would land in the wrong columns.
+pub fn shown(c: char) -> char {
+    if c.is_control() { ' ' } else { c }
+}
+
 /// Forwards events from a pane's terminal and I/O thread to the server's main loop.
 #[derive(Clone)]
 pub struct EventProxy {
@@ -207,7 +214,7 @@ impl TermPane {
                 if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
                     continue;
                 }
-                s.push(cell.c);
+                s.push(shown(cell.c));
                 if let Some(zw) = cell.zerowidth() {
                     s.extend(zw);
                 }
@@ -233,7 +240,7 @@ impl TermPane {
                 .rev()
                 .find(|c| {
                     let cell = &row[Column(*c)];
-                    cell.c != ' ' || sgr_bg(cell.bg).is_some() || cell.flags.contains(Flags::INVERSE)
+                    shown(cell.c) != ' ' || sgr_bg(cell.bg).is_some() || cell.flags.contains(Flags::INVERSE)
                 })
                 .map_or(0, |c| c + 1);
             let mut s = String::new();
@@ -248,7 +255,7 @@ impl TermPane {
                     s.push_str(&format!("\x1b[0{sgr}m"));
                     last = sgr;
                 }
-                s.push(cell.c);
+                s.push(shown(cell.c));
                 if let Some(zw) = cell.zerowidth() {
                     s.extend(zw);
                 }

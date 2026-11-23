@@ -422,6 +422,31 @@ fn scrollback_with_the_wheel() {
 }
 
 #[test]
+fn tabs_in_output_stay_in_place_when_scrolling() {
+    let env = Env::new("e2e-tabs-scroll");
+    let s = env.attach(80, 24);
+    s.wait_for("$");
+    // Lines like `git status` prints: every other one starts with a tab.
+    s.send(b"printf 'plain %s xxxxxxxxxxxx\\n\\tmodified:   f%s.rs\\n' $(seq 1 80)\r");
+    s.wait_for("f80.rs");
+    // One wheel report scrolls 3 lines, so rows that held a plain line now hold a tabbed one, and back.
+    for _ in 0..4 {
+        s.send(b"\x1b[<64;5;5M");
+        s.wait_for("SCROLL:");
+        let text = s.text();
+        for line in text.lines().filter(|l| l.contains("plain") || l.contains("modified")) {
+            // A tab at the start moves to column 8.
+            let ok = line.starts_with("│plain ") && unframe(line).ends_with("xxxxxxxxxxxx")
+                || line.starts_with("│        modified:   f") && unframe(line).ends_with(".rs");
+            assert!(ok, "a line out of place: {line:?}\nthe screen shows:\n{text}");
+        }
+    }
+    // The pane's text has the tab as blanks too, as the screen shows it.
+    let dump = env.tos(&["dump-screen"]);
+    assert!(dump.contains("\n        modified:   f80.rs") && !dump.contains('\t'), "{dump:?}");
+}
+
+#[test]
 fn programs_exiting_close_panes_and_the_session() {
     let env = Env::new("e2e-exit");
     env.tos(&["start"]);
