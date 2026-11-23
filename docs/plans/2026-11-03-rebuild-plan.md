@@ -152,10 +152,10 @@ desktop ──────────────────┤   client: thin
      every pane = PTY + terminal emulator (our alacritty_terminal fork)
              ▲   local socket (events, e.g. "new file arrived"; pane text for the phone)
    daemon: poller + webhook listener (public, signature-checked)
-         + phone API (private: tailnet-only + paired devices) ◄──HTTPS/WebSocket── phone PWA
 ```
 
-The phone API and PWA come from the [phone interface plan](2026-11-03-phone-interface.md).
+A phone app is developed separately, on top of the `tos` command line. See the
+[phone interface plan](2026-11-03-phone-interface.md).
 
 - **Client:** puts the terminal in raw mode, parses input (`crossterm`), forwards it, draws the frames it
   receives, and handles detach.
@@ -367,13 +367,11 @@ Because this is for other people, some zellij features become expected.
   get the coloured-block fallback ([phone research](../findings/2026-11-03-phone-interface-research.md) §1).
 - **Security:**
   - The session server listens only on a Unix socket.
-  - The public webhook listener is kept separate from the private phone API.
-  - The phone API binds only to Tailscale and accepts only paired devices (see the
-    [phone interface plan](2026-11-03-phone-interface.md)).
   - Use Tailscale or WireGuard for SSH from the phone instead of exposing SSH to the internet.
 
-**Phone app (PWA):** browsing, previews, editing and push notifications come from a phone-native PWA over our
-own API, not from the terminal. See the [phone interface plan](2026-11-03-phone-interface.md).
+**Phone app:** on a phone, browsing, previews and agent conversations come from a phone app developed
+separately, not from the terminal. termos provides its command line and events for it. See the
+[phone interface plan](2026-11-03-phone-interface.md).
 
 ## 10. Hard parts and risks
 
@@ -402,7 +400,7 @@ Sizes are rough estimates.
 | **4. Persistence** | Reboot recovery: layout, folders, names, finder state; programs that were running come back as commands waiting at the prompt | Sessions survive reboots, crashes and Ctrl+Q |
 | **5. Finder extras** | CSV grid editor; kitty, iTerm2 and sixel images | Full replacement for the prototype |
 | **6. CLI and extensions** | Every zellij command `tb` has the features for, with zellij's names and flags; stable tab and pane ids; JSON output; events (`tb subscribe`); keys that run commands (zellij's keybind syntax); status-bar text from extensions; a stable, documented API ([CLI extension plan](2026-11-05-cli-extensions.md)) | Other people extend `tb` from any language; zellij scripts such as `prbot` port by renaming (**~3–5k lines**) |
-| **7. Phone** | Everything for phones: the one-pane layout below ~80 columns, per-client layouts, plain keys and taps for every action; then the PWA ([phone plan](2026-11-03-phone-interface.md) P1–P4) | SSH-from-phone ready (**~10–15k lines** total before the PWA) |
+| **7. Phone** | Everything for phones: the one-pane layout below ~80 columns, per-client layouts, plain keys and taps for every action. A phone app is developed separately ([phone plan](2026-11-03-phone-interface.md)) | SSH-from-phone ready (**~10–15k lines** total) |
 | **8. Floating panes** | Floating (pop-up) panes; maybe stacked and pinned panes and swap layouts, zellij's other gaps; their 12 CLI actions | No missing zellij pane features |
 | **Parallel track** | Daemon: poller, webhook, events into the finder; drives sessions through the step 6 CLI | Independent process; can start anytime |
 | **9. Launch** | Config, themes, layouts, key hints, docs, packaging, testing across terminals (Ghostty, Terminator, WezTerm, kitty, iTerm2, Termux, Blink) on Linux and macOS | Ready for other users (roughly **2×** the personal-use effort) |
@@ -502,6 +500,9 @@ CSV table layout, rendering HTML via Markdown) and its notepad-style Neovim conf
   - **calamine** reads the spreadsheets; `zip` and `quick-xml`, which it brings in, read docx and pptx. 12 new
     crates, all MIT or Apache-2.0 compatible ([calamine finding](../findings/2026-11-11-calamine.md)).
   - Details are in the [video and Office plan](2026-11-07-video-and-office-previews.md).
+- **2026-11-21:** **the phone app moved out of termos** and is developed separately. The daemon no longer
+  gets a phone API. termos keeps the SSH path (step 7's narrow layout) and its command line, and plans agent
+  state events that a phone app can use ([phone plan](2026-11-03-phone-interface.md)).
 
 ---
 
