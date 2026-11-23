@@ -239,6 +239,10 @@ documentation. The files are in `~/.local/state/termos/agents/`.
   - `Enter` or a click on a header opens or closes that file.
   - `j`/`k`, the arrows, `PgUp`/`PgDn`, `g`/`G` and the wheel scroll.
   - `e` edits the file in a new pane, and `x` drops it from the list.
+  - `/` filters the list, as in the finder: type part of a path, such as `agent`, and only the files whose path
+    has those letters in order show, best match first. The open file closes while you type; `↑`/`↓` move,
+    `Enter` opens the highlighted file and keeps the filter, and `Esc` cancels. With a filter kept, `Esc` or `f`
+    clears it. [The plan](plans/2026-11-23-docs-pane-filter.md).
   - `q` closes the pane.
 - **Copying, as in the finder's preview:**
   - **Drag** over the open file to select from one character to another; letting go copies it, and it stays

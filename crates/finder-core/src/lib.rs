@@ -361,14 +361,19 @@ pub fn human_size(bytes: u64) -> String {
 /// Keeps entries whose names contain the letters of `query` in order (case-insensitive).
 /// Returns the indexes of matching entries, best matches (shortest span, earliest start) first.
 pub fn filter(entries: &[Entry], query: &str) -> Vec<usize> {
+    filter_names(entries.iter().map(|e| e.name.as_str()), query)
+}
+
+/// `filter` for any list of names, such as the docs pane's paths.
+pub fn filter_names<'a>(names: impl IntoIterator<Item = &'a str>, query: &str) -> Vec<usize> {
+    let names = names.into_iter();
     if query.is_empty() {
-        return (0..entries.len()).collect();
+        return (0..names.count()).collect();
     }
     let q: Vec<char> = query.to_lowercase().chars().collect();
-    let mut scored: Vec<(usize, usize, usize)> = entries
-        .iter()
+    let mut scored: Vec<(usize, usize, usize)> = names
         .enumerate()
-        .filter_map(|(i, e)| subsequence_span(&e.name.to_lowercase(), &q).map(|(s, l)| (l, s, i)))
+        .filter_map(|(i, name)| subsequence_span(&name.to_lowercase(), &q).map(|(s, l)| (l, s, i)))
         .collect();
     scored.sort();
     scored.into_iter().map(|(_, _, i)| i).collect()

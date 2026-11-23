@@ -5,7 +5,9 @@
 //! folder, outside a repository), listed again by a thread of their own.
 //! Text in the open file is selected and copied as in the finder's preview, with the same code (`select.rs`);
 //! being a program, it copies by writing OSC 52, which `tos` passes on to the clipboard.
-//! Plans: docs/plans/2026-11-17-agent-plan-pane.md, docs/plans/2026-11-21-preview-select-copy.md.
+//! `/` filters the headers by path, with the finder's matching.
+//! Plans: docs/plans/2026-11-17-agent-plan-pane.md, docs/plans/2026-11-21-preview-select-copy.md,
+//! docs/plans/2026-11-23-docs-pane-filter.md.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -79,6 +81,13 @@ struct Selected {
     mtime: Option<SystemTime>,
 }
 
+/// While a filter is typed after `/`: what was showing before, for Esc to bring back.
+#[derive(Default)]
+struct Typing {
+    open: Option<PathBuf>,
+    following: bool,
+}
+
 /// The accordion's state.
 #[derive(Default)]
 pub struct Docs {
@@ -119,6 +128,10 @@ pub struct Docs {
     /// With nothing open, the list of headers: the first one on screen, and how many rows it had last time.
     list_top: usize,
     list_rows: usize,
+    /// Typed after `/`: only the headers whose label has its letters in order show, best match first.
+    filter: String,
+    /// The filter is being typed: keys go to it.
+    typing: Option<Typing>,
 }
 
 /// How a path shows: relative to `root` or else `cwd` if inside one, else with `~` for the home folder.
@@ -362,11 +375,79 @@ impl Docs {
         self.sel = moved(self.sel);
     }
 
-    /// Moves the highlight `delta` headers down (or up), in the list shown with nothing open.
+    /// The entries whose headers show, in order: all of them, or with a filter those that match, best first.
+    fn shown(&self) -> Vec<usize> {
+        finder_core::filter_names(self.entries.iter().map(|e| e.label.as_str()), &self.filter)
+    }
+
+    /// Whether the highlighted entry's header shows.
+    fn sel_shown(&self) -> bool {
+        self.shown().contains(&self.sel)
+    }
+
+    /// Moves the highlight `delta` headers down (or up) among those that show.
     fn move_sel(&mut self, delta: isize) {
-        if let Some(last) = self.entries.len().checked_sub(1) {
-            self.sel = self.sel.saturating_add_signed(delta).min(last);
+        let shown = self.shown();
+        if let Some(last) = shown.len().checked_sub(1) {
+            let at = shown.iter().position(|&i| i == self.sel).map_or(0, |at| at.saturating_add_signed(delta));
+            self.sel = shown[at.min(last)];
         }
+    }
+
+    /// `/`: starts typing a filter. The open file closes, so the matches show as a list.
+    fn start_filter(&mut self) {
+        let open = self.open_path().map(Path::to_path_buf);
+        self.typing = Some(Typing { open, following: self.following });
+        self.filter.clear();
+        self.open = None;
+        self.following = false;
+        self.selection = None;
+    }
+
+    /// A key while the filter is typed.
+    fn filter_key(&mut self, k: KeyEvent) {
+        match k.code {
+            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.filter.push(c);
+                self.refilter();
+            }
+            KeyCode::Backspace => {
+                self.filter.pop();
+                self.refilter();
+            }
+            KeyCode::Down => self.move_sel(1),
+            KeyCode::Up => self.move_sel(-1),
+            // Keep the filter and open the highlighted file.
+            KeyCode::Enter => {
+                self.typing = None;
+                if self.sel_shown() {
+                    self.open = Some(self.sel);
+                }
+            }
+            // Cancel: what was showing before comes back, or with following, the file written last.
+            KeyCode::Esc => {
+                let before = self.typing.take().unwrap_or_default();
+                self.filter.clear();
+                self.following = before.following;
+                self.open = if before.following {
+                    self.newest()
+                } else {
+                    before.open.and_then(|p| self.entries.iter().position(|e| e.path == p))
+                };
+                if let Some(o) = self.open {
+                    self.sel = o;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The filter changed: the best match is highlighted.
+    fn refilter(&mut self) {
+        if let Some(&best) = self.shown().first() {
+            self.sel = best;
+        }
+        self.list_top = 0;
     }
 
     /// Drops files that no longer exist.
@@ -400,15 +481,13 @@ impl Docs {
         self.following = false;
     }
 
-    /// Opens the next (`down`) or previous section.
+    /// Opens the next (`down`) or previous section among those that show.
     fn step(&mut self, down: bool) {
-        if self.entries.is_empty() {
-            return;
+        self.move_sel(if down { 1 } else { -1 });
+        if self.sel_shown() {
+            self.open = Some(self.sel);
+            self.following = false;
         }
-        let last = self.entries.len() - 1;
-        self.sel = if down { (self.sel + 1).min(last) } else { self.sel.saturating_sub(1) };
-        self.open = Some(self.sel);
-        self.following = false;
     }
 
     fn scroll_by(&mut self, delta: isize) {
@@ -427,6 +506,10 @@ impl Docs {
     pub fn key(&mut self, k: KeyEvent) -> Outcome {
         self.check_selection();
         self.note = None;
+        if self.typing.is_some() {
+            self.filter_key(k);
+            return Outcome::Redraw;
+        }
         let page = self.body_rows.max(2) as isize - 1;
         let list_page = self.list_rows.max(2) as isize - 1;
         // Nothing open: the keys that scroll a file move the highlight through the list instead.
@@ -481,23 +564,31 @@ impl Docs {
             KeyCode::Char('G') | KeyCode::End => self.scroll_to(true),
             KeyCode::Tab => self.step(true),
             KeyCode::BackTab => self.step(false),
-            KeyCode::Enter if !self.entries.is_empty() => self.toggle(self.sel),
+            KeyCode::Enter if self.sel_shown() => self.toggle(self.sel),
+            KeyCode::Char('/') => self.start_filter(),
+            KeyCode::Esc if !self.filter.is_empty() => self.filter.clear(),
             KeyCode::Char('f') => {
+                // The agent's next file might not match a filter.
+                self.filter.clear();
                 self.following = true;
                 if let Some(newest) = self.newest() {
                     self.open = Some(newest);
                     self.sel = newest;
                 }
             }
-            KeyCode::Char('x') if !self.entries.is_empty() => {
-                self.dropped.insert(self.entries[self.sel].path.clone());
-                self.remove(self.sel);
-            }
-            KeyCode::Char('e') => {
-                if let Some(e) = self.entries.get(self.sel) {
-                    return Outcome::Edit(e.path.clone());
+            KeyCode::Char('x') => {
+                let shown = self.shown();
+                if let Some(at) = shown.iter().position(|&i| i == self.sel) {
+                    self.dropped.insert(self.entries[self.sel].path.clone());
+                    self.remove(self.sel);
+                    // The highlight goes to the header that took the dropped one's place.
+                    let shown = self.shown();
+                    if let Some(&i) = shown.get(at.min(shown.len().saturating_sub(1))) {
+                        self.sel = i;
+                    }
                 }
             }
+            KeyCode::Char('e') if self.sel_shown() => return Outcome::Edit(self.entries[self.sel].path.clone()),
             _ => {}
         }
         Outcome::Redraw
@@ -666,11 +757,17 @@ impl Docs {
         }
         let dim = Style::default().fg(Color::DarkGray);
         let n = self.entries.len();
+        let shown = self.shown();
+        let matching = shown.len();
         let follow = if self.following { "following" } else { "f follows" };
         let title = match (&self.note, self.selection.as_ref().filter(|s| s.sel.shown()).map(|s| s.sel.making)) {
             (Some(note), _) => format!(" {note}"),
             (None, Some(Making::Keys)) => " j/k extend · y copy · Esc cancel".to_owned(),
             (None, Some(_)) => " Ctrl+c copy · Esc clear".to_owned(),
+            (None, None) if self.typing.is_some() => {
+                format!(" /{}▏ · {matching} of {n} · Enter opens · Esc cancels", self.filter)
+            }
+            (None, None) if !self.filter.is_empty() => format!(" /{} · {matching} of {n} · Esc clears", self.filter),
             (None, None) => format!(" docs · {n} · {follow}"),
         };
         buf.set_stringn(area.x, area.y, &title, usize::from(area.width), dim);
@@ -692,32 +789,42 @@ impl Docs {
             }
             return;
         }
-        // Rows from the top: each header, and the open section's lines under its header. The open section gets
-        // the rows the headers leave, and at least 2/3 of them: when the headers don't all fit beside that, only
-        // those nearest the open section show.
-        let body_h = match self.open {
-            Some(_) => avail.saturating_sub(n).max(avail * BODY_SHARE.0 / BODY_SHARE.1),
+        if matching == 0 {
+            if avail > 0 {
+                buf.set_stringn(area.x, area.y + 1, " (no match)", usize::from(area.width), dim);
+            }
+            return;
+        }
+        // Rows from the top: each header that shows, and the open section's lines under its header. The open
+        // section gets the rows the headers leave, and at least 2/3 of them: when the headers don't all fit beside
+        // that, only those nearest the open section show.
+        let open = self.open.filter(|o| shown.contains(o));
+        let body_h = match open {
+            Some(_) => avail.saturating_sub(matching).max(avail * BODY_SHARE.0 / BODY_SHARE.1),
             None => 0,
         };
         let mut rows: Vec<Option<usize>> = Vec::new(); // Some(entry) for a header, None for a body line
-        for i in 0..n {
+        for &i in &shown {
             rows.push(Some(i));
-            if self.open == Some(i) {
+            if open == Some(i) {
                 rows.extend(std::iter::repeat_n(None, body_h));
             }
         }
+        // Where a header is among those that show: its row, as the headers above it take one row each.
+        let row_of = |i: usize| shown.iter().position(|&s| s == i).unwrap_or(0);
         let start = if rows.len() <= avail {
             0
-        } else if let Some(o) = self.open.filter(|_| body_h > 0) {
+        } else if let Some(o) = open.filter(|_| body_h > 0) {
             // The open section whole on screen, with the headers nearest it: half above, half below.
             let above = (avail - body_h - 1) / 2;
-            o.saturating_sub(above).min(rows.len() - avail)
+            row_of(o).saturating_sub(above).min(rows.len() - avail)
         } else {
             // A list of headers, scrolled as little as keeps the highlighted one on screen.
-            if self.sel < self.list_top {
-                self.list_top = self.sel;
-            } else if self.sel >= self.list_top + avail {
-                self.list_top = self.sel + 1 - avail;
+            let sel = row_of(self.sel);
+            if sel < self.list_top {
+                self.list_top = sel;
+            } else if sel >= self.list_top + avail {
+                self.list_top = sel + 1 - avail;
             }
             self.list_top = self.list_top.min(rows.len() - avail);
             self.list_top
@@ -727,7 +834,7 @@ impl Docs {
         let mut body_line = 0;
         let mut body: Vec<Line<'static>> = Vec::new();
         let mut scroll = 0;
-        if let Some(o) = self.open.filter(|_| body_h > 0) {
+        if let Some(o) = open.filter(|_| body_h > 0) {
             body = self.body(o, text_w).to_vec();
             self.body_rows = body_h;
             self.body_len = body.len();
@@ -745,17 +852,17 @@ impl Docs {
                 Some(i) => {
                     self.header_rows.push((y, i));
                     let e = &self.entries[i];
-                    let open = self.open == Some(i);
+                    let is_open = open == Some(i);
                     let m = mtime(&e.path);
-                    let changed = !open && m.is_some_and(|m| e.seen.is_none_or(|s| m > s));
+                    let changed = !is_open && m.is_some_and(|m| e.seen.is_none_or(|s| m > s));
                     // The agent's files: when it wrote them. The others: when they last changed.
                     let when = if e.by_agent { e.written } else { m.map_or(e.written, secs) };
                     let right = format!("{}{} ", if changed { "● " } else { "" }, age(when, now));
-                    let arrow = if open { "▾ " } else { "▸ " };
+                    let arrow = if is_open { "▾ " } else { "▸ " };
                     let room = width.saturating_sub(arrow.width() + right.width() + 1);
                     let name = fit_left(&e.label, room);
                     let mut style = Style::default();
-                    if open {
+                    if is_open {
                         style = style.add_modifier(Modifier::BOLD);
                     }
                     if i == self.sel {
@@ -1206,6 +1313,96 @@ mod tests {
         docs.key(key(KeyCode::Tab));
         let rows = screen(&mut docs, 40, 22);
         assert!(rows[4].starts_with("▾ f16.md"), "{rows:?}");
+    }
+
+    fn typed(docs: &mut Docs, text: &str) -> Vec<Outcome> {
+        text.chars().map(|c| docs.key(key(KeyCode::Char(c)))).collect()
+    }
+
+    #[test]
+    fn slash_filters_the_headers_best_match_first_and_enter_opens_one() {
+        let (dir, paths) =
+            folder(&["README.md", "docs/findings/agent-hooks.md", "docs/plans/agent-pane.md", "notes.md"]);
+        let mut docs = Docs::with_root(Some(dir.path().to_path_buf()));
+        docs.add_files(paths);
+        assert_eq!(
+            labels(&docs),
+            ["notes.md", "docs/plans/agent-pane.md", "docs/findings/agent-hooks.md", "README.md"]
+        );
+        docs.key(key(KeyCode::Enter));
+        assert_eq!(docs.open, Some(0), "notes.md is open");
+
+        // `/` closes it, and typing narrows the list: both "agent" files, the earlier match first.
+        docs.key(key(KeyCode::Char('/')));
+        assert_eq!(docs.open, None);
+        assert_eq!(screen(&mut docs, 40, 8)[0], " /▏ · 4 of 4 · Enter opens · Esc cancels");
+        typed(&mut docs, "agent");
+        let rows = screen(&mut docs, 50, 8);
+        assert_eq!(rows[0], " /agent▏ · 2 of 4 · Enter opens · Esc cancels");
+        assert!(rows[1].starts_with("▸ docs/plans/agent-pane.md"), "{rows:?}");
+        assert!(rows[2].starts_with("▸ docs/findings/agent-hooks.md"), "{rows:?}");
+        assert_eq!(rows[3], "", "{rows:?}");
+        assert_eq!(docs.sel, 1, "the best match is highlighted");
+        // Every letter types, q included; Backspace takes it back.
+        assert_eq!(typed(&mut docs, "q"), [Outcome::Redraw]);
+        assert_eq!(screen(&mut docs, 50, 8)[1], " (no match)");
+        docs.key(key(KeyCode::Backspace));
+
+        // ↓ and Enter open the second match and keep the filter; Tab moves only among the matches.
+        docs.key(key(KeyCode::Down));
+        docs.key(key(KeyCode::Enter));
+        let rows = screen(&mut docs, 50, 8);
+        assert_eq!(rows[0], " /agent · 2 of 4 · Esc clears");
+        assert!(rows[2].starts_with("▾ docs/findings/agent-hooks.md"), "{rows:?}");
+        docs.key(key(KeyCode::Tab));
+        assert_eq!(docs.open, Some(2), "Tab stays on the last match");
+        docs.key(key(KeyCode::BackTab));
+        assert_eq!(docs.open, Some(1), "Shift+Tab opens the plan");
+
+        // Esc clears the filter; the plan stays open.
+        docs.key(key(KeyCode::Esc));
+        assert_eq!(screen(&mut docs, 50, 8)[0], " docs · 4 · f follows");
+        assert_eq!(docs.open, Some(1));
+        // f clears a filter too, as the agent's next file might not match it.
+        docs.key(key(KeyCode::Char('/')));
+        typed(&mut docs, "readme");
+        docs.key(key(KeyCode::Enter));
+        assert_eq!(docs.open, Some(3));
+        docs.key(key(KeyCode::Char('f')));
+        assert!(docs.filter.is_empty() && docs.following);
+    }
+
+    #[test]
+    fn esc_while_typing_brings_back_the_open_file_and_following() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = dir.path();
+        for f in ["a.md", "b.md", "c.md"] {
+            fs::write(w.join(f), "x").unwrap();
+        }
+        let mut docs = Docs::new();
+        let mut list = list_line(&w.join("a.md"), w, 990.0) + &list_line(&w.join("b.md"), w, 991.0);
+        docs.ingest(&list);
+        assert_eq!((docs.open, docs.following), (Some(0), true), "b.md, followed");
+        docs.key(key(KeyCode::Char('/')));
+        typed(&mut docs, "a");
+        assert_eq!((docs.open, docs.following), (None, false));
+        // The agent writes c.md while the filter is typed: it doesn't match, so it waits, hidden.
+        list += &list_line(&w.join("c.md"), w, 995.0);
+        docs.ingest(&list);
+        assert_eq!(docs.open, None);
+        let rows = screen(&mut docs, 40, 8);
+        assert!(rows[1].starts_with("▸ a.md") && !rows.iter().any(|r| r.contains("c.md")), "{rows:?}");
+        // Esc: following again, so c.md, the file written last, opens.
+        docs.key(key(KeyCode::Esc));
+        assert_eq!(labels(&docs), ["c.md", "b.md", "a.md"]);
+        assert_eq!((docs.open, docs.following), (Some(0), true));
+        // Without following, Esc brings back the file that was open.
+        docs.key(key(KeyCode::Tab));
+        assert_eq!((docs.open, docs.following), (Some(1), false), "b.md");
+        docs.key(key(KeyCode::Char('/')));
+        typed(&mut docs, "a");
+        docs.key(key(KeyCode::Esc));
+        assert_eq!((docs.open, docs.following), (Some(1), false));
     }
 
     #[test]

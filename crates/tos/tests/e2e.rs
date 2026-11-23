@@ -2411,6 +2411,16 @@ fn docs_pane_lists_the_repository() {
     let text = s.wait_until("the repository's files", |t| t.contains("README.md") && t.contains("docs/guide.md"));
     assert!(!text.contains("build.md"), "ignored files stay out: {text}");
     assert!(docs["cwd"].as_str().is_some_and(|c| c.ends_with("crates/app")), "{docs}");
+
+    // `/` filters the list (docs/plans/2026-11-23-docs-pane-filter.md): only the guide shows, and Enter opens it.
+    env.tos(&["action", "focus-pane-id", &docs["id"].to_string()]);
+    s.send(b"/gui");
+    let text = s.wait_until("the filter", |t| t.contains("/gui▏ · 1 of 2"));
+    assert!(!text.contains("README.md"), "{text}");
+    s.send(b"\r");
+    s.wait_until("the guide, open", |t| t.contains("How to use it.") && t.contains("/gui · 1 of 2 · Esc clears"));
+    s.send(b"\x1b");
+    s.wait_until("the list, whole again", |t| t.contains("README.md") && t.contains("docs · 2"));
 }
 
 #[test]
