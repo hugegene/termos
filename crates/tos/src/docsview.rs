@@ -1,14 +1,19 @@
 //! `tos docs --list FILE`: the docs pane's program. It follows the list that the server appends to (one JSON
 //! line per Markdown file an agent wrote, `server/docs_pane.rs`) and shows the files as an accordion: a header
 //! line per file, newest first, and one file open below its header, drawn with the finder's Markdown renderer.
+//! Below the agent's files come the other Markdown files of the git repository the pane starts in (or of its
+//! folder, outside a repository), listed again by a thread of their own.
 //! Text in the open file is selected and copied as in the finder's preview, with the same code (`select.rs`);
 //! being a program, it copies by writing OSC 52, which `tos` passes on to the clipboard.
 //! Plans: docs/plans/2026-11-17-agent-plan-pane.md, docs/plans/2026-11-21-preview-select-copy.md.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::io::{self, Stdout};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, thread};
 
@@ -27,20 +32,34 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use unicode_width::UnicodeWidthStr;
 
-use crate::paths;
 use crate::server::finder::select::{self, Making, Selection};
 use crate::server::finder::view::markdown;
+use crate::{agents, paths};
+
+/// The open file's least share of the pane's rows, when not every header fits beside it (an estimate).
+const BODY_SHARE: (usize, usize) = (2, 3);
+/// The folder is listed again at least this often, and no sooner than this after the last time (estimates).
+const RELIST_EVERY: Duration = Duration::from_secs(20);
+const RELIST_GAP: Duration = Duration::from_secs(2);
+/// Outside a git repository, the walk goes this many folders deep, and stops after this many folders or files
+/// (estimates): enough for a project, cheap in `~`.
+const WALK_DEPTH: usize = 3;
+const WALK_DIRS: usize = 1000;
+const WALK_FILES: usize = 1000;
 
 /// One file in the list.
 #[derive(Debug)]
 pub struct Entry {
     pub path: PathBuf,
-    /// The path as shown: relative to the agent's folder, else under `~`.
+    /// The path as shown: relative to the repository (or the agent's folder), else under `~`.
     pub label: String,
-    /// When the agent last wrote it (seconds since 1970, from the list).
+    /// When the agent last wrote it (seconds since 1970, from the list); for the folder's other files, when
+    /// they last changed as they were listed.
     pub written: f64,
-    /// The file's modification time when it was last on screen, open.
+    /// The file's modification time when it was last on screen, open, or when it was listed.
     pub seen: Option<SystemTime>,
+    /// The agent wrote it, rather than it being one of the folder's other files.
+    pub by_agent: bool,
 }
 
 /// What a key or click asks the program to do beyond redrawing.
@@ -91,12 +110,23 @@ pub struct Docs {
     selection: Option<Selected>,
     /// Said in the title line until the next key: why nothing was copied.
     note: Option<String>,
+    /// The folder whose Markdown files are listed: the git repository the pane is in, or the pane's folder.
+    root: Option<PathBuf>,
+    /// The folder has been listed once: files found later are new, and go on top.
+    listed: bool,
+    /// Files dropped with `x`: listing the folder again doesn't bring them back, the agent writing them does.
+    dropped: HashSet<PathBuf>,
+    /// With nothing open, the list of headers: the first one on screen, and how many rows it had last time.
+    list_top: usize,
+    list_rows: usize,
 }
 
-/// How a path shows: relative to `cwd` if inside it, else with `~` for the home folder.
-fn label(path: &Path, cwd: Option<&Path>) -> String {
-    if let Some(rel) = cwd.and_then(|c| path.strip_prefix(c).ok()) {
-        return rel.to_string_lossy().into_owned();
+/// How a path shows: relative to `root` or else `cwd` if inside one, else with `~` for the home folder.
+fn label(path: &Path, root: Option<&Path>, cwd: Option<&Path>) -> String {
+    for dir in [root, cwd].into_iter().flatten() {
+        if let Ok(rel) = path.strip_prefix(dir) {
+            return rel.to_string_lossy().into_owned();
+        }
     }
     for home in paths::home_dirs() {
         if let Ok(rel) = path.strip_prefix(home) {
@@ -121,8 +151,98 @@ fn age(t: f64, now: f64) -> String {
     }
 }
 
+fn secs(t: SystemTime) -> f64 {
+    t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64()
+}
+
 fn now_secs() -> f64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64()
+    secs(SystemTime::now())
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|x| x.eq_ignore_ascii_case("md") || x.eq_ignore_ascii_case("markdown"))
+}
+
+/// The folder the docs pane lists: the top of the git repository that `dir` is in, else `dir`.
+pub fn root_of(dir: &Path) -> PathBuf {
+    let top = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    match top {
+        Ok(out) if out.status.success() && out.stdout.len() > 1 => {
+            PathBuf::from(OsStr::from_bytes(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout)))
+        }
+        _ => dir.to_path_buf(),
+    }
+}
+
+/// The Markdown files under `root`. In a git repository, its tracked files and the new ones that `.gitignore`
+/// doesn't ignore; elsewhere, a walk of the folder that stops early (`WALK_*`). Never files in agents' own
+/// folders, such as Claude's memory in `~/.claude`.
+pub fn markdown_files(root: &Path) -> Vec<PathBuf> {
+    let git = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    let found = match git {
+        Ok(out) if out.status.success() => out
+            .stdout
+            .split(|&b| b == 0)
+            .filter(|p| !p.is_empty())
+            .map(|p| root.join(OsStr::from_bytes(p)))
+            .filter(|p| is_markdown(p))
+            .collect(),
+        _ => walk(root),
+    };
+    let mut files: Vec<PathBuf> =
+        found.into_iter().filter(|p| p.is_file() && !agents::in_agent_dir(p, paths::home_dirs())).collect();
+    // A file with a merge conflict comes once per side.
+    files.dedup();
+    files
+}
+
+/// The Markdown files in `root` and its folders, nearest first, skipping hidden folders, `node_modules` and
+/// `target`, within the `WALK_*` limits.
+fn walk(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut dirs = std::collections::VecDeque::from([(root.to_path_buf(), 0)]);
+    let mut read = 0;
+    while let Some((dir, depth)) = dirs.pop_front() {
+        read += 1;
+        if read > WALK_DIRS {
+            break;
+        }
+        let Ok(items) = fs::read_dir(&dir) else { continue };
+        for item in items.flatten() {
+            let name = item.file_name();
+            let name = name.to_string_lossy();
+            let Ok(kind) = item.file_type() else { continue };
+            if name.starts_with('.') {
+                continue;
+            }
+            let path = item.path();
+            if kind.is_dir() {
+                if depth < WALK_DEPTH && name != "node_modules" && name != "target" {
+                    dirs.push_back((path, depth + 1));
+                }
+            } else if is_markdown(&path) {
+                out.push(path);
+                if out.len() >= WALK_FILES {
+                    return out;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Cuts `text` to `width` columns from the left, keeping the end: `…/plans/2026-11-21-x.md`.
@@ -151,6 +271,11 @@ impl Docs {
         Docs { following: true, ..Docs::default() }
     }
 
+    /// A docs pane that labels files relative to `root`, the folder it lists.
+    pub fn with_root(root: Option<PathBuf>) -> Docs {
+        Docs { root, ..Docs::new() }
+    }
+
     /// Reads the list's new lines. Only whole lines count: a line still being written waits for next time.
     pub fn ingest(&mut self, text: &str) {
         let lines: Vec<&str> = text.split_inclusive('\n').filter(|l| l.ends_with('\n')).collect();
@@ -160,16 +285,22 @@ impl Docs {
             let Some(path) = v["path"].as_str().map(PathBuf::from) else { continue };
             let cwd = v["cwd"].as_str().map(Path::new);
             let t = v["t"].as_f64().unwrap_or_else(now_secs);
+            self.dropped.remove(&path);
             let i = match self.entries.iter().position(|e| e.path == path) {
-                Some(i) => {
+                Some(i) if self.entries[i].by_agent => {
                     self.entries[i].written = t;
                     i
                 }
+                // One of the folder's files, written by the agent for the first time: it joins the agent's, on top.
+                Some(i) => {
+                    self.move_to_top(i);
+                    self.entries[0].by_agent = true;
+                    self.entries[0].written = t;
+                    0
+                }
                 None => {
-                    let label = label(&path, cwd);
-                    self.entries.insert(0, Entry { path, label, written: t, seen: None });
-                    self.open = self.open.map(|o| o + 1);
-                    self.sel = if self.entries.len() > 1 { self.sel + 1 } else { 0 };
+                    let label = label(&path, self.root.as_deref(), cwd);
+                    self.insert_top(Entry { path, label, written: t, seen: None, by_agent: true });
                     0
                 }
             };
@@ -177,6 +308,64 @@ impl Docs {
                 self.open = Some(i);
                 self.sel = i;
             }
+        }
+    }
+
+    /// Adds the folder's Markdown files that aren't listed yet. The first listing goes below the agent's files,
+    /// most recently changed first; files that later listings find are new, so they go on top.
+    pub fn add_files(&mut self, files: Vec<PathBuf>) {
+        let known: HashSet<&Path> = self.entries.iter().map(|e| e.path.as_path()).collect();
+        let mut new: Vec<(Option<SystemTime>, PathBuf)> = files
+            .into_iter()
+            .filter(|f| !known.contains(f.as_path()) && !self.dropped.contains(f))
+            .map(|f| (mtime(&f), f))
+            .collect();
+        new.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        let root = self.root.clone();
+        let entry = |(m, path): (Option<SystemTime>, PathBuf)| Entry {
+            label: label(&path, root.as_deref(), None),
+            written: m.map_or(0.0, secs),
+            seen: m,
+            by_agent: false,
+            path,
+        };
+        if self.listed {
+            for item in new.into_iter().rev() {
+                self.insert_top(entry(item));
+            }
+        } else {
+            self.entries.extend(new.into_iter().map(entry));
+            self.listed = true;
+        }
+    }
+
+    /// Puts a new entry on top; the open and highlighted ones stay the same files.
+    fn insert_top(&mut self, e: Entry) {
+        self.entries.insert(0, e);
+        self.open = self.open.map(|o| o + 1);
+        self.sel = if self.entries.len() > 1 { self.sel + 1 } else { 0 };
+        if self.list_top > 0 {
+            self.list_top += 1;
+        }
+    }
+
+    /// Moves entry `i` to the top; the open and highlighted ones stay the same files.
+    fn move_to_top(&mut self, i: usize) {
+        let e = self.entries.remove(i);
+        self.entries.insert(0, e);
+        let moved = |x: usize| match x {
+            x if x == i => 0,
+            x if x < i => x + 1,
+            x => x,
+        };
+        self.open = self.open.map(moved);
+        self.sel = moved(self.sel);
+    }
+
+    /// Moves the highlight `delta` headers down (or up), in the list shown with nothing open.
+    fn move_sel(&mut self, delta: isize) {
+        if let Some(last) = self.entries.len().checked_sub(1) {
+            self.sel = self.sel.saturating_add_signed(delta).min(last);
         }
     }
 
@@ -239,6 +428,10 @@ impl Docs {
         self.check_selection();
         self.note = None;
         let page = self.body_rows.max(2) as isize - 1;
+        let list_page = self.list_rows.max(2) as isize - 1;
+        // Nothing open: the keys that scroll a file move the highlight through the list instead.
+        let listing = self.open.is_none();
+        let all = self.entries.len() as isize;
         let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
         if let Some(making) = self.selection.as_ref().map(|s| s.sel.making) {
             // Selecting lines with `v`: the scroll keys move its end; y, Ctrl+c or Enter copy it.
@@ -274,6 +467,12 @@ impl Docs {
             // Ctrl+c copies, when something is selected (above); it never closes the pane.
             _ if ctrl_c => {}
             KeyCode::Char('v' | 'V') => self.select_lines(),
+            KeyCode::Char('j') | KeyCode::Down if listing => self.move_sel(1),
+            KeyCode::Char('k') | KeyCode::Up if listing => self.move_sel(-1),
+            KeyCode::PageDown | KeyCode::Char(' ') if listing => self.move_sel(list_page),
+            KeyCode::PageUp if listing => self.move_sel(-list_page),
+            KeyCode::Char('g') | KeyCode::Home if listing => self.move_sel(-all),
+            KeyCode::Char('G') | KeyCode::End if listing => self.move_sel(all),
             KeyCode::Char('j') | KeyCode::Down => self.scroll_by(1),
             KeyCode::Char('k') | KeyCode::Up => self.scroll_by(-1),
             KeyCode::PageDown | KeyCode::Char(' ') => self.scroll_by(page),
@@ -290,7 +489,10 @@ impl Docs {
                     self.sel = newest;
                 }
             }
-            KeyCode::Char('x') if !self.entries.is_empty() => self.remove(self.sel),
+            KeyCode::Char('x') if !self.entries.is_empty() => {
+                self.dropped.insert(self.entries[self.sel].path.clone());
+                self.remove(self.sel);
+            }
             KeyCode::Char('e') => {
                 if let Some(e) = self.entries.get(self.sel) {
                     return Outcome::Edit(e.path.clone());
@@ -399,6 +601,8 @@ impl Docs {
         self.check_selection();
         let making = self.selection.as_ref().map(|s| s.sel.making);
         match m.kind {
+            MouseEventKind::ScrollDown if self.open.is_none() => self.move_sel(3),
+            MouseEventKind::ScrollUp if self.open.is_none() => self.move_sel(-3),
             MouseEventKind::ScrollDown => self.scroll_by(3),
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) => {
@@ -471,24 +675,29 @@ impl Docs {
         };
         buf.set_stringn(area.x, area.y, &title, usize::from(area.width), dim);
         let avail = usize::from(area.height - 1);
+        self.list_rows = avail;
         if n == 0 {
+            let place = self.root.as_deref().map_or_else(|| "this folder".to_owned(), |r| label(r, None, None));
             let lines = [
-                " No Markdown files yet.",
-                "",
-                " The .md files that an agent in this tab",
-                " writes in its folder show here.",
-                "",
-                " q closes · Ctrl+t d reopens",
+                " No Markdown files yet.".to_owned(),
+                String::new(),
+                format!(" The .md files in {place},"),
+                " and those an agent in this tab writes,".to_owned(),
+                " show here.".to_owned(),
+                String::new(),
+                " q closes · Ctrl+t d reopens".to_owned(),
             ];
             for (k, l) in lines.iter().enumerate().take(avail) {
                 buf.set_stringn(area.x, area.y + 1 + k as u16, l, usize::from(area.width), dim);
             }
             return;
         }
-        // Rows from the top: each header, and the open section's lines under its header.
+        // Rows from the top: each header, and the open section's lines under its header. The open section gets
+        // the rows the headers leave, and at least 2/3 of them: when the headers don't all fit beside that, only
+        // those nearest the open section show.
         let body_h = match self.open {
-            Some(_) if avail > n => avail - n,
-            _ => 0,
+            Some(_) => avail.saturating_sub(n).max(avail * BODY_SHARE.0 / BODY_SHARE.1),
+            None => 0,
         };
         let mut rows: Vec<Option<usize>> = Vec::new(); // Some(entry) for a header, None for a body line
         for i in 0..n {
@@ -497,7 +706,22 @@ impl Docs {
                 rows.extend(std::iter::repeat_n(None, body_h));
             }
         }
-        let start = if rows.len() > avail { self.sel.saturating_sub(avail - 1).min(rows.len() - avail) } else { 0 };
+        let start = if rows.len() <= avail {
+            0
+        } else if let Some(o) = self.open.filter(|_| body_h > 0) {
+            // The open section whole on screen, with the headers nearest it: half above, half below.
+            let above = (avail - body_h - 1) / 2;
+            o.saturating_sub(above).min(rows.len() - avail)
+        } else {
+            // A list of headers, scrolled as little as keeps the highlighted one on screen.
+            if self.sel < self.list_top {
+                self.list_top = self.sel;
+            } else if self.sel >= self.list_top + avail {
+                self.list_top = self.sel + 1 - avail;
+            }
+            self.list_top = self.list_top.min(rows.len() - avail);
+            self.list_top
+        };
         let width = usize::from(area.width);
         let text_w = width.saturating_sub(2).max(1);
         let mut body_line = 0;
@@ -522,8 +746,11 @@ impl Docs {
                     self.header_rows.push((y, i));
                     let e = &self.entries[i];
                     let open = self.open == Some(i);
-                    let changed = !open && mtime(&e.path).is_some_and(|m| e.seen.is_none_or(|s| m > s));
-                    let right = format!("{}{} ", if changed { "● " } else { "" }, age(e.written, now));
+                    let m = mtime(&e.path);
+                    let changed = !open && m.is_some_and(|m| e.seen.is_none_or(|s| m > s));
+                    // The agent's files: when it wrote them. The others: when they last changed.
+                    let when = if e.by_agent { e.written } else { m.map_or(e.written, secs) };
+                    let right = format!("{}{} ", if changed { "● " } else { "" }, age(when, now));
                     let arrow = if open { "▾ " } else { "▸ " };
                     let room = width.saturating_sub(arrow.width() + right.width() + 1);
                     let name = fit_left(&e.label, room);
@@ -583,11 +810,14 @@ fn osc52(text: &str) {
 enum Msg {
     Term(Event),
     Changed,
-    Tick,
+    /// The folder's Markdown files, listed again.
+    Files(Vec<PathBuf>),
 }
 
 /// Runs the docs pane on `list` until `q`.
 pub fn run(list: PathBuf) -> anyhow::Result<()> {
+    // The pane starts in the agent's folder, or the focused pane's: list the Markdown files of its repository.
+    let root = std::env::current_dir().ok().map(|d| root_of(&d));
     let (tx, rx) = mpsc::channel::<Msg>();
     let keys = tx.clone();
     thread::spawn(move || {
@@ -597,17 +827,29 @@ pub fn run(list: PathBuf) -> anyhow::Result<()> {
             }
         }
     });
-    let ticks = tx.clone();
+    // The lister: the folder's Markdown files, every RELIST_EVERY, or after a change but at most every RELIST_GAP.
+    // Its own thread, so a slow git never holds up the keys. Each listing also moves the headers' ages ("5m") on.
+    let (relist, wanted) = mpsc::channel::<()>();
+    let files = tx.clone();
+    let dir = root.clone();
     thread::spawn(move || {
-        // Ages on the headers ("5m") move on.
-        while ticks.send(Msg::Tick).is_ok() {
-            thread::sleep(Duration::from_secs(20));
+        loop {
+            let found = dir.as_deref().map(markdown_files).unwrap_or_default();
+            if files.send(Msg::Files(found)).is_err() {
+                break;
+            }
+            thread::sleep(RELIST_GAP);
+            match wanted.recv_timeout(RELIST_EVERY - RELIST_GAP) {
+                Ok(()) | Err(RecvTimeoutError::Timeout) => while wanted.try_recv().is_ok() {},
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
         }
     });
     let changes = tx;
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if res.is_ok_and(|e| !matches!(e.kind, notify::EventKind::Access(_))) {
             let _ = changes.send(Msg::Changed);
+            let _ = relist.send(());
         }
     })
     .context("watching files")?;
@@ -620,16 +862,22 @@ pub fn run(list: PathBuf) -> anyhow::Result<()> {
     if let Some(dir) = list.parent() {
         watch(dir, &mut watcher);
     }
+    // The repository's top folder, not all of it: a recursive watch of target/ alone takes thousands of watches.
+    if let Some(dir) = &root {
+        watch(dir, &mut watcher);
+    }
 
     terminal::enable_raw_mode()?;
     let _restore = Restore;
     execute!(io::stdout(), terminal::EnterAlternateScreen, EnableMouseCapture, cursor::Hide)?;
     let mut term: Terminal<CrosstermBackend<Stdout>> = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-    let mut docs = Docs::new();
+    let mut docs = Docs::with_root(root);
     loop {
         docs.ingest(&fs::read_to_string(&list).unwrap_or_default());
         docs.forget_deleted();
-        for e in &docs.entries {
+        // The folders of the agent's files and of the open file, so that their changes redraw at once.
+        let open = docs.open.and_then(|o| docs.entries.get(o));
+        for e in docs.entries.iter().filter(|e| e.by_agent).chain(open) {
             if let Some(dir) = e.path.parent() {
                 watch(dir, &mut watcher);
             }
@@ -663,7 +911,8 @@ pub fn run(list: PathBuf) -> anyhow::Result<()> {
                         osc52(&text);
                     }
                 }
-                Msg::Term(_) | Msg::Changed | Msg::Tick => {}
+                Msg::Files(found) => docs.add_files(found),
+                Msg::Term(_) | Msg::Changed => {}
             }
             // Take whatever else is waiting before drawing, so a burst of changes draws once.
             match rx.try_recv() {
@@ -870,6 +1119,127 @@ mod tests {
         assert!(docs.selection.is_none());
     }
 
+    /// A folder of Markdown files, `a.md` changed longest ago, each one second after the last.
+    fn folder(names: &[&str]) -> (tempfile::TempDir, Vec<PathBuf>) {
+        let dir = tempfile::tempdir().unwrap();
+        let base = SystemTime::now() - Duration::from_secs(1000);
+        let paths: Vec<PathBuf> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let p = dir.path().join(n);
+                fs::create_dir_all(p.parent().unwrap()).unwrap();
+                fs::write(&p, format!("# {n}\n\nThe text of {n}.\n")).unwrap();
+                let f = fs::File::options().write(true).open(&p).unwrap();
+                f.set_modified(base + Duration::from_secs(i as u64)).unwrap();
+                p
+            })
+            .collect();
+        (dir, paths)
+    }
+
+    fn labels(docs: &Docs) -> Vec<&str> {
+        docs.entries.iter().map(|e| e.label.as_str()).collect()
+    }
+
+    #[test]
+    fn the_folders_files_go_below_the_agents_and_an_agents_write_brings_one_to_the_top() {
+        let (dir, paths) = folder(&["a.md", "docs/b.md", "c.md", "new.md"]);
+        let w = dir.path();
+        let mut docs = Docs::with_root(Some(w.to_path_buf()));
+        // The agent wrote new.md; then the folder is listed: the rest below, most recently changed first.
+        let mut list = list_line(&paths[3], w, 990.0);
+        docs.ingest(&list);
+        docs.add_files(paths[..3].to_vec());
+        assert_eq!(labels(&docs), ["new.md", "c.md", "docs/b.md", "a.md"]);
+        assert_eq!(docs.open, Some(0), "following opened the agent's file");
+        let rows = screen(&mut docs, 40, 12);
+        assert!(!rows.iter().any(|r| r.contains('●')), "listed files aren't new: {rows:?}");
+
+        // The agent writes a.md, one of the folder's: it moves to the top once and opens.
+        list += &list_line(&paths[0], w, 995.0);
+        docs.ingest(&list);
+        assert_eq!(labels(&docs), ["a.md", "new.md", "c.md", "docs/b.md"]);
+        assert_eq!(docs.open, Some(0));
+        // A file found by a later listing is new: it goes on top, and the open file stays open.
+        let later = w.join("later.md");
+        fs::write(&later, "# Later").unwrap();
+        docs.add_files(vec![later, paths[1].clone()]);
+        assert_eq!(labels(&docs), ["later.md", "a.md", "new.md", "c.md", "docs/b.md"]);
+        assert_eq!(docs.open, Some(1));
+
+        // x drops c.md, and listing again doesn't bring it back; the agent writing it does.
+        docs.sel = 3;
+        docs.key(key(KeyCode::Char('x')));
+        docs.add_files(paths.clone());
+        assert!(!labels(&docs).contains(&"c.md"));
+        list += &list_line(&paths[2], w, 999.0);
+        docs.ingest(&list);
+        assert_eq!(labels(&docs)[0], "c.md");
+    }
+
+    #[test]
+    fn with_many_files_the_open_one_keeps_two_thirds_and_the_nearest_headers_show() {
+        let names: Vec<String> = (0..30).map(|i| format!("f{i:02}.md")).collect();
+        let (dir, paths) = folder(&names.iter().map(String::as_str).collect::<Vec<_>>());
+        let mut docs = Docs::with_root(Some(dir.path().to_path_buf()));
+        docs.add_files(paths);
+        // Nothing open: a list. j moves the highlight, and the list scrolls to keep it on screen.
+        let rows = screen(&mut docs, 40, 10);
+        assert!(rows[1].starts_with("▸ f29.md") && rows[9].starts_with("▸ f21.md"), "{rows:?}");
+        for _ in 0..12 {
+            docs.key(key(KeyCode::Char('j')));
+        }
+        assert_eq!((docs.sel, docs.open), (12, None));
+        let rows = screen(&mut docs, 40, 10);
+        assert!(rows[9].starts_with("▸ f17.md"), "the highlighted header at the bottom: {rows:?}");
+
+        // Enter opens f17.md: 2/3 of the 21 rows are its text, with the headers nearest it around it.
+        docs.key(key(KeyCode::Enter));
+        let rows = screen(&mut docs, 40, 22);
+        let open = rows.iter().position(|r| r.starts_with("▾ f17.md")).expect("f17.md's header");
+        assert_eq!(open, 4, "three headers above it: {rows:?}");
+        assert!(rows[1].starts_with("▸ f20.md") && rows[open + 1].contains("f17.md"), "{rows:?}");
+        assert!(rows[open + 15].starts_with("▸ f16.md"), "14 rows of text, then the next header: {rows:?}");
+        assert!(rows[21].starts_with("▸ f14.md"), "{rows:?}");
+        // Tab opens the next one, and the headers move with it.
+        docs.key(key(KeyCode::Tab));
+        let rows = screen(&mut docs, 40, 22);
+        assert!(rows[4].starts_with("▾ f16.md"), "{rows:?}");
+    }
+
+    #[test]
+    fn a_repository_lists_its_files_and_a_plain_folder_is_walked() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().canonicalize().unwrap().join("repo");
+        for f in ["README.md", "docs/plan.md", "src/main.rs", "target/out.md", "sub/deep/NOTES.markdown"] {
+            let p = repo.join(f);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, "x").unwrap();
+        }
+        fs::write(repo.join(".gitignore"), "target/\n").unwrap();
+        let git = Command::new("git").arg("-C").arg(&repo).args(["init", "-q"]).status();
+        assert!(git.is_ok_and(|s| s.success()), "git init");
+        // From a subfolder, the repository's top; untracked files count, ignored ones don't.
+        assert_eq!(root_of(&repo.join("sub/deep")), repo);
+        let mut found = markdown_files(&repo);
+        found.sort();
+        let want: Vec<PathBuf> =
+            ["README.md", "docs/plan.md", "sub/deep/NOTES.markdown"].iter().map(|f| repo.join(f)).collect();
+        assert_eq!(found, want);
+
+        // Outside a repository: the folder's own, then 3 levels down, skipping hidden folders and target/.
+        let plain = dir.path().canonicalize().unwrap().join("plain");
+        for f in ["a.md", "x/b.md", "x/y/z/c.md", "x/y/z/w/too-deep.md", ".hidden/d.md", "target/e.md"] {
+            let p = plain.join(f);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, "x").unwrap();
+        }
+        assert_eq!(root_of(&plain), plain);
+        let found = markdown_files(&plain);
+        assert_eq!(found, ["a.md", "x/b.md", "x/y/z/c.md"].map(|f| plain.join(f)));
+    }
+
     #[test]
     fn half_written_lines_wait() {
         let mut docs = Docs::new();
@@ -881,8 +1251,12 @@ mod tests {
 
     #[test]
     fn labels_and_ages() {
-        assert_eq!(label(Path::new("/w/docs/x.md"), Some(Path::new("/w"))), "docs/x.md");
-        assert_eq!(label(Path::new("/elsewhere/x.md"), Some(Path::new("/w"))), "/elsewhere/x.md");
+        assert_eq!(label(Path::new("/w/docs/x.md"), None, Some(Path::new("/w"))), "docs/x.md");
+        assert_eq!(label(Path::new("/w/docs/x.md"), Some(Path::new("/w/docs")), Some(Path::new("/w"))), "x.md");
+        assert_eq!(
+            label(Path::new("/elsewhere/x.md"), Some(Path::new("/r")), Some(Path::new("/w"))),
+            "/elsewhere/x.md"
+        );
         assert_eq!(age(100.0, 130.0), "now");
         assert_eq!(age(100.0, 400.0), "5m");
         assert_eq!(age(0.0, 7200.0), "2h");

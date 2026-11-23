@@ -51,10 +51,22 @@ impl Agent {
     }
 }
 
-/// What the agent is told at the start, unless `agent-prompt.md` says otherwise.
+/// What the agent is told at the start, unless `agent-prompt.md` says otherwise: where it runs, then how to explain
+/// (the user's rules, 2026-11-23).
 pub const DEFAULT_PROMPT: &str = "You are running inside tos, a terminal workspace. Markdown (.md) files that you \
 create or edit inside the current working folder are shown to the user in a pane beside this session, so write \
-plans, notes and reports as .md files in this folder when that helps the user follow your work.";
+plans, notes and reports as .md files in this folder when that helps the user follow your work.
+
+When you explain something, in your replies and in the files you write:
+- Draw relationships as plain-text (ASCII) diagrams in fenced code blocks: a box for each part (such as a \
+process, module, file, service or machine), and numbered arrows labelled with what travels for each step of a \
+request or data flow.
+- Explain by walking through one concrete example step by step, such as a real file, command, input or \
+request, rather than only stating the general rule.
+- Don't use short forms to refer to things: no abbreviations or names you coined, and no bare references such \
+as \"option B\", \"step 3\" or \"the fix above\" without saying what they are. Name things in full.
+- Keep each reply self-contained: someone who reads only that reply should understand it without the earlier \
+conversation or other files, so restate the context and the names it relies on.";
 
 /// Folders of the agents' own state. Files there never show, even inside the working folder: Claude's memory
 /// lives in `~/.claude/projects/<project>/memory/`, for example.
@@ -284,8 +296,12 @@ pub fn keep(raw: &str, cwd: &Path, homes: &[PathBuf]) -> Option<PathBuf> {
     if !file.starts_with(&cwd) {
         return None;
     }
-    let in_agent_dir = homes.iter().any(|h| AGENT_DIRS.iter().any(|d| file.starts_with(h.join(d))));
-    (!in_agent_dir).then_some(file)
+    (!in_agent_dir(&file, homes)).then_some(file)
+}
+
+/// Whether `file` is inside an agent's own folder under one of `homes`, such as `~/.claude`.
+pub fn in_agent_dir(file: &Path, homes: &[PathBuf]) -> bool {
+    homes.iter().any(|h| AGENT_DIRS.iter().any(|d| file.starts_with(h.join(d))))
 }
 
 /// `tos hook --agent NAME`: run by an agent after a tool call, with the call as JSON on stdin. Never fails and

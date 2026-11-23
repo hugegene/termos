@@ -2301,6 +2301,7 @@ fn docs_pane_shows_the_markdown_an_agent_writes() {
     fs::create_dir_all(work.join("docs")).unwrap();
     fs::write(work.join("docs/plan.md"), "# The export plan\n\nStep one: add the button.\n").unwrap();
     fs::write(work.join("main.rs"), "fn main() {}\n").unwrap();
+    fs::write(work.join("README.md"), "# Read me\n").unwrap();
     fs::write(env.root.join("outside.md"), "# Outside\n").unwrap();
     let s = env.attach(120, 30);
     s.wait_for("$");
@@ -2322,6 +2323,8 @@ fn docs_pane_shows_the_markdown_an_agent_writes() {
     assert_eq!(env.focused(), agent, "the focus stays on the agent");
     s.wait_for("docs/plan.md");
     s.wait_for("Step one: add the button.");
+    // The folder's other Markdown files are listed too, closed, below the agent's.
+    s.wait_for("▸ README.md");
 
     // A second file goes on top and opens; the first closes to its header.
     fs::write(work.join("notes.md"), "# Notes\n\nSecond file.\n").unwrap();
@@ -2354,14 +2357,45 @@ fn docs_pane_shows_the_markdown_an_agent_writes() {
     assert_eq!(env.focused(), agent, "the focus stays on the agent");
 }
 
+/// Ctrl+t d with no agent: the docs pane lists the Markdown files of the focused pane's repository, from its top
+/// folder, and leaves out what .gitignore ignores. Plan: docs/plans/2026-11-17-agent-plan-pane.md.
+#[test]
+fn docs_pane_lists_the_repository() {
+    let env = Env::new("e2e-docsrepo");
+    let repo = env.root.join("repo");
+    for (f, text) in [
+        ("README.md", "# The repository\n"),
+        ("docs/guide.md", "# Guide\n\nHow to use it.\n"),
+        ("crates/app/src/main.rs", "fn main() {}\n"),
+        ("target/build.md", "# Built\n"),
+        (".gitignore", "target/\n"),
+    ] {
+        fs::create_dir_all(repo.join(f).parent().unwrap()).unwrap();
+        fs::write(repo.join(f), text).unwrap();
+    }
+    assert!(Command::new("git").arg("-C").arg(&repo).args(["init", "-q"]).status().unwrap().success());
+    let s = env.attach(120, 30);
+    s.wait_for("$");
+    let shell = env.focused();
+    s.send(format!("cd {}\r", repo.join("crates/app").display()).as_bytes());
+    sleep(Duration::from_millis(300));
+    s.send(b"\x14");
+    s.send(b"d");
+    let docs = wait("the docs pane", || env.panes().into_iter().find(|p| p["kind"] == "docs"));
+    assert_eq!(env.focused(), shell, "the focus stays");
+    let text = s.wait_until("the repository's files", |t| t.contains("README.md") && t.contains("docs/guide.md"));
+    assert!(!text.contains("build.md"), "ignored files stay out: {text}");
+    assert!(docs["cwd"].as_str().is_some_and(|c| c.ends_with("crates/app")), "{docs}");
+}
+
 #[test]
 fn agent_launchers_add_their_hook() {
     let env = Env::new("e2e-launch");
     let bin = env.root.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let args_out = env.root.join("args.txt");
-    // A stand-in for Claude Code that records its arguments.
-    let fake = format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", args_out.display());
+    // A stand-in for Claude Code that records its arguments, each ending in a NUL: the prompt has lines.
+    let fake = format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > '{}'\n", args_out.display());
     fs::write(bin.join("claude"), fake).unwrap();
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
@@ -2379,12 +2413,16 @@ fn agent_launchers_add_their_hook() {
 
     let out = launch(&["claude", "--resume", "--help"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let args = fs::read_to_string(&args_out).unwrap();
-    let args: Vec<&str> = args.lines().collect();
+    let read_args = || -> Vec<String> {
+        let text = fs::read_to_string(&args_out).unwrap();
+        text.split_terminator('\0').map(str::to_owned).collect()
+    };
+    let args = read_args();
     let settings = env.root.join("state/agents/claude/settings.json");
     assert_eq!(args[..2], ["--settings", settings.to_str().unwrap()]);
     assert_eq!(args[2], "--append-system-prompt");
     assert!(args[3].starts_with("You are running inside tos"), "{args:?}");
+    assert!(args[3].contains("walking through one concrete example"), "the rules on explaining: {args:?}");
     assert_eq!(args[4..], ["--resume", "--help"], "every argument goes to the agent, --help too");
     let hooks: serde_json::Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
     let command = hooks["hooks"]["PostToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
@@ -2394,10 +2432,10 @@ fn agent_launchers_add_their_hook() {
     fs::create_dir_all(config.join("termos")).unwrap();
     fs::write(config.join("termos/agent-prompt.md"), "Be brief.\n").unwrap();
     launch(&["claude"]);
-    assert_eq!(fs::read_to_string(&args_out).unwrap().lines().nth(3), Some("Be brief."));
+    assert_eq!(read_args()[3], "Be brief.");
     fs::write(config.join("termos/agent-prompt.md"), "").unwrap();
     launch(&["claude"]);
-    assert_eq!(fs::read_to_string(&args_out).unwrap().lines().count(), 2);
+    assert_eq!(read_args().len(), 2);
 
     // An agent that isn't installed.
     let out = launch(&["grok"]);

@@ -112,4 +112,4 @@ zellij's actions, with zellij's names and flags, and `tos`'s own.
 | [`clear-status`](action/clear-status.md) | Remove a status segment, or all of them (tos) |
 | [`reload-config`](action/reload-config.md) | Read ~/.config/termos/config.kdl again and print what it skipped (tos) |
 | [`add-doc`](action/add-doc.md) | Show a Markdown file in the docs pane of a pane's tab, opening the docs pane if needed (tos). `tos claude` and the other agent launchers do this for each .md file the agent writes |
-| [`toggle-docs`](action/toggle-docs.md) | Show a tab's docs pane, or hide it if it's showing (tos) |
+| [`toggle-docs`](action/toggle-docs.md) | Show a tab's docs pane, or hide it if it's showing (tos). It lists the Markdown files of the git repository that the tab's focused pane is in, below those an agent in the tab wrote |

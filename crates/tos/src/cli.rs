@@ -498,7 +498,8 @@ pub enum ActionCmd {
         #[arg(long)]
         cwd: Option<PathBuf>,
     },
-    /// Show a tab's docs pane, or hide it if it's showing (tos)
+    /// Show a tab's docs pane, or hide it if it's showing (tos). It lists the Markdown files of the git repository
+    /// that the tab's focused pane is in, below those an agent in the tab wrote
     ToggleDocs {
         #[command(flatten)]
         t: TabOpt,

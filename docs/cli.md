@@ -178,13 +178,29 @@ or `~` for home).
 `tos claude` starts Claude Code with two additions, for that session only. Nothing is written to Claude's own
 settings, and plain `claude` is unchanged.
 - **A hook** that runs `tos hook --agent claude` after each `Write`, `Edit` or `MultiEdit`.
-- **A few lines at the end of its system prompt:** you're inside `tos`, and the `.md` files you write in this
-  folder show beside you. The text comes from `~/.config/termos/agent-prompt.md` if that exists; an empty file
-  means none.
+- **A few lines at the end of its system prompt,** in two parts:
+  - you're inside `tos`, and the `.md` files you write in this folder show beside you;
+  - how to explain, in replies and in the files it writes: draw relationships as plain-text diagrams, walk
+    through one concrete example, don't use short forms such as "option B" or coined abbreviations, and keep
+    each reply self-contained.
+
+  If `~/.config/termos/agent-prompt.md` exists, its text replaces both parts; an empty file means none. The
+  default text is `DEFAULT_PROMPT` in `crates/tos/src/agents.rs`, to copy and change.
 
 Each `.md` file the agent then creates or edits **inside its working folder** shows in the tab's **docs pane**, on
-the tab's right. Files in agents' own folders (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, `~/.grok`)
-never show, so Claude's memory doesn't.
+the tab's right, on top and open. Files in agents' own folders (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`,
+`~/.grok`) never show, so Claude's memory doesn't.
+
+**The docs pane also lists the repository's other Markdown files,** below the agent's, most recently changed
+first. It lists the git repository it starts in, from its top folder: the tracked files and the new ones that
+`.gitignore` doesn't ignore. Outside a repository it lists the folder and three levels of subfolders, at most
+1,000 files. `Ctrl+t d` starts it in the focused pane's folder, so it works without an agent too. With nothing
+open, `j`/`k` move through the list and `Enter` opens a file; with one open, `Tab` and `Shift+Tab` step through
+them.
+
+For example, in `~/termos/crates/tos` press `Ctrl+t d`. The pane lists the 183 `.md` files of `~/termos`, such as
+`docs/plans/2026-11-17-agent-plan-pane.md` and `README.md`, with nothing open. Then `tos claude` in the other pane
+writes `docs/plans/2026-11-23-x.md`: it appears on top and opens, and the rest stay listed below it.
 
 ```
  $ tos claude
@@ -203,10 +219,10 @@ never show, so Claude's memory doesn't.
 |---|---|---|
 | `tos claude` | `--settings FILE` | `--append-system-prompt` |
 | `tos codex` | `-c hooks.PostToolUse=[…]`. Codex asks once to trust it | `-c developer_instructions=…`, which replaces your own for that session if you set any |
-| `tos agy` | `--settings FILE` | none |
-| `tos agent` (Cursor) | `--plugin-dir DIR`, a plugin with an `afterFileEdit` hook | none |
+| `tos agy` | `--settings FILE` | none: no flag adds to its system prompt |
+| `tos agent` (Cursor) | `--plugin-dir DIR`, a plugin with an `afterFileEdit` hook | none: no flag adds to its system prompt |
 | `tos grok` (xAI Grok Build) | `--plugin-dir DIR` | `--rules` |
-| `tos gemini` | `GEMINI_CLI_SYSTEM_SETTINGS_PATH=FILE`, a settings file holding only the hook | none |
+| `tos gemini` | `GEMINI_CLI_SYSTEM_SETTINGS_PATH=FILE`, a settings file holding only the hook | none: `GEMINI_SYSTEM_MD` would replace its whole system prompt |
 
 Only `tos claude`'s flags have been checked against a real Claude Code; the others follow each agent's
 documentation. The files are in `~/.local/state/termos/agents/`.

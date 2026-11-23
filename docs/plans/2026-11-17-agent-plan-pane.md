@@ -1,6 +1,8 @@
 # Plan: `tos claude`, `tos codex`, …: agent launchers with a hook and a starting prompt, and a docs pane for the `.md` files they write
 
-**Status:** built (2026-11-21); trying it with the real agents (step 6) is yours · **Date:** 2026-11-17, changed 2026-11-18, 2026-11-19 and 2026-11-21 ·
+**Status:** built (2026-11-21); the whole repository's files and the rules on explaining are step 7
+(2026-11-23); trying it with the real agents (step 6) is yours · **Date:** 2026-11-17, changed 2026-11-18,
+2026-11-19, 2026-11-21 and 2026-11-23 ·
 **Related:** [the finder's Markdown preview](2026-11-07-markdown-links.md),
 [key clashes with agent CLIs](../findings/2026-11-17-agent-cli-key-clashes.md) · **Findings:**
 [where agents keep a plan, and their hooks](../findings/2026-11-17-agent-plan-sources.md),
@@ -39,6 +41,15 @@
     `ToggleDocs` in `config.kdl` (section 3, "Hiding").
   - Then, with the finder preview's copy merged into `main`, the user asked for the same in the docs pane
     (section 3, "Selecting and copying").
+- **2026-11-23:** the user asked: "can the docs pane show all md file in a repo by default. the following claude
+  editing a plan still works. can tos claude and tos other stuffs have a base prompt input, "always use ASCII
+  diagram draw relationship to explain and explain by walking through example, do not use short form to
+  reference and keep reply self-contained"". Two changes follow:
+  - **The docs pane lists every Markdown file in the repository,** not only the ones the agent wrote. The files
+    the agent writes still go on top and open by themselves (section 3, "Every Markdown file in the
+    repository").
+  - **The default starting instructions** gain four rules on how to explain (section 1, "The starting
+    instructions"). `agent-prompt.md` still replaces the whole text.
 
 ## Decision
 
@@ -93,11 +104,22 @@ claude --settings ~/.local/state/termos/agents/claude/settings.json \
   `TOS_PANE_ID` and does nothing.
 - **An agent that isn't installed:** `tos grok` with no `grok` on `PATH` stops with `grok isn't on your PATH`.
 - **The starting instructions:**
-  - **The default text** is short: you're inside `tos`, and the `.md` files you write in this folder appear
-    beside you, so write plans and notes as `.md` files there.
+  - **The default text** has two parts. The first says that you're inside `tos`, and that the `.md` files you
+    write in this folder appear beside you, so write plans and notes as `.md` files there.
+  - **The second part, how to explain** (added 2026-11-23, the user's wording turned into four rules), applies to
+    replies and to the files the agent writes:
+    1. draw relationships as plain-text (ASCII) diagrams in fenced code blocks: boxes for the parts, numbered
+       and labelled arrows for each step of a flow;
+    2. explain by walking through one concrete example step by step;
+    3. no short forms: no abbreviations or coined names, and no bare references such as "option B" or "the fix
+       above"; name things in full;
+    4. keep each reply self-contained, so that it reads on its own without the earlier conversation.
   - **Your own text:** if `~/.config/termos/agent-prompt.md` exists (beside `config.kdl`), its text is used
-    instead. An empty file means no starting instructions.
+    instead of both parts. An empty file means no starting instructions.
   - **It goes on the command line as text,** for example `--append-system-prompt "…"`, so there's no file for it.
+  - **Which agents get it:** `tos claude`, `tos codex` and `tos grok`. `tos agy`, `tos agent` (Cursor) and
+    `tos gemini` have no flag that adds to the system prompt
+    ([finding](../findings/2026-11-21-agent-launch-flags.md)), so they get neither part, as before.
 
 **The files `tos` writes** (added 2026-11-21, after the user asked). They hold only the hook. They're the same
 at every launch, so two launches at once write the same bytes.
@@ -170,8 +192,86 @@ segment instead.
   - This keeps out Claude's memory files (`~/.claude/projects/<project>/memory/*.md`), which the user asked on
     2026-11-21 to leave out.
   - Without it, an agent started in `~` would show them, since its working folder holds `~/.claude`.
-- **Only the agent's writes count.** Files you edit yourself, or that `git checkout` changes, don't appear.
+- **Only the agent's writes count** for following and for the top of the list. Since 2026-11-23 the
+  repository's other Markdown files are listed below them (next part).
 - **Each tab has its own list.**
+
+**Every Markdown file in the repository** (added 2026-11-23, after the user asked "can the docs pane show all
+md file in a repo by default"):
+- **Which folder:** the docs pane's own working folder, widened to its git repository's top folder
+  (`git rev-parse --show-toplevel`) when it's inside one.
+  - When an agent's write opens the pane, that folder is the agent's working folder, as before.
+  - When `Ctrl+t d` opens it, it's the folder of the tab's focused pane. Before, it was no folder in particular.
+  - A restored docs pane starts in its saved folder, so it lists the same repository.
+- **Which files:**
+  - **In a git repository:** what `git ls-files --cached --others --exclude-standard` lists, that is tracked
+    files and new files that `.gitignore` doesn't ignore, kept if they end in `.md` or `.markdown` and exist.
+  - **Outside one:** the folder and its subfolders down to 3 levels, skipping hidden folders, `node_modules`
+    and `target`, at most 1,000 folders and 1,000 files. All of these limits are **estimates**; they keep a pane
+    opened in `~` cheap.
+  - **Agents' own folders are left out,** as for the agent's writes.
+- **The order:**
+  1. the files the agent wrote, newest first, as before;
+  2. then the rest of the repository's Markdown files, most recently changed first, as found when the pane
+     starts;
+  3. a file that appears later, such as one you create, goes on top, as any new entry does.
+- **When the agent writes a file that's already listed** as one of the repository's, it moves to the top once
+  and opens, as a new file would. Its later writes don't move it.
+- **Following is unchanged:** only the agent's writes open a file. Opened with `Ctrl+t d` before the agent has
+  written anything, the pane shows the list of headers with nothing open.
+- **Ages on the headers:** for the agent's files, when the agent wrote them; for the others, when the file last
+  changed. `●` marks a file that changed since it was listed or last open.
+- **Listing again:** every 20 seconds, and at most every 2 seconds after a change in a folder the pane watches
+  (both **estimates**). Listing runs in its own thread, so a slow `git` never holds up the keys. The pane
+  watches the repository's top folder, the agent's files' folders and the open file's folder, not every
+  folder in the repository: a recursive watch of `target/` alone would need thousands of watches.
+- **`x` drops a file** from the list until the pane restarts, so listing again doesn't bring it back. An agent's
+  write brings it back.
+
+**Many files** (this repository has 183 `.md` files: 86 in `docs/cli/`, 53 in `docs/findings/`, 37 in
+`docs/plans/`). Before, every header stayed on screen and the open section got the rest, which leaves no room at
+all once there are more files than rows. Now:
+- **The open file gets at least 2/3 of the pane's rows** (an estimate). If every header fits in the rest, all
+  show, as before.
+- **If they don't fit,** the headers nearest the open one fill the rest, half above it and half below. `Tab` and
+  `Shift+Tab` step through the files, opening each, and the headers move with them.
+- **With nothing open,** the pane is a list of headers: `j`/`k`, the arrows, `PgUp`/`PgDn`, `g`/`G` and the wheel
+  move the highlight, and `Enter` opens the highlighted file. `Enter` on the open file closes it again.
+
+```
+ Ctrl+t d in ~/termos, nothing written yet        then tos claude writes docs/plans/2026-11-23-x.md
+┌──────────────────────────────────────────┐      ┌──────────────────────────────────────────┐
+│ docs · 183 · following                   │      │ docs · 184 · following                   │
+│▸ docs/plans/2026-11-17-agent-plan-…  2m  │      │▾ docs/plans/2026-11-23-x.md         now  │
+│▸ README.md                           1h  │      │  # Plan: the export button               │
+│▸ docs/cli.md                         1h  │      │  **Status:** proposed                    │
+│▸ CLAUDE.md                           2d  │      │  …   (2/3 of the rows, at least)         │
+│▸ docs/findings/2026-11-21-demo-doc…  2d  │      │                                          │
+│▸ …                                       │      │▸ docs/plans/2026-11-17-agent-plan-…  2m  │
+│  (j/k move, Enter opens)                 │      │▸ README.md                           1h  │
+└──────────────────────────────────────────┘      └──────────────────────────────────────────┘
+```
+
+```
+┌─ tos docs --list FILE (the docs pane) ───────────────────────────────────────────────────┐
+│ main thread: keys, mouse, drawing                                                         │
+│   ▲ (1) the list file grew: the agent's writes (ingest, as before)                       │
+│   ▲ (2) Files(paths): the repository's .md files, from the lister thread                  │
+│   │                                                                                       │
+│ lister thread: every 20 s, or 2 s after a change ──▶ git ls-files … (or the folder walk)  │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Walking through the first picture:
+1. Your shell is in `~/termos/crates/tos`. You press `Ctrl+t d`. The server starts `tos docs --list FILE` in that
+   folder.
+2. The docs pane asks git for the repository's top folder, `~/termos`, and lists its 183 Markdown files, most
+   recently changed first. Nothing is open, so `j`/`k` move the highlight and `Enter` opens a file.
+3. You start `tos claude` in the other pane and ask for a plan. Claude writes `docs/plans/2026-11-23-x.md`.
+4. The hook sends `add-doc`, the server appends the file to the list, and the pane reads the new line. The file
+   is new, so it goes on top, and following opens it with 2/3 of the rows. The headers nearest it stay below.
+5. Claude then edits `README.md`, listed third. It moves to the top and opens, and the plan closes to its
+   header, now second.
 - **Later:** plan text or a step list that only exists inside a tool call, such as Claude's `ExitPlanMode` or
   Codex's `update_plan`, rendered as Markdown and titled "Plan · claude".
 
@@ -180,11 +280,12 @@ option B.
 
 **The accordion:**
 - **One header line per entry.** For example, `▾ docs/plans/2026-11-21-x.md   now`:
-  - the path is relative to the agent pane's folder, or written `~/…`;
+  - the path is relative to the repository's top folder (since 2026-11-23; before, the agent pane's folder),
+    or else written `~/…`;
   - its age is right-aligned;
   - `●` marks a file that changed since you last had it open.
 - **One section is open at a time.** Its rendered Markdown fills the space between its header and the next one.
-  The other headers stay visible above and below, so every file is always listed.
+  The other headers stay visible above and below, as many as fit ("Many files" above).
 - **The newest file comes first,** in the order files first appeared. Edits don't move a file, so nothing
   jumps while you read; an edited file just gets its `●`.
 - **Following** (`following` in the title): the file written last opens on its own. A file that's already open
@@ -375,7 +476,18 @@ Built on 2026-11-21, in the order below. Step 0 became part of step 6: the hook 
    - **Gemini:** does a hook from the system settings file run?
    - **Each agent:** do the starting instructions arrive?
 
+7. **2026-11-23: every Markdown file in the repository, and the rules on explaining.**
+   - `docsview.rs`: the lister thread (`git ls-files`, or the bounded walk), the repository's files below the
+     agent's, moving a file the agent writes to the top, the 2/3 rule with the headers around the open file, and
+     moving through the list with nothing open.
+   - `docs_pane.rs`: `Ctrl+t d` starts the pane in the folder of the tab's focused pane.
+   - `agents.rs`: the default starting instructions get the four rules.
+   - Tests: unit tests for the order, the move to the top, `x` staying dropped, the layout with many files and
+     the listing (a git repository and a plain folder); an e2e test that `Ctrl+t d` in a repository's subfolder
+     lists its files and leaves out ignored ones. Docs: `docs/cli.md`, the README line.
+
 **Later:**
+- a `/` filter in the docs pane, for repositories with hundreds of Markdown files;
 - more launchers, in the order of the "Later" table in section 2;
 - plan text and step lists that live only inside a tool call;
 - the narrow-tab rule;

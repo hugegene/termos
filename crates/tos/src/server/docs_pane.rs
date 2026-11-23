@@ -3,7 +3,8 @@
 //! `tos hook` (from an agent started by `tos claude` and the like) sends `add-doc` for each `.md` file the agent
 //! writes in its folder. The server appends the file to the tab's list, a file of JSON lines, and opens the tab's
 //! docs pane on the right if it isn't open: an ordinary terminal pane running `tos docs --list FILE`, which
-//! follows the list and draws the files as an accordion (`crate::docsview`).
+//! follows the list and draws the files as an accordion (`crate::docsview`). The viewer also lists the other
+//! Markdown files of the git repository it starts in, so the folder it starts in matters.
 //! Plan: docs/plans/2026-11-17-agent-plan-pane.md.
 
 use std::fs::{self, OpenOptions};
@@ -166,7 +167,9 @@ impl Server {
             None => new_list().context("making the docs list")?,
         };
         self.tabs[ti].docs.list = Some(list.clone());
-        self.open_docs(ti, &list, None)?;
+        // In the folder of the tab's focused pane: the viewer lists the Markdown files of its repository.
+        let cwd = self.pane_cwd(self.tabs[ti].focus);
+        self.open_docs(ti, &list, cwd)?;
         Ok(())
     }
 
