@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
 
-use crate::paths;
+use crate::{client, paths};
 
 const RELEASES: &str = "https://github.com/hugegene/termos/releases";
 /// At most one request a day, across every session on the machine (the result is kept in a file).
@@ -206,13 +206,44 @@ pub fn run(version: Option<String>, force: bool) -> anyhow::Result<()> {
         if let Some(v) = &version {
             sh.env("TOS_VERSION", v);
         }
+        // The installer's own hint about servers still running is a guess from `pgrep`; ours names them.
+        sh.env("TOS_FROM_UPDATE", "1");
         sh.status().context("running the installer")
     });
     let _ = fs::remove_file(&script);
     if !status?.success() {
         bail!("the installer stopped (its message is above); the installed tos is unchanged");
     }
+    if let Some(installed) = installed_version()
+        && installed != env!("CARGO_PKG_VERSION")
+        && let Some(hint) = restart_hint(&client::running_sessions(), &installed)
+    {
+        println!("{hint}");
+    }
     Ok(())
+}
+
+/// The version the `tos` symlink points at: `<install-dir>/tos` → `<data>/termos/versions/<version>/tos`.
+fn installed_version() -> Option<String> {
+    let dir = fs::read_to_string(paths::data_dir().join("install-dir")).ok()?;
+    let target = fs::read_link(Path::new(dir.trim()).join("tos")).ok()?;
+    Some(target.parent()?.file_name()?.to_str()?.to_owned())
+}
+
+/// Sessions keep running the version that started them, so after an update they need ending and attaching
+/// again. `None` when no session is running.
+fn restart_hint(sessions: &[String], version: &str) -> Option<String> {
+    let attach = match sessions {
+        [] => return None,
+        [one] => format!("tos attach {one}"),
+        _ => "tos attach <name> for each".to_owned(),
+    };
+    Some(format!(
+        "tos update: running sessions still use the old version: {}.\nTo move them to {version}: detach \
+         (Ctrl+O d), end them with `tos kill-all -y`, then attach again with `{attach}`, which restores their \
+         tabs and panes.",
+        sessions.join(", ")
+    ))
 }
 
 fn download(url: &str, to: &Path) -> anyhow::Result<()> {
@@ -258,6 +289,16 @@ mod tests {
         assert!(refuse_version("0.2.0", true).is_none());
         assert!(refuse_version("0.1.1", true).unwrap().contains("called tb"));
         assert!(refuse_version("latest", false).unwrap().contains("isn't a version number"));
+    }
+
+    #[test]
+    fn the_restart_hint_names_the_running_sessions() {
+        assert_eq!(restart_hint(&[], "0.5.0"), None);
+        let one = restart_hint(&["work".into()], "0.5.0").unwrap();
+        assert!(one.contains(": work.") && one.contains("to 0.5.0") && one.contains("`tos attach work`"), "{one}");
+        assert!(one.contains("detach (Ctrl+O d)") && one.contains("`tos kill-all -y`"), "{one}");
+        let two = restart_hint(&["work".into(), "notes".into()], "0.5.0").unwrap();
+        assert!(two.contains(": work, notes.") && two.contains("`tos attach <name> for each`"), "{two}");
     }
 
     #[test]

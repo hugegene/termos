@@ -121,7 +121,7 @@ pub fn list_sessions(short: bool, reverse: bool) -> anyhow::Result<()> {
 }
 
 /// Sessions whose server answers, with the one we're in (if any) last, so ending it doesn't stop us early.
-fn running_sessions() -> Vec<String> {
+pub fn running_sessions() -> Vec<String> {
     let mut names: Vec<String> = paths::session_names().into_iter().filter(|n| connect(n).is_ok()).collect();
     if let Ok(current) = env::var("TOS_SESSION")
         && let Some(i) = names.iter().position(|n| *n == current)

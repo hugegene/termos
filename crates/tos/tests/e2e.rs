@@ -2236,9 +2236,15 @@ fn update_replaces_an_installed_tos_and_keeps_the_one_before() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("wasn't installed by the installer"), "{out:?}");
 
     // The installed one is: bin/tos now points at 9.9.9, and the version before stays for running sessions.
+    // A session started before the update is told how to move to 9.9.9, by tos rather than by the installer.
+    env.tos(&["start"]);
     let out = run_update(&env, &tos, &[], &from_release);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(fs::read_link(&tos).unwrap(), versions.join("9.9.9/tos"));
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("running sessions still use the old version: e2e-update."), "{said}");
+    assert!(said.contains("To move them to 9.9.9: detach (Ctrl+O d)") && said.contains("`tos attach e2e-update`"));
+    assert!(!said.contains("tos install: tos sessions from before"), "{said}");
     assert!(versions.join(env!("CARGO_PKG_VERSION")).join("tos").exists());
     let said = Command::new(&tos).arg("--version").output().unwrap();
     assert_eq!(String::from_utf8_lossy(&said.stdout).trim(), "tos 9.9.9 (extension API 2)");

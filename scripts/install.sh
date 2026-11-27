@@ -196,10 +196,11 @@ On Linux it needs glibc 2.34 or newer: Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedor
     running under it: end them with \`tb kill-all-sessions -y\` and \`tos\` restores them. Then: rm $install_dir/tb"
     fi
     # Only when the version changed: reinstalling the same one leaves running servers as current as before.
-    if [ "$upgrade" = yes ] && [ "${previous%/tos}" != "$dest" ] &&
+    # `tos update` (TOS_FROM_UPDATE=1) says this itself, naming the sessions.
+    if [ "$upgrade" = yes ] && [ "${previous%/tos}" != "$dest" ] && [ "${TOS_FROM_UPDATE:-0}" != 1 ] &&
         command -v pgrep >/dev/null 2>&1 && pgrep -x tos >/dev/null 2>&1; then
-        say "a tos server from before is still running the old version. If tos refuses to attach,
-    run: tos kill   (attaching again restores the session)"
+        say "tos sessions from before are still running the old version. To move them to this one:
+    detach (Ctrl+O d), end them with \`tos kill-all -y\`, then attach again, which restores their tabs and panes"
     fi
 }
 

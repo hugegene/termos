@@ -20,7 +20,7 @@ tos update [OPTIONS]
 ```sh
 tos update                    # the newest release; nothing if this is it
 tos update --version 0.3.0    # a particular one, for example to go back
-The installer keeps the version before, so a session still running it is unaffected; `tos kill` and attaching again move it to the new one.
+The installer keeps the version before, so a session still running it is unaffected. Afterwards, tos update names the sessions still running and how to move them to the new version: detach (Ctrl+O d), `tos kill-all -y`, then attach again, which restores them.
 ```
 
 See also: [all commands](README.md) · [the overview](../cli.md)

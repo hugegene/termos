@@ -121,6 +121,13 @@ says to run `tos kill`, and attaching again restores the session under 0.2.2.
     stand-in GitHub on the current version) and `update_to_a_release_without_update_needs_force`. The hint
     was checked by hand with a dummy `tos` process: nothing on a reinstall, and one line on 0.3.0 → 0.3.1.
 - [x] **Distribution plan:** its "Later: `tos update`" item links here (2026-11-10).
+- [x] **Saying how to move running sessions** (2026-11-27, the user's request): after installing a different
+  version, `tos update` lists the sessions still running and says to detach (Ctrl+O d), run
+  `tos kill-all -y` and attach again. It sets `TOS_FROM_UPDATE=1` for the installer, whose own `pgrep` hint
+  (which also matched the `tos update` process itself) is then left out. The one-line installer's hint now
+  gives the same three steps.
+  - **Tests:** a unit test for the wording, and `update_replaces_an_installed_tos_and_keeps_the_one_before`
+    now starts a session first and checks the hint names it.
 
 ## Open questions
 

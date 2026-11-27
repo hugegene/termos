@@ -202,7 +202,7 @@ enum Cmd {
     },
     /// Install the newest release over this one (only a tos installed by the one-line installer)
     #[command(
-        after_long_help = "Examples:\n  tos update                    # the newest release; nothing if this is it\n  tos update --version 0.3.0    # a particular one, for example to go back\n\nThe installer keeps the version before, so a session still running it is unaffected; `tos kill` and attaching again move it to the new one."
+        after_long_help = "Examples:\n  tos update                    # the newest release; nothing if this is it\n  tos update --version 0.3.0    # a particular one, for example to go back\n\nThe installer keeps the version before, so a session still running it is unaffected. Afterwards, tos update names the sessions still running and how to move them to the new version: detach (Ctrl+O d), `tos kill-all -y`, then attach again, which restores them."
     )]
     Update {
         /// The release to install, such as 0.3.0 (default: the newest)

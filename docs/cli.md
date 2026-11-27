@@ -365,8 +365,9 @@ as Claude Code does:
   `tos update --version 0.3.0` installs a particular release, for example to go back. Releases before 0.3.0
   have no `tos update`, so they need `--force`: after installing one, only the one-line installer comes back.
   Releases before 0.2.0 were called `tb` and can't be installed this way. The installer keeps the version that was current before, so a
-  session still running it is unaffected. `tos kill` and attaching again move it to the new version (the
-  session is restored). A `tos` that the installer didn't put there, such as a `cargo build`, is never
+  session still running it is unaffected. Afterwards `tos update` names the sessions still running and how
+  to move them to the new version: detach (Ctrl+O d), end them with `tos kill-all -y`, then attach again,
+  which restores their tabs and panes. A `tos` that the installer didn't put there, such as a `cargo build`, is never
   replaced: `tos update` says so and stops.
 - **The notice:** each session's server checks for a newer release, asking GitHub at most once a day per
   machine. The answer is kept in `~/.local/state/termos/update-check`. A newer release shows in the status
