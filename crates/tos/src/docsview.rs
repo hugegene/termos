@@ -5,9 +5,10 @@
 //! folder, outside a repository), listed again by a thread of their own.
 //! Text in the open file is selected and copied as in the finder's preview, with the same code (`select.rs`);
 //! being a program, it copies by writing OSC 52, which `tos` passes on to the clipboard.
-//! `/` filters the headers by path, with the finder's matching.
+//! `/` filters the headers by path, with the finder's matching. While following, the file the agent wrote last
+//! shows alone, as if filtered for it.
 //! Plans: docs/plans/2026-11-17-agent-plan-pane.md, docs/plans/2026-11-21-preview-select-copy.md,
-//! docs/plans/2026-11-23-docs-pane-filter.md.
+//! docs/plans/2026-11-23-docs-pane-filter.md, docs/plans/2026-11-27-docs-pane-follow-filter.md.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -86,6 +87,8 @@ struct Selected {
 struct Typing {
     open: Option<PathBuf>,
     following: bool,
+    filter: String,
+    pin: Option<PathBuf>,
 }
 
 /// The accordion's state.
@@ -132,6 +135,8 @@ pub struct Docs {
     filter: String,
     /// The filter is being typed: keys go to it.
     typing: Option<Typing>,
+    /// The file following opened: only it shows, as if filtered for (by its whole path, not letters in order).
+    pin: Option<PathBuf>,
 }
 
 /// How a path shows: relative to `root` or else `cwd` if inside one, else with `~` for the home folder.
@@ -318,10 +323,32 @@ impl Docs {
                 }
             };
             if self.following {
-                self.open = Some(i);
-                self.sel = i;
+                self.follow_to(i);
             }
         }
+    }
+
+    /// Following opens entry `i`, alone: the filter becomes that file.
+    fn follow_to(&mut self, i: usize) {
+        self.open = Some(i);
+        self.sel = i;
+        self.filter.clear();
+        self.pin = Some(self.entries[i].path.clone());
+    }
+
+    /// `f`, or Esc after `/` with following on: the file written last opens, alone.
+    fn follow(&mut self) {
+        self.following = true;
+        self.filter.clear();
+        self.pin = None;
+        if let Some(newest) = self.newest() {
+            self.follow_to(newest);
+        }
+    }
+
+    /// Some headers are hidden: by a filter typed after `/`, or because following shows one file alone.
+    fn filtered(&self) -> bool {
+        self.pin.is_some() || !self.filter.is_empty()
     }
 
     /// Adds the folder's Markdown files that aren't listed yet. The first listing goes below the agent's files,
@@ -375,8 +402,12 @@ impl Docs {
         self.sel = moved(self.sel);
     }
 
-    /// The entries whose headers show, in order: all of them, or with a filter those that match, best first.
+    /// The entries whose headers show, in order: all of them, with a filter those that match, best first, or
+    /// the file following opened.
     fn shown(&self) -> Vec<usize> {
+        if let Some(pin) = &self.pin {
+            return self.entries.iter().position(|e| &e.path == pin).into_iter().collect();
+        }
         finder_core::filter_names(self.entries.iter().map(|e| e.label.as_str()), &self.filter)
     }
 
@@ -397,8 +428,8 @@ impl Docs {
     /// `/`: starts typing a filter. The open file closes, so the matches show as a list.
     fn start_filter(&mut self) {
         let open = self.open_path().map(Path::to_path_buf);
-        self.typing = Some(Typing { open, following: self.following });
-        self.filter.clear();
+        let (filter, pin) = (std::mem::take(&mut self.filter), self.pin.take());
+        self.typing = Some(Typing { open, following: self.following, filter, pin });
         self.open = None;
         self.following = false;
         self.selection = None;
@@ -424,16 +455,16 @@ impl Docs {
                     self.open = Some(self.sel);
                 }
             }
-            // Cancel: what was showing before comes back, or with following, the file written last.
+            // Cancel: what was showing before comes back, or with following, the file written last, alone.
             KeyCode::Esc => {
                 let before = self.typing.take().unwrap_or_default();
-                self.filter.clear();
-                self.following = before.following;
-                self.open = if before.following {
-                    self.newest()
-                } else {
-                    before.open.and_then(|p| self.entries.iter().position(|e| e.path == p))
-                };
+                if before.following {
+                    self.follow();
+                    return;
+                }
+                self.filter = before.filter;
+                self.pin = before.pin.filter(|p| self.entries.iter().any(|e| &e.path == p));
+                self.open = before.open.and_then(|p| self.entries.iter().position(|e| e.path == p));
                 if let Some(o) = self.open {
                     self.sel = o;
                 }
@@ -463,6 +494,10 @@ impl Docs {
     }
 
     fn remove(&mut self, i: usize) {
+        // Following's filter goes with its file, rather than leaving "(no match)".
+        if self.pin.as_ref() == Some(&self.entries[i].path) {
+            self.pin = None;
+        }
         self.entries.remove(i);
         self.open = match self.open {
             Some(o) if o == i => None,
@@ -566,16 +601,12 @@ impl Docs {
             KeyCode::BackTab => self.step(false),
             KeyCode::Enter if self.sel_shown() => self.toggle(self.sel),
             KeyCode::Char('/') => self.start_filter(),
-            KeyCode::Esc if !self.filter.is_empty() => self.filter.clear(),
-            KeyCode::Char('f') => {
-                // The agent's next file might not match a filter.
+            // Every header again; following, if on, goes on.
+            KeyCode::Esc if self.filtered() => {
                 self.filter.clear();
-                self.following = true;
-                if let Some(newest) = self.newest() {
-                    self.open = Some(newest);
-                    self.sel = newest;
-                }
+                self.pin = None;
             }
+            KeyCode::Char('f') => self.follow(),
             KeyCode::Char('x') => {
                 let shown = self.shown();
                 if let Some(at) = shown.iter().position(|&i| i == self.sel) {
@@ -767,7 +798,17 @@ impl Docs {
             (None, None) if self.typing.is_some() => {
                 format!(" /{}▏ · {matching} of {n} · Enter opens · Esc cancels", self.filter)
             }
-            (None, None) if !self.filter.is_empty() => format!(" /{} · {matching} of {n} · Esc clears", self.filter),
+            (None, None) if self.filtered() => {
+                // Following's filter shows as the file's name, cut from the left to leave room for the rest.
+                let text = match &self.pin {
+                    Some(p) => p.file_name().map_or_else(|| p.to_string_lossy(), |f| f.to_string_lossy()).into_owned(),
+                    None => self.filter.clone(),
+                };
+                let rest =
+                    format!(" · {matching} of {n}{} · Esc clears", if self.following { " · following" } else { "" });
+                let room = usize::from(area.width).saturating_sub(2 + rest.width()).max(12);
+                format!(" /{}{rest}", fit_left(&text, room))
+            }
             (None, None) => format!(" docs · {n} · {follow}"),
         };
         buf.set_stringn(area.x, area.y, &title, usize::from(area.width), dim);
@@ -1059,14 +1100,19 @@ mod tests {
         list += &list_line(&w.join("b.md"), w, 995.0);
         docs.ingest(&list);
         let rows = screen(&mut docs, 40, 10);
-        assert_eq!(rows[0], " docs · 2 · following");
+        assert_eq!(rows[0], " /b.md · 1 of 2 · following · Esc clears");
         assert!(rows[1].starts_with("▾ b.md") && rows[1].ends_with("now"), "{rows:?}");
         assert!(rows.iter().any(|r| r.contains("Beta")), "{rows:?}");
+        // Esc shows the other header too.
+        docs.key(key(KeyCode::Esc));
+        let rows = screen(&mut docs, 40, 10);
+        assert_eq!(rows[0], " docs · 2 · following");
         assert!(rows[9].starts_with("▸ a.md"), "the other header stays at the bottom: {rows:?}");
 
         // a.md is written again: it doesn't move, and following opens it.
         list += &list_line(&w.join("a.md"), w, 999.0);
         docs.ingest(&list);
+        docs.key(key(KeyCode::Esc));
         let rows = screen(&mut docs, 40, 10);
         assert!(rows[1].starts_with("▸ b.md") && rows[2].starts_with("▾ a.md"), "{rows:?}");
         assert!(rows.iter().any(|r| r.contains("Alpha")));
@@ -1081,6 +1127,8 @@ mod tests {
         let mut docs = Docs::new();
         let mut list = list_line(&w.join("a.md"), w, 990.0) + &list_line(&w.join("b.md"), w, 991.0);
         docs.ingest(&list);
+        // Following shows b.md alone; Esc brings back a.md's header.
+        docs.key(key(KeyCode::Esc));
         screen(&mut docs, 40, 8);
         // Click a.md's header (row 7: the last line, under b.md's open section).
         let click = MouseEvent {
@@ -1276,6 +1324,7 @@ mod tests {
         assert_eq!(docs.open, Some(1));
 
         // x drops c.md, and listing again doesn't bring it back; the agent writing it does.
+        docs.key(key(KeyCode::Esc));
         docs.sel = 3;
         docs.key(key(KeyCode::Char('x')));
         docs.add_files(paths.clone());
@@ -1396,13 +1445,79 @@ mod tests {
         docs.key(key(KeyCode::Esc));
         assert_eq!(labels(&docs), ["c.md", "b.md", "a.md"]);
         assert_eq!((docs.open, docs.following), (Some(0), true));
-        // Without following, Esc brings back the file that was open.
+        // Without following, Esc brings back the file that was open. (Esc first shows every header, not only
+        // c.md, so that Tab can move to b.md.)
+        docs.key(key(KeyCode::Esc));
         docs.key(key(KeyCode::Tab));
         assert_eq!((docs.open, docs.following), (Some(1), false), "b.md");
         docs.key(key(KeyCode::Char('/')));
         typed(&mut docs, "a");
         docs.key(key(KeyCode::Esc));
         assert_eq!((docs.open, docs.following), (Some(1), false));
+    }
+
+    #[test]
+    fn following_shows_the_file_written_last_alone() {
+        let (dir, paths) = folder(&["README.md", "docs/cli/README.md", "docs/plans/x.md", "notes.md"]);
+        let w = dir.path();
+        let mut docs = Docs::with_root(Some(w.to_path_buf()));
+        docs.add_files(paths.clone());
+        // Nothing written yet: the whole list, nothing open, nothing filtered.
+        assert_eq!((docs.shown().len(), docs.open), (4, None));
+        assert_eq!(screen(&mut docs, 60, 8)[0], " docs · 4 · following");
+
+        // The agent writes the plan: it opens alone, with every row, and the title reads as a filter for it.
+        let t = now_secs();
+        let mut list = list_line(&paths[2], w, t);
+        docs.ingest(&list);
+        let rows = screen(&mut docs, 60, 8);
+        assert_eq!(rows[0], " /x.md · 1 of 4 · following · Esc clears");
+        assert!(rows[1].starts_with("▾ docs/plans/x.md"), "{rows:?}");
+        assert!(rows[2..].iter().all(|r| !r.starts_with('▸')), "no other header: {rows:?}");
+
+        // README.md, exactly: docs/cli/README.md has its letters in order, and still doesn't show.
+        list += &list_line(&paths[0], w, t + 1.0);
+        docs.ingest(&list);
+        let rows = screen(&mut docs, 60, 8);
+        assert_eq!(rows[0], " /README.md · 1 of 4 · following · Esc clears");
+        assert!(rows[1].starts_with("▾ README.md") && !rows.iter().any(|r| r.contains("docs/cli")), "{rows:?}");
+
+        // Esc shows every file; README.md stays open and following goes on, so the next write is alone again.
+        docs.key(key(KeyCode::Esc));
+        assert_eq!(screen(&mut docs, 60, 8)[0], " docs · 4 · following");
+        assert_eq!(docs.shown().len(), 4);
+        assert_eq!(docs.entries[docs.open.unwrap()].label, "README.md");
+        list += &list_line(&paths[2], w, t + 2.0);
+        docs.ingest(&list);
+        assert_eq!(docs.shown(), [docs.open.unwrap()]);
+        assert_eq!(docs.entries[docs.open.unwrap()].label, "docs/plans/x.md");
+
+        // Tab stops following and keeps the filter: the agent's next write doesn't move it.
+        docs.key(key(KeyCode::Tab));
+        assert_eq!(screen(&mut docs, 60, 8)[0], " /x.md · 1 of 4 · Esc clears");
+        list += &list_line(&paths[0], w, t + 3.0);
+        docs.ingest(&list);
+        assert_eq!(docs.entries[docs.open.unwrap()].label, "docs/plans/x.md");
+        // f follows again: the file written last, alone.
+        docs.key(key(KeyCode::Char('f')));
+        assert_eq!(screen(&mut docs, 60, 8)[0], " /README.md · 1 of 4 · following · Esc clears");
+
+        // `/` then Esc brings it back, following or not.
+        docs.key(key(KeyCode::Char('/')));
+        typed(&mut docs, "notes");
+        assert_eq!(docs.shown().len(), 1);
+        docs.key(key(KeyCode::Esc));
+        assert_eq!(screen(&mut docs, 60, 8)[0], " /README.md · 1 of 4 · following · Esc clears");
+        docs.key(key(KeyCode::Tab));
+        docs.key(key(KeyCode::Char('/')));
+        typed(&mut docs, "n");
+        docs.key(key(KeyCode::Esc));
+        assert_eq!(screen(&mut docs, 60, 8)[0], " /README.md · 1 of 4 · Esc clears");
+
+        // x drops the file, and the filter goes with it rather than leaving "(no match)".
+        docs.key(key(KeyCode::Char('x')));
+        assert_eq!(screen(&mut docs, 60, 8)[0], " docs · 3 · f follows");
+        assert_eq!(docs.shown().len(), 3);
     }
 
     #[test]

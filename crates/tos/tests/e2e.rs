@@ -2348,16 +2348,22 @@ fn docs_pane_shows_the_markdown_an_agent_writes() {
     assert_eq!(env.focused(), agent, "the focus stays on the agent");
     s.wait_for("docs/plan.md");
     s.wait_for("Step one: add the button.");
-    // The folder's other Markdown files are listed too, closed, below the agent's.
-    s.wait_for("▸ README.md");
+    // Following shows the plan alone, filtered for it (docs/plans/2026-11-27-docs-pane-follow-filter.md); the
+    // folder's other Markdown files are listed too, and Esc shows them.
+    let text = s.wait_for("/plan.md · 1 of 2 · following · Esc clears");
+    assert!(!text.contains("README.md"), "{text}");
+    env.tos(&["action", "focus-pane-id", &docs["id"].to_string()]);
+    s.send(b"\x1b");
+    s.wait_until("the other files", |t| t.contains("▸ README.md") && t.contains("docs · 2 · following"));
+    env.tos(&["action", "focus-pane-id", &agent.to_string()]);
 
-    // A second file goes on top and opens; the first closes to its header.
+    // A second file goes on top and opens, alone again: the plan's header goes.
     fs::write(work.join("notes.md"), "# Notes\n\nSecond file.\n").unwrap();
     let agy = serde_json::json!({"cwd": work, "toolCall": {"name": "write_to_file", "args": {"TargetFile": work.join("notes.md")}}});
     assert_eq!(run_hook(&env, agent, "agy", &agy).trim(), "{}", "agy expects {{}}");
     s.wait_for("Second file.");
-    let text = s.wait_until("plan.md's section to close", |t| !t.contains("Step one"));
-    assert!(text.contains("▸ docs/plan.md"), "{text}");
+    let text = s.wait_until("plan.md to go", |t| !t.contains("Step one") && t.contains("/notes.md · 1 of 3"));
+    assert!(!text.contains("docs/plan.md"), "{text}");
 
     // Closed by the user, it stays closed: new files count up in the status bar, and toggle-docs reopens it.
     env.tos(&["action", "close-pane", "-p", &docs["id"].to_string()]);
@@ -2509,8 +2515,9 @@ fn drag_in_the_docs_pane_copies() {
     s.send(b"\x03");
     wait("copied again", || (s.proxy.clipboard.lock().unwrap().len() == 2).then_some(()));
     // v selects whole lines from the top; j adds one and y copies them.
+    // (The title still says "Esc clears": following shows the plan alone, as a filter.)
     s.send(b"\x1b");
-    s.wait_until("the selection cleared", |t| !t.contains("Esc clear"));
+    s.wait_until("the selection cleared", |t| !t.contains("Ctrl+c copy"));
     s.send(b"v");
     s.wait_for("j/k extend");
     s.send(b"jjy");

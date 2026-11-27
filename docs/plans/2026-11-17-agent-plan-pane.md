@@ -50,6 +50,9 @@
     repository").
   - **The default starting instructions** gain four rules on how to explain (section 1, "The starting
     instructions"). `agent-prompt.md` still replaces the whole text.
+- **2026-11-27:** the user asked for the docs pane to come out "in filtered mode, meaning /{doc name} so that the
+  only document visible is it". Following now shows the file the agent wrote last alone, as a filter; `Esc`
+  shows the rest. See [its plan](2026-11-27-docs-pane-follow-filter.md).
 
 ## Decision
 

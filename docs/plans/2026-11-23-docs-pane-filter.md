@@ -1,5 +1,10 @@
 # The docs pane's `/` filter
 
+**Changes:**
+- **2026-11-27:** following now filters too, to the file the agent wrote last, by its whole path
+  ([that plan](2026-11-27-docs-pane-follow-filter.md)). So `f` no longer clears a filter: it replaces it with
+  following's. `Esc` while typing brings back the filter that showed before `/`, as well as the open file.
+
 ## Decision
 
 `/` in the docs pane filters its list of files the way `/` filters the finder's list:

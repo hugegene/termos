@@ -232,8 +232,10 @@ documentation. The files are in `~/.local/state/termos/agents/`.
 **The docs pane** is an ordinary pane running `tos docs`, one per tab, 40% of the tab's width:
 - **A header line per file,** newest first. A file that's written again keeps its place.
 - **One file open at a time,** rendered as the finder renders Markdown, and redrawn when the file changes.
-- **Following:** while the title says `following`, the file written last opens by itself. Opening another
-  yourself stops that, and `f` starts it again.
+- **Following:** while the title says `following`, the file written last opens by itself, alone, as if
+  filtered for it: the title reads `/2026-11-27-x.md · 1 of 184 · following · Esc clears`. `Esc` shows every file
+  and goes on following. Opening another file yourself stops following and keeps what shows; `f` starts it again.
+  [The plan](plans/2026-11-27-docs-pane-follow-filter.md).
 - **Keys:**
   - `Tab`/`Shift+Tab` move to the next or previous file.
   - `Enter` or a click on a header opens or closes that file.
@@ -241,8 +243,8 @@ documentation. The files are in `~/.local/state/termos/agents/`.
   - `e` edits the file in a new pane, and `x` drops it from the list.
   - `/` filters the list, as in the finder: type part of a path, such as `agent`, and only the files whose path
     has those letters in order show, best match first. The open file closes while you type; `↑`/`↓` move,
-    `Enter` opens the highlighted file and keeps the filter, and `Esc` cancels. With a filter kept, `Esc` or `f`
-    clears it. [The plan](plans/2026-11-23-docs-pane-filter.md).
+    `Enter` opens the highlighted file and keeps the filter, and `Esc` cancels. With a filter kept, `Esc` clears
+    it, and `f` replaces it with following's. [The plan](plans/2026-11-23-docs-pane-filter.md).
   - `q` closes the pane.
 - **Copying, as in the finder's preview:**
   - **Drag** over the open file to select from one character to another; letting go copies it, and it stays
